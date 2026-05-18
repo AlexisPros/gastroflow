@@ -9,7 +9,6 @@ class ReservationBase(OrmBaseModel):
     customer_phone: str
     guest_count: int
     reservation_time: datetime
-    status: str = "PENDING"
     notes: str | None = None
 
 
@@ -29,4 +28,5 @@ class ReservationUpdate(OrmBaseModel):
 
 class ReservationRead(ReservationBase):
     id: int
+    status: str
     created_at: datetime

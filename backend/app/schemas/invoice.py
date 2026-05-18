@@ -8,7 +8,6 @@ class InvoiceBase(OrmBaseModel):
     nip: str
     company_name: str
     invoice_number: str
-    status: str = "CREATED"
 
 
 class InvoiceCreate(InvoiceBase):
@@ -25,4 +24,5 @@ class InvoiceUpdate(OrmBaseModel):
 
 class InvoiceRead(InvoiceBase):
     id: int
+    status: str
     created_at: datetime

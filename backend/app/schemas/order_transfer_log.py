@@ -17,7 +17,6 @@ class OrderTransferLogUpdate(OrmBaseModel):
     order_id: int | None = None
     from_waiter_id: int | None = None
     to_waiter_id: int | None = None
-    transferred_at: datetime | None = None
 
 
 class OrderTransferLogRead(OrderTransferLogBase):

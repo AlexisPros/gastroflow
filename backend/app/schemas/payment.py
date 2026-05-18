@@ -7,7 +7,6 @@ class PaymentBase(OrmBaseModel):
     order_id: int
     method: str
     amount: float
-    status: str = "COMPLETED"
 
 
 class PaymentCreate(PaymentBase):
@@ -23,4 +22,5 @@ class PaymentUpdate(OrmBaseModel):
 
 class PaymentRead(PaymentBase):
     id: int
+    status: str
     created_at: datetime

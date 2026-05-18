@@ -19,7 +19,6 @@ class OrderActionLogUpdate(OrmBaseModel):
     user_id: int | None = None
     action_type: str | None = None
     description: str | None = None
-    created_at: datetime | None = None
 
 
 class OrderActionLogRead(OrderActionLogBase):

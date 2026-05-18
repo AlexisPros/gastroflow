@@ -8,8 +8,6 @@ class OrderBase(OrmBaseModel):
     waiter_id: int | None = None
     discount_id: int | None = None
     source: str = "WAITER"
-    status: str = "OPEN"
-    closed_at: datetime | None = None
     total_amount: float = 0
     tip_amount: float = 0
 
@@ -24,11 +22,12 @@ class OrderUpdate(OrmBaseModel):
     discount_id: int | None = None
     source: str | None = None
     status: str | None = None
-    closed_at: datetime | None = None
     total_amount: float | None = None
     tip_amount: float | None = None
 
 
 class OrderRead(OrderBase):
     id: int
+    status: str
+    closed_at: datetime | None = None
     created_at: datetime

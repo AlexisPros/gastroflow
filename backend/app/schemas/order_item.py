@@ -7,7 +7,6 @@ class OrderItemBase(OrmBaseModel):
     quantity: int = 1
     unit_price: float
     total_price: float
-    status: str = "NEW"
     notes: str | None = None
 
 
@@ -27,3 +26,4 @@ class OrderItemUpdate(OrmBaseModel):
 
 class OrderItemRead(OrderItemBase):
     id: int
+    status: str

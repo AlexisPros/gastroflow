@@ -4,7 +4,6 @@ from app.schemas.base import OrmBaseModel
 class RestaurantTableBase(OrmBaseModel):
     table_number: str
     current_guests: int | None = None
-    status: str = "FREE"
     qr_code_url: str | None = None
     is_active: bool = True
 
@@ -23,3 +22,4 @@ class RestaurantTableUpdate(OrmBaseModel):
 
 class RestaurantTableRead(RestaurantTableBase):
     id: int
+    status: str
