@@ -35,7 +35,7 @@ class CRUDStockMovement(CRUDBase[StockMovement, StockMovementCreate, StockMoveme
         *,
         stock_item: StockItem,
         type: str,
-        quantity_delta: float,
+        quantity_delta: Decimal,
         description: str | None = None,
         prevent_negative: bool = True,
     ) -> StockMovement:

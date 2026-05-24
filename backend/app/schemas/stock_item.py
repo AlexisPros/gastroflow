@@ -1,11 +1,11 @@
 from app.schemas.base import OrmBaseModel
-
+from decimal import Decimal
 
 class StockItemBase(OrmBaseModel):
     warehouse_id: int
     ingredient_id: int
-    quantity: float
-    minimum_quantity: float | None = None
+    quantity: Decimal
+    minimum_quantity: Decimal | None = None
 
 
 class StockItemCreate(StockItemBase):
@@ -15,8 +15,8 @@ class StockItemCreate(StockItemBase):
 class StockItemUpdate(OrmBaseModel):
     warehouse_id: int | None = None
     ingredient_id: int | None = None
-    quantity: float | None = None
-    minimum_quantity: float | None = None
+    quantity: Decimal | None = None
+    minimum_quantity: Decimal | None = None
 
 
 class StockItemRead(StockItemBase):
