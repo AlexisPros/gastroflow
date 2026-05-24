@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from app.schemas.base import OrmBaseModel
 
@@ -8,8 +9,8 @@ class OrderBase(OrmBaseModel):
     waiter_id: int | None = None
     discount_id: int | None = None
     source: str = "WAITER"
-    total_amount: float = 0
-    tip_amount: float = 0
+    total_amount: Decimal = Decimal("0.00")
+    tip_amount: Decimal = Decimal("0.00")
 
 
 class OrderCreate(OrderBase):
@@ -22,8 +23,8 @@ class OrderUpdate(OrmBaseModel):
     discount_id: int | None = None
     source: str | None = None
     status: str | None = None
-    total_amount: float | None = None
-    tip_amount: float | None = None
+    total_amount: Decimal | None = None
+    tip_amount: Decimal | None = None
 
 
 class OrderRead(OrderBase):

@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.crud.base import CRUDBase
 from app.models.order import Order
 from app.schemas.order import OrderCreate, OrderUpdate
-
+from decimal import Decimal
 
 class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
     async def change_table(
@@ -41,7 +41,7 @@ class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
         db: AsyncSession,
         *,
         db_obj: Order,
-        tip_amount: float,
+        tip_amount: Decimal,
     ) -> Order:
         db_obj.tip_amount = tip_amount
 

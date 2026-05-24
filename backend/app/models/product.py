@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -41,7 +42,7 @@ class Product(Base):
         nullable=True,
     )
 
-    price: Mapped[float] = mapped_column(
+    price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )

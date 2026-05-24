@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -66,13 +67,13 @@ class Order(Base):
         nullable=True,
     )
 
-    total_amount: Mapped[float] = mapped_column(
+    total_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
         default=0,
     )
 
-    tip_amount: Mapped[float] = mapped_column(
+    tip_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
         default=0,

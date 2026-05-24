@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from app.schemas.base import OrmBaseModel
 
@@ -6,7 +7,7 @@ from app.schemas.base import OrmBaseModel
 class PaymentBase(OrmBaseModel):
     order_id: int
     method: str
-    amount: float
+    amount: Decimal
 
 
 class PaymentCreate(PaymentBase):
@@ -16,7 +17,7 @@ class PaymentCreate(PaymentBase):
 class PaymentUpdate(OrmBaseModel):
     order_id: int | None = None
     method: str | None = None
-    amount: float | None = None
+    amount: Decimal | None = None
     status: str | None = None
 
 

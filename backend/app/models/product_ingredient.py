@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -27,7 +28,7 @@ class ProductIngredient(Base):
         nullable=False,
     )
 
-    quantity: Mapped[float] = mapped_column(
+    quantity: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )

@@ -1,10 +1,10 @@
 from app.schemas.base import OrmBaseModel
-
+from decimal import Decimal
 
 class ProductIngredientBase(OrmBaseModel):
     product_id: int
     ingredient_id: int
-    quantity: float
+    quantity: Decimal
 
 
 class ProductIngredientCreate(ProductIngredientBase):
@@ -14,7 +14,7 @@ class ProductIngredientCreate(ProductIngredientBase):
 class ProductIngredientUpdate(OrmBaseModel):
     product_id: int | None = None
     ingredient_id: int | None = None
-    quantity: float | None = None
+    quantity: Decimal | None = None
 
 
 class ProductIngredientRead(ProductIngredientBase):

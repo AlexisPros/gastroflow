@@ -15,7 +15,7 @@ class CRUDStockMovement(CRUDBase[StockMovement, StockMovementCreate, StockMoveme
         *,
         stock_item_id: int,
         type: str,
-        quantity: float,
+        quantity: Decimal,
         description: str | None = None,
     ) -> StockMovement:
         db_obj = StockMovement(

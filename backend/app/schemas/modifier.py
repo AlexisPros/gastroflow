@@ -1,9 +1,9 @@
 from app.schemas.base import OrmBaseModel
-
+from decimal import Decimal
 
 class ModifierBase(OrmBaseModel):
     name: str
-    price: float = 0
+    price: Decimal = Decimal("0.00")
     is_active: bool = True
 
 
@@ -13,7 +13,7 @@ class ModifierCreate(ModifierBase):
 
 class ModifierUpdate(OrmBaseModel):
     name: str | None = None
-    price: float | None = None
+    price: Decimal | None = None
     is_active: bool | None = None
 
 

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -39,12 +40,12 @@ class OrderItem(Base):
         default=1,
     )
 
-    unit_price: Mapped[float] = mapped_column(
+    unit_price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )
 
-    total_price: Mapped[float] = mapped_column(
+    total_price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
     )
