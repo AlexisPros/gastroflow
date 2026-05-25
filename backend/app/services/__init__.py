@@ -2,6 +2,7 @@ from app.services.authorization_service import authorization_service
 from app.services.billing_service import billing_service
 from app.services.discount_service import discount_service
 from app.services.fiscal_service import fiscal_service
+from app.services.floor_plan_service import floor_plan_service
 from app.services.invoice_service import invoice_service
 from app.services.kitchen_service import kitchen_service
 from app.services.mock_printer_service import mock_printer_service

@@ -1,4 +1,11 @@
 from app.schemas.discount import DiscountCreate, DiscountRead, DiscountUpdate
+from app.schemas.floor_plan import FloorPlanCreate, FloorPlanRead, FloorPlanUpdate
+from app.schemas.floor_plan_table import (
+    FloorPlanTableCreate,
+    FloorPlanTablePositionUpdate,
+    FloorPlanTableRead,
+    FloorPlanTableUpdate,
+)
 from app.schemas.ingredient import IngredientCreate, IngredientRead, IngredientUpdate
 from app.schemas.invoice import InvoiceCreate, InvoiceRead, InvoiceUpdate
 from app.schemas.kitchen_section import (
@@ -43,6 +50,11 @@ from app.schemas.product_modifier import (
     ProductModifierUpdate,
 )
 from app.schemas.reservation import ReservationCreate, ReservationRead, ReservationUpdate
+from app.schemas.reservation_table import (
+    ReservationTableCreate,
+    ReservationTableRead,
+    ReservationTableUpdate,
+)
 from app.schemas.restaurant_config import (
     RestaurantConfigCreate,
     RestaurantConfigRead,

@@ -8,8 +8,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.floor_plan_table import FloorPlanTable
     from app.models.order import Order
     from app.models.reservation import Reservation
+    from app.models.reservation_table import ReservationTable
 
 
 class RestaurantTable(Base):
@@ -54,4 +56,16 @@ class RestaurantTable(Base):
     reservations: Mapped[list[Reservation]] = relationship(
         "Reservation",
         back_populates="table",
+    )
+
+    floor_plan_positions: Mapped[list[FloorPlanTable]] = relationship(
+        "FloorPlanTable",
+        back_populates="table",
+        cascade="all, delete-orphan",
+    )
+
+    reservation_links: Mapped[list[ReservationTable]] = relationship(
+        "ReservationTable",
+        back_populates="table",
+        cascade="all, delete-orphan",
     )
