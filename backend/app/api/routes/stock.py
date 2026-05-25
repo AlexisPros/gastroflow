@@ -1,16 +1,21 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
 from app.crud import order_item as crud_order_item
 from app.crud import stock_item as crud_stock_item
 from app.schemas import StockMovementRead
 from app.schemas.stock_item import StockItemRead
 from app.services import stock_service
 
-router = APIRouter(tags=["Stock"])
+STOCK_ROLES = {"ADMIN", "MANAGER", "KITCHEN", "BARTENDER"}
+
+router = APIRouter(
+    tags=["Stock"],
+    dependencies=[Depends(require_roles(STOCK_ROLES))],
+)
 
 
 class ApplyStockMovementRequest(BaseModel):

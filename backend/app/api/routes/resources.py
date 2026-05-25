@@ -1,9 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, get_or_404
+from app.api.deps import DbSession, get_or_404, require_roles
 from app.crud import (
     discount,
     floor_plan,
@@ -119,6 +119,11 @@ from app.schemas import (
 
 router = APIRouter(tags=["CRUD"])
 
+ADMIN_MANAGER = {"ADMIN", "MANAGER"}
+STAFF = {"ADMIN", "MANAGER", "WAITER", "KITCHEN", "BARTENDER"}
+SERVICE_STAFF = {"ADMIN", "MANAGER", "WAITER"}
+KITCHEN_STAFF = {"ADMIN", "MANAGER", "KITCHEN", "BARTENDER"}
+
 
 def register_crud_routes(
     *,
@@ -129,6 +134,8 @@ def register_crud_routes(
     read_schema: type[BaseModel],
     entity_name: str,
     tag: str,
+    read_roles: set[str],
+    write_roles: set[str],
 ) -> None:
     async def list_items(
         db: DbSession,
@@ -184,6 +191,7 @@ def register_crud_routes(
         response_model=list[read_schema],  # pyright: ignore[reportInvalidTypeForm]
         tags=[tag],
         operation_id=f"list_{entity_name}",
+        dependencies=[Depends(require_roles(read_roles))],
     )
     router.add_api_route(
         path,
@@ -193,6 +201,7 @@ def register_crud_routes(
         status_code=status.HTTP_201_CREATED,
         tags=[tag],
         operation_id=f"create_{entity_name}",
+        dependencies=[Depends(require_roles(write_roles))],
     )
     router.add_api_route(
         f"{path}/{{item_id}}",
@@ -201,6 +210,7 @@ def register_crud_routes(
         response_model=read_schema,
         tags=[tag],
         operation_id=f"get_{entity_name}",
+        dependencies=[Depends(require_roles(read_roles))],
     )
     router.add_api_route(
         f"{path}/{{item_id}}",
@@ -209,6 +219,7 @@ def register_crud_routes(
         response_model=read_schema,
         tags=[tag],
         operation_id=f"update_{entity_name}",
+        dependencies=[Depends(require_roles(write_roles))],
     )
     router.add_api_route(
         f"{path}/{{item_id}}",
@@ -217,6 +228,7 @@ def register_crud_routes(
         response_model=read_schema,
         tags=[tag],
         operation_id=f"delete_{entity_name}",
+        dependencies=[Depends(require_roles(write_roles))],
     )
 
 
@@ -228,6 +240,8 @@ register_crud_routes(
     read_schema=DiscountRead,
     entity_name="discount",
     tag="Discounts",
+    read_roles=SERVICE_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/floor-plans",
@@ -237,6 +251,8 @@ register_crud_routes(
     read_schema=FloorPlanRead,
     entity_name="floor_plan",
     tag="Floor plans",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/floor-plan-tables",
@@ -246,6 +262,8 @@ register_crud_routes(
     read_schema=FloorPlanTableRead,
     entity_name="floor_plan_table",
     tag="Floor plans",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/ingredients",
@@ -255,6 +273,8 @@ register_crud_routes(
     read_schema=IngredientRead,
     entity_name="ingredient",
     tag="Ingredients",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/invoices",
@@ -264,6 +284,8 @@ register_crud_routes(
     read_schema=InvoiceRead,
     entity_name="invoice",
     tag="Invoices",
+    read_roles=SERVICE_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/kitchen-sections",
@@ -273,6 +295,8 @@ register_crud_routes(
     read_schema=KitchenSectionRead,
     entity_name="kitchen_section",
     tag="Kitchen",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/kitchen-tasks",
@@ -282,6 +306,8 @@ register_crud_routes(
     read_schema=KitchenTaskRead,
     entity_name="kitchen_task",
     tag="Kitchen",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/modifiers",
@@ -291,6 +317,8 @@ register_crud_routes(
     read_schema=ModifierRead,
     entity_name="modifier",
     tag="Menu",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/orders",
@@ -300,6 +328,8 @@ register_crud_routes(
     read_schema=OrderRead,
     entity_name="order",
     tag="Orders",
+    read_roles=SERVICE_STAFF | KITCHEN_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/order-action-logs",
@@ -309,6 +339,8 @@ register_crud_routes(
     read_schema=OrderActionLogRead,
     entity_name="order_action_log",
     tag="Orders",
+    read_roles=ADMIN_MANAGER,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/order-items",
@@ -318,6 +350,8 @@ register_crud_routes(
     read_schema=OrderItemRead,
     entity_name="order_item",
     tag="Orders",
+    read_roles=SERVICE_STAFF | KITCHEN_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/order-item-modifiers",
@@ -327,6 +361,8 @@ register_crud_routes(
     read_schema=OrderItemModifierRead,
     entity_name="order_item_modifier",
     tag="Orders",
+    read_roles=SERVICE_STAFF | KITCHEN_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/order-transfer-logs",
@@ -336,6 +372,8 @@ register_crud_routes(
     read_schema=OrderTransferLogRead,
     entity_name="order_transfer_log",
     tag="Orders",
+    read_roles=ADMIN_MANAGER,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/payments",
@@ -345,6 +383,8 @@ register_crud_routes(
     read_schema=PaymentRead,
     entity_name="payment",
     tag="Payments",
+    read_roles=SERVICE_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/products",
@@ -354,6 +394,8 @@ register_crud_routes(
     read_schema=ProductRead,
     entity_name="product",
     tag="Menu",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/product-categories",
@@ -363,6 +405,8 @@ register_crud_routes(
     read_schema=ProductCategoryRead,
     entity_name="product_category",
     tag="Menu",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/product-ingredients",
@@ -372,6 +416,8 @@ register_crud_routes(
     read_schema=ProductIngredientRead,
     entity_name="product_ingredient",
     tag="Menu",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/product-modifiers",
@@ -381,6 +427,8 @@ register_crud_routes(
     read_schema=ProductModifierRead,
     entity_name="product_modifier",
     tag="Menu",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/reservations",
@@ -390,6 +438,8 @@ register_crud_routes(
     read_schema=ReservationRead,
     entity_name="reservation",
     tag="Reservations",
+    read_roles=SERVICE_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/reservation-tables",
@@ -399,6 +449,8 @@ register_crud_routes(
     read_schema=ReservationTableRead,
     entity_name="reservation_table",
     tag="Reservations",
+    read_roles=SERVICE_STAFF,
+    write_roles=SERVICE_STAFF,
 )
 register_crud_routes(
     path="/restaurant-config",
@@ -408,6 +460,8 @@ register_crud_routes(
     read_schema=RestaurantConfigRead,
     entity_name="restaurant_config",
     tag="Restaurant",
+    read_roles=ADMIN_MANAGER,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/restaurant-tables",
@@ -417,6 +471,8 @@ register_crud_routes(
     read_schema=RestaurantTableRead,
     entity_name="restaurant_table",
     tag="Restaurant",
+    read_roles=STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/stock-items",
@@ -426,6 +482,8 @@ register_crud_routes(
     read_schema=StockItemRead,
     entity_name="stock_item",
     tag="Stock",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/stock-movements",
@@ -435,6 +493,8 @@ register_crud_routes(
     read_schema=StockMovementRead,
     entity_name="stock_movement",
     tag="Stock",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/system-modules",
@@ -444,6 +504,8 @@ register_crud_routes(
     read_schema=SystemModuleRead,
     entity_name="system_module",
     tag="System",
+    read_roles=ADMIN_MANAGER,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/users",
@@ -453,6 +515,8 @@ register_crud_routes(
     read_schema=UserRead,
     entity_name="user",
     tag="Users",
+    read_roles=ADMIN_MANAGER,
+    write_roles=ADMIN_MANAGER,
 )
 register_crud_routes(
     path="/warehouses",
@@ -462,4 +526,6 @@ register_crud_routes(
     read_schema=WarehouseRead,
     entity_name="warehouse",
     tag="Stock",
+    read_roles=KITCHEN_STAFF,
+    write_roles=ADMIN_MANAGER,
 )

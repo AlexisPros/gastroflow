@@ -1,16 +1,21 @@
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
 from app.crud import reservation as crud_reservation
 from app.crud import reservation_table as crud_reservation_table
 from app.crud import restaurant_table as crud_restaurant_table
 from app.schemas import ReservationRead, ReservationTableRead
 from app.services import reservation_service
 
-router = APIRouter(tags=["Reservations"])
+RESERVATION_ROLES = {"ADMIN", "MANAGER", "WAITER"}
+
+router = APIRouter(
+    tags=["Reservations"],
+    dependencies=[Depends(require_roles(RESERVATION_ROLES))],
+)
 
 
 class SeatReservationRequest(BaseModel):

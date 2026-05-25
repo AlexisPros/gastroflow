@@ -1,11 +1,16 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
-from app.api.deps import DbSession, get_or_404
+from app.api.deps import DbSession, get_or_404, require_roles
 from app.crud import order as crud_order
 from app.services import fiscal_service, mock_printer_service
 
-router = APIRouter(tags=["Fiscal mock"])
+FISCAL_ROLES = {"ADMIN", "MANAGER", "WAITER"}
+
+router = APIRouter(
+    tags=["Fiscal mock"],
+    dependencies=[Depends(require_roles(FISCAL_ROLES))],
+)
 
 
 @router.get(

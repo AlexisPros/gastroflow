@@ -1,14 +1,19 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
 from app.crud import invoice as crud_invoice
 from app.crud import order as crud_order
 from app.schemas import InvoiceRead
 from app.services import invoice_service
 
-router = APIRouter(tags=["Invoices"])
+INVOICE_ROLES = {"ADMIN", "MANAGER", "WAITER"}
+
+router = APIRouter(
+    tags=["Invoices"],
+    dependencies=[Depends(require_roles(INVOICE_ROLES))],
+)
 
 
 class CreateInvoiceRequest(BaseModel):

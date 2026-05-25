@@ -1,7 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
 from app.crud import floor_plan as crud_floor_plan
 from app.crud import floor_plan_table as crud_floor_plan_table
 from app.crud import restaurant_table as crud_restaurant_table
@@ -12,7 +12,12 @@ from app.schemas import (
 )
 from app.services import floor_plan_service
 
-router = APIRouter(tags=["Floor plans"])
+FLOOR_PLAN_ROLES = {"ADMIN", "MANAGER"}
+
+router = APIRouter(
+    tags=["Floor plans"],
+    dependencies=[Depends(require_roles(FLOOR_PLAN_ROLES))],
+)
 
 
 class AddTableToFloorPlanRequest(BaseModel):
