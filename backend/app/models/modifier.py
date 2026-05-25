@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Integer, Numeric, String
@@ -21,10 +22,10 @@ class Modifier(Base):
         nullable=False,
     )
 
-    price: Mapped[float] = mapped_column(
+    price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     is_active: Mapped[bool] = mapped_column(

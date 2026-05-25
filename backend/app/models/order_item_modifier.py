@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Integer, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -31,10 +32,10 @@ class OrderItemModifier(Base):
         nullable=False,
     )
 
-    price: Mapped[float] = mapped_column(
+    price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     order_item: Mapped[OrderItem] = relationship(

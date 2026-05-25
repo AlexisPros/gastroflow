@@ -14,16 +14,16 @@ class UserBase(OrmBaseModel):
 
 
 class UserCreate(UserBase):
-    password_hash: str
-    pin_hash: str | None = None
+    password: str
+    pin: str | None = None
 
 
 class UserUpdate(OrmBaseModel):
     first_name: str | None = None
     last_name: str | None = None
     email: EmailStr | None = None
-    password_hash: str | None = None
-    pin_hash: str | None = None
+    password: str | None = None
+    pin: str | None = None
     role: str | None = None
     is_active: bool | None = None
 

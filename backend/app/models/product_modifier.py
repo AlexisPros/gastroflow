@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, ForeignKey, Integer, Numeric
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from decimal import Decimal
 
 from app.db.base import Base
 
@@ -28,7 +29,7 @@ class ProductModifier(Base):
         nullable=False,
     )
 
-    price_override: Mapped[float | None] = mapped_column(
+    price_override: Mapped[Decimal | None] = mapped_column(
         Numeric(10, 2),
         nullable=True,
     )
