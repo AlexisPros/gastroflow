@@ -1,4 +1,6 @@
 from app.crud.discount import discount
+from app.crud.floor_plan import floor_plan
+from app.crud.floor_plan_table import floor_plan_table
 from app.crud.ingredient import ingredient
 from app.crud.invoice import invoice
 from app.crud.kitchen_task import kitchen_task
@@ -15,6 +17,7 @@ from app.crud.product_category import product_category
 from app.crud.product_ingredient import product_ingredient
 from app.crud.product_modifier import product_modifier
 from app.crud.reservation import reservation
+from app.crud.reservation_table import reservation_table
 from app.crud.restaurant_config import restaurant_config
 from app.crud.restaurant_table import restaurant_table
 from app.crud.stock_item import stock_item
