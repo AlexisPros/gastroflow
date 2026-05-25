@@ -21,6 +21,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PinLoginRequest(BaseModel):
+    user_id: int
+    pin: str
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -48,6 +53,21 @@ class UserCapabilitiesResponse(BaseModel):
     can_manage_order: bool
     can_manage_kitchen: bool
     can_manage_users: bool
+
+
+def build_token_response(user) -> TokenResponse:
+    access_token = create_access_token(
+        subject=str(user.id),
+        extra_claims={
+            "email": user.email,
+            "role": user.role,
+        },
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        user=UserRead.model_validate(user),
+    )
 
 
 @router.get(
@@ -79,18 +99,23 @@ async def login(body: LoginRequest, db: DbSession):
             detail="Invalid email or password.",
         )
 
-    access_token = create_access_token(
-        subject=str(user.id),
-        extra_claims={
-            "email": user.email,
-            "role": user.role,
-        },
-    )
+    return build_token_response(user)
 
-    return TokenResponse(
-        access_token=access_token,
-        user=UserRead.model_validate(user),
+
+@router.post("/auth/pin-login", response_model=TokenResponse)
+async def pin_login(body: PinLoginRequest, db: DbSession):
+    user = await user_service.authenticate_by_pin(
+        db,
+        user_id=body.user_id,
+        pin=body.pin,
     )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid user or PIN.",
+        )
+
+    return build_token_response(user)
 
 
 @router.get("/auth/me", response_model=UserRead)
