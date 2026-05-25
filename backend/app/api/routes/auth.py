@@ -1,7 +1,14 @@
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
-from app.api.deps import DbSession, get_or_404, raise_forbidden
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    RequireAdminManager,
+    get_or_404,
+    raise_forbidden,
+)
+from app.core.security import create_access_token
 from app.crud import user as crud_user
 from app.schemas import UserRead
 from app.services import authorization_service, user_service
@@ -12,6 +19,12 @@ router = APIRouter(tags=["Auth"])
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserRead
 
 
 class VerifyPinRequest(BaseModel):
@@ -37,7 +50,11 @@ class UserCapabilitiesResponse(BaseModel):
     can_manage_users: bool
 
 
-@router.get("/users/by-email", response_model=UserRead)
+@router.get(
+    "/users/by-email",
+    response_model=UserRead,
+    dependencies=[RequireAdminManager],
+)
 async def get_user_by_email(email: EmailStr, db: DbSession):
     user = await crud_user.get_by_email(db, email=email)
     if user is None:
@@ -49,7 +66,7 @@ async def get_user_by_email(email: EmailStr, db: DbSession):
     return user
 
 
-@router.post("/auth/login", response_model=UserRead)
+@router.post("/auth/login", response_model=TokenResponse)
 async def login(body: LoginRequest, db: DbSession):
     user = await user_service.authenticate_by_password(
         db,
@@ -62,10 +79,30 @@ async def login(body: LoginRequest, db: DbSession):
             detail="Invalid email or password.",
         )
 
-    return user
+    access_token = create_access_token(
+        subject=str(user.id),
+        extra_claims={
+            "email": user.email,
+            "role": user.role,
+        },
+    )
+
+    return TokenResponse(
+        access_token=access_token,
+        user=UserRead.model_validate(user),
+    )
 
 
-@router.post("/users/{user_id}/verify-pin", response_model=BooleanResponse)
+@router.get("/auth/me", response_model=UserRead)
+async def get_me(current_user: CurrentUser):
+    return current_user
+
+
+@router.post(
+    "/users/{user_id}/verify-pin",
+    response_model=BooleanResponse,
+    dependencies=[RequireAdminManager],
+)
 async def verify_user_pin(
     user_id: int,
     body: VerifyPinRequest,
@@ -82,7 +119,11 @@ async def verify_user_pin(
     )
 
 
-@router.post("/authorization/check-role", response_model=RoleCheckResponse)
+@router.post(
+    "/authorization/check-role",
+    response_model=RoleCheckResponse,
+    dependencies=[RequireAdminManager],
+)
 async def check_role(body: RoleCheckRequest, db: DbSession):
     user = await get_or_404(
         crud_obj=crud_user,
@@ -95,7 +136,11 @@ async def check_role(body: RoleCheckRequest, db: DbSession):
     )
 
 
-@router.post("/authorization/require-role", response_model=RoleCheckResponse)
+@router.post(
+    "/authorization/require-role",
+    response_model=RoleCheckResponse,
+    dependencies=[RequireAdminManager],
+)
 async def require_role(body: RoleCheckRequest, db: DbSession):
     user = await get_or_404(
         crud_obj=crud_user,
@@ -117,6 +162,7 @@ async def require_role(body: RoleCheckRequest, db: DbSession):
 @router.get(
     "/authorization/users/{user_id}/capabilities",
     response_model=UserCapabilitiesResponse,
+    dependencies=[RequireAdminManager],
 )
 async def get_user_capabilities(user_id: int, db: DbSession):
     user = await get_or_404(

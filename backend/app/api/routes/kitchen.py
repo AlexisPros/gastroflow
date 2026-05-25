@@ -1,11 +1,14 @@
 from fastapi import APIRouter
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, RequireKitchenRole, get_or_404, raise_bad_request
 from app.crud import kitchen_task as crud_kitchen_task
 from app.schemas import KitchenTaskRead
 from app.services import kitchen_service
 
-router = APIRouter(tags=["Kitchen"])
+router = APIRouter(
+    tags=["Kitchen"],
+    dependencies=[RequireKitchenRole],
+)
 
 
 @router.post("/kitchen-tasks/{task_id}/start", response_model=KitchenTaskRead)

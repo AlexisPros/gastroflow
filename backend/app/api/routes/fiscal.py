@@ -1,11 +1,14 @@
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
-from app.api.deps import DbSession, get_or_404
+from app.api.deps import DbSession, RequireFiscalRole, get_or_404
 from app.crud import order as crud_order
 from app.services import fiscal_service, mock_printer_service
 
-router = APIRouter(tags=["Fiscal mock"])
+router = APIRouter(
+    tags=["Fiscal mock"],
+    dependencies=[RequireFiscalRole],
+)
 
 
 @router.get(

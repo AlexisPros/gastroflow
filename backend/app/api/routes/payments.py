@@ -3,13 +3,16 @@ from decimal import Decimal
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, RequirePaymentRole, get_or_404, raise_bad_request
 from app.crud import order as crud_order
 from app.crud import payment as crud_payment
 from app.schemas import PaymentRead
 from app.services import payment_service
 
-router = APIRouter(tags=["Payments"])
+router = APIRouter(
+    tags=["Payments"],
+    dependencies=[RequirePaymentRole],
+)
 
 
 class RegisterPaymentRequest(BaseModel):

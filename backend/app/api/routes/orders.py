@@ -3,7 +3,7 @@ from decimal import Decimal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request
+from app.api.deps import DbSession, RequireOrderRole, get_or_404, raise_bad_request
 from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
 from app.services import (
@@ -19,7 +19,10 @@ from app.schemas import (
     OrderTransferLogRead,
 )
 
-router = APIRouter(tags=["Orders"])
+router = APIRouter(
+    tags=["Orders"],
+    dependencies=[RequireOrderRole],
+)
 
 
 class OrderItemInput(BaseModel):
