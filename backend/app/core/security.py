@@ -1,31 +1,43 @@
 from datetime import datetime, timedelta, timezone
+import hashlib
 from typing import Any
 
+import bcrypt
 from jose import jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(
-    schemes=["bcrypt_sha256"],
-    deprecated="auto",
-)
+
+def _sha256_digest(value: str) -> bytes:
+    return hashlib.sha256(value.encode("utf-8")).digest()
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(
+        _sha256_digest(password),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    return pwd_context.verify(plain_password, password_hash)
+    return bcrypt.checkpw(
+        _sha256_digest(plain_password),
+        password_hash.encode("utf-8"),
+    )
 
 
 def get_pin_hash(pin: str) -> str:
-    return pwd_context.hash(pin)
+    return bcrypt.hashpw(
+        _sha256_digest(pin),
+        bcrypt.gensalt(),
+    ).decode("utf-8")
 
 
 def verify_pin(plain_pin: str, pin_hash: str) -> bool:
-    return pwd_context.verify(plain_pin, pin_hash)
+    return bcrypt.checkpw(
+        _sha256_digest(plain_pin),
+        pin_hash.encode("utf-8"),
+    )
 
 
 def create_access_token(

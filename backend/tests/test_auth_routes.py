@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user, require_roles
-from app.core.security import create_access_token, decode_access_token
+from app.core.security import create_access_token, decode_access_token, get_password_hash
+from app.crud import user as crud_user
 from app.main import app
 from app.models.user import User
 
@@ -20,7 +21,7 @@ def make_user(role: str) -> User:
         first_name="Test",
         last_name="User",
         email="test@example.com",
-        password_hash="hash",
+        password_hash=get_password_hash("secret-password"),
         role=role,
         is_active=True,
         created_at=datetime.now(timezone.utc),
@@ -125,3 +126,87 @@ def test_wrong_role_gets_403_on_protected_route():
         app.dependency_overrides.clear()
 
     assert response.status_code == 403
+
+
+def test_login_returns_access_token(monkeypatch):
+    test_user = make_user("ADMIN")
+
+    async def get_by_email(_db, *, email: str):
+        if email == test_user.email:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get_by_email", get_by_email)
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": test_user.email,
+            "password": "secret-password",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert body["user"]["email"] == test_user.email
+
+    payload = decode_access_token(body["access_token"])
+    assert payload["sub"] == str(test_user.id)
+    assert payload["role"] == "ADMIN"
+
+
+def test_login_rejects_wrong_password(monkeypatch):
+    test_user = make_user("ADMIN")
+
+    async def get_by_email(_db, *, email: str):
+        if email == test_user.email:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get_by_email", get_by_email)
+
+    response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": test_user.email,
+            "password": "wrong-password",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_login_token_can_access_auth_me(monkeypatch):
+    test_user = make_user("MANAGER")
+
+    async def get_by_email(_db, *, email: str):
+        if email == test_user.email:
+            return test_user
+        return None
+
+    async def get(_db, id: int):
+        if id == test_user.id:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get_by_email", get_by_email)
+    monkeypatch.setattr(crud_user, "get", get)
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": test_user.email,
+            "password": "secret-password",
+        },
+    )
+    token = login_response.json()["access_token"]
+
+    me_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert me_response.status_code == 200
+    assert me_response.json()["email"] == test_user.email
+    assert me_response.json()["role"] == "MANAGER"
