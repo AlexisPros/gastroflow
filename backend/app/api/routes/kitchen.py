@@ -1,15 +1,13 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
+from app.api.deps import DbSession, RequireKitchenRole, get_or_404, raise_bad_request
 from app.crud import kitchen_task as crud_kitchen_task
 from app.schemas import KitchenTaskRead
 from app.services import kitchen_service
 
-KITCHEN_ROLES = {"ADMIN", "MANAGER", "KITCHEN", "BARTENDER"}
-
 router = APIRouter(
     tags=["Kitchen"],
-    dependencies=[Depends(require_roles(KITCHEN_ROLES))],
+    dependencies=[RequireKitchenRole],
 )
 
 

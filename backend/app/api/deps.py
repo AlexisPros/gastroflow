@@ -74,6 +74,23 @@ async def get_current_user(
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
+ADMIN = "ADMIN"
+MANAGER = "MANAGER"
+WAITER = "WAITER"
+KITCHEN = "KITCHEN"
+BARTENDER = "BARTENDER"
+
+ADMIN_MANAGER_ROLES = {ADMIN, MANAGER}
+ORDER_ROLES = {ADMIN, MANAGER, WAITER}
+PAYMENT_ROLES = {ADMIN, MANAGER, WAITER}
+RESERVATION_ROLES = {ADMIN, MANAGER, WAITER}
+FISCAL_ROLES = {ADMIN, MANAGER, WAITER}
+KITCHEN_ROLES = {ADMIN, MANAGER, KITCHEN, BARTENDER}
+STOCK_ROLES = {ADMIN, MANAGER, KITCHEN, BARTENDER}
+FLOOR_PLAN_ROLES = {ADMIN, MANAGER}
+STAFF_ROLES = {ADMIN, MANAGER, WAITER, KITCHEN, BARTENDER}
+SERVICE_STAFF_ROLES = {ADMIN, MANAGER, WAITER}
+
 
 def require_roles(allowed_roles: set[str]):
     async def role_checker(current_user: CurrentUser) -> User:
@@ -86,3 +103,15 @@ def require_roles(allowed_roles: set[str]):
         return current_user
 
     return role_checker
+
+
+RequireAdminManager = Depends(require_roles(ADMIN_MANAGER_ROLES))
+RequireOrderRole = Depends(require_roles(ORDER_ROLES))
+RequirePaymentRole = Depends(require_roles(PAYMENT_ROLES))
+RequireReservationRole = Depends(require_roles(RESERVATION_ROLES))
+RequireFiscalRole = Depends(require_roles(FISCAL_ROLES))
+RequireKitchenRole = Depends(require_roles(KITCHEN_ROLES))
+RequireStockRole = Depends(require_roles(STOCK_ROLES))
+RequireFloorPlanRole = Depends(require_roles(FLOOR_PLAN_ROLES))
+RequireStaffRole = Depends(require_roles(STAFF_ROLES))
+RequireServiceStaffRole = Depends(require_roles(SERVICE_STAFF_ROLES))

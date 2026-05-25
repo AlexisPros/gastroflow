@@ -1,9 +1,9 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.deps import DbSession, get_or_404, raise_bad_request, require_roles
+from app.api.deps import DbSession, RequireOrderRole, get_or_404, raise_bad_request
 from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
 from app.services import (
@@ -19,11 +19,9 @@ from app.schemas import (
     OrderTransferLogRead,
 )
 
-ORDER_ROLES = {"ADMIN", "MANAGER", "WAITER"}
-
 router = APIRouter(
     tags=["Orders"],
-    dependencies=[Depends(require_roles(ORDER_ROLES))],
+    dependencies=[RequireOrderRole],
 )
 
 

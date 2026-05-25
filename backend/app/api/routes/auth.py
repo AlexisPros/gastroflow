@@ -1,12 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, EmailStr
 
 from app.api.deps import (
     CurrentUser,
     DbSession,
+    RequireAdminManager,
     get_or_404,
     raise_forbidden,
-    require_roles,
 )
 from app.core.security import create_access_token
 from app.crud import user as crud_user
@@ -14,8 +14,6 @@ from app.schemas import UserRead
 from app.services import authorization_service, user_service
 
 router = APIRouter(tags=["Auth"])
-
-ADMIN_MANAGER = {"ADMIN", "MANAGER"}
 
 
 class LoginRequest(BaseModel):
@@ -55,7 +53,7 @@ class UserCapabilitiesResponse(BaseModel):
 @router.get(
     "/users/by-email",
     response_model=UserRead,
-    dependencies=[Depends(require_roles(ADMIN_MANAGER))],
+    dependencies=[RequireAdminManager],
 )
 async def get_user_by_email(email: EmailStr, db: DbSession):
     user = await crud_user.get_by_email(db, email=email)
@@ -103,7 +101,7 @@ async def get_me(current_user: CurrentUser):
 @router.post(
     "/users/{user_id}/verify-pin",
     response_model=BooleanResponse,
-    dependencies=[Depends(require_roles(ADMIN_MANAGER))],
+    dependencies=[RequireAdminManager],
 )
 async def verify_user_pin(
     user_id: int,
@@ -124,7 +122,7 @@ async def verify_user_pin(
 @router.post(
     "/authorization/check-role",
     response_model=RoleCheckResponse,
-    dependencies=[Depends(require_roles(ADMIN_MANAGER))],
+    dependencies=[RequireAdminManager],
 )
 async def check_role(body: RoleCheckRequest, db: DbSession):
     user = await get_or_404(
@@ -141,7 +139,7 @@ async def check_role(body: RoleCheckRequest, db: DbSession):
 @router.post(
     "/authorization/require-role",
     response_model=RoleCheckResponse,
-    dependencies=[Depends(require_roles(ADMIN_MANAGER))],
+    dependencies=[RequireAdminManager],
 )
 async def require_role(body: RoleCheckRequest, db: DbSession):
     user = await get_or_404(
@@ -164,7 +162,7 @@ async def require_role(body: RoleCheckRequest, db: DbSession):
 @router.get(
     "/authorization/users/{user_id}/capabilities",
     response_model=UserCapabilitiesResponse,
-    dependencies=[Depends(require_roles(ADMIN_MANAGER))],
+    dependencies=[RequireAdminManager],
 )
 async def get_user_capabilities(user_id: int, db: DbSession):
     user = await get_or_404(
