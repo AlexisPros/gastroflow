@@ -39,8 +39,7 @@ class CRUDStockMovement(CRUDBase[StockMovement, StockMovementCreate, StockMoveme
         description: str | None = None,
         prevent_negative: bool = True,
     ) -> StockMovement:
-        quantity_delta_decimal = Decimal(str(quantity_delta))
-        new_quantity = stock_item.quantity + quantity_delta_decimal
+        new_quantity = stock_item.quantity + quantity_delta
 
         if prevent_negative and new_quantity < 0:
             raise ValueError("Stock quantity cannot be negative.")
@@ -50,7 +49,7 @@ class CRUDStockMovement(CRUDBase[StockMovement, StockMovementCreate, StockMoveme
         db_obj = StockMovement(
             stock_item_id=stock_item.id,
             type=type,
-            quantity=abs(quantity_delta_decimal),
+            quantity=abs(quantity_delta),
             description=description,
         )
 

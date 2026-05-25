@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from decimal import Decimal
 
 from app.db.base import Base
 
@@ -70,13 +70,13 @@ class Order(Base):
     total_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     tip_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     table: Mapped[RestaurantTable | None] = relationship(

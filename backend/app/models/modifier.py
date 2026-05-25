@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from decimal import Decimal
 
 from app.db.base import Base
 
@@ -25,7 +25,7 @@ class Modifier(Base):
     price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     is_active: Mapped[bool] = mapped_column(

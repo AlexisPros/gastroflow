@@ -35,7 +35,7 @@ class OrderItemModifier(Base):
     price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
-        default=0,
+        default=Decimal("0.00"),
     )
 
     order_item: Mapped[OrderItem] = relationship(
