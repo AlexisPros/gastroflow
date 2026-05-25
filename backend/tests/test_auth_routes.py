@@ -7,8 +7,10 @@ from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user, require_roles
 from app.core.security import create_access_token, decode_access_token, get_password_hash
+from app.crud import restaurant_table as crud_restaurant_table
 from app.crud import user as crud_user
 from app.main import app
+from app.models.restaurant_table import RestaurantTable
 from app.models.user import User
 
 
@@ -33,6 +35,17 @@ def override_current_user(role: str) -> None:
         return make_user(role)
 
     app.dependency_overrides[get_current_user] = _get_current_user_override
+
+
+def make_restaurant_table() -> RestaurantTable:
+    return RestaurantTable(
+        id=1,
+        table_number="A1",
+        current_guests=None,
+        status="FREE",
+        qr_code_url=None,
+        is_active=True,
+    )
 
 
 def test_create_and_decode_access_token():
@@ -210,3 +223,126 @@ def test_login_token_can_access_auth_me(monkeypatch):
     assert me_response.status_code == 200
     assert me_response.json()["email"] == test_user.email
     assert me_response.json()["role"] == "MANAGER"
+
+
+def test_resource_route_requires_token():
+    response = client.get("/api/v1/restaurant-tables")
+
+    assert response.status_code == 401
+
+
+def test_resource_create_forbidden_for_wrong_role():
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/restaurant-tables",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "table_number": "A1",
+                "current_guests": None,
+                "qr_code_url": None,
+                "is_active": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
+def test_resource_list_with_allowed_role_reaches_crud(monkeypatch):
+    async def get_multi(_db, *, skip: int = 0, limit: int = 100):
+        assert skip == 0
+        assert limit == 100
+        return [make_restaurant_table()]
+
+    monkeypatch.setattr(crud_restaurant_table, "get_multi", get_multi)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/restaurant-tables",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["table_number"] == "A1"
+
+
+def test_resource_create_with_allowed_role_reaches_crud(monkeypatch):
+    async def create(_db, *, obj_in):
+        assert obj_in.table_number == "A2"
+        table = make_restaurant_table()
+        table.table_number = obj_in.table_number
+        return table
+
+    monkeypatch.setattr(crud_restaurant_table, "create", create)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.post(
+            "/api/v1/restaurant-tables",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "table_number": "A2",
+                "current_guests": None,
+                "qr_code_url": None,
+                "is_active": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["table_number"] == "A2"
+
+
+def test_resource_update_with_allowed_role_reaches_crud(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_restaurant_table()
+
+    async def update(_db, *, db_obj, obj_in):
+        assert db_obj.id == 1
+        assert obj_in.status == "OCCUPIED"
+        db_obj.status = obj_in.status
+        return db_obj
+
+    monkeypatch.setattr(crud_restaurant_table, "get", get)
+    monkeypatch.setattr(crud_restaurant_table, "update", update)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.patch(
+            "/api/v1/restaurant-tables/1",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"status": "OCCUPIED"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "OCCUPIED"
+
+
+def test_resource_delete_with_allowed_role_reaches_crud(monkeypatch):
+    async def delete(_db, *, id: int):
+        assert id == 1
+        return make_restaurant_table()
+
+    monkeypatch.setattr(crud_restaurant_table, "delete", delete)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.delete(
+            "/api/v1/restaurant-tables/1",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["table_number"] == "A1"
