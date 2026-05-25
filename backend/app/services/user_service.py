@@ -22,6 +22,22 @@ class UserService:
 
         return db_user
 
+    async def authenticate_by_pin(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: int,
+        pin: str,
+    ) -> User | None:
+        db_user = await user.get(db, id=user_id)
+        if db_user is None or not db_user.is_active:
+            return None
+
+        if not self.verify_user_pin(user=db_user, pin=pin):
+            return None
+
+        return db_user
+
     def verify_user_pin(self, *, user: User, pin: str) -> bool:
         if user.pin_hash is None:
             return False

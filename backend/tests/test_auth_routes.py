@@ -6,7 +6,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user, require_roles
-from app.core.security import create_access_token, decode_access_token, get_password_hash
+from app.core.security import (
+    create_access_token,
+    decode_access_token,
+    get_password_hash,
+    get_pin_hash,
+)
 from app.crud import restaurant_table as crud_restaurant_table
 from app.crud import user as crud_user
 from app.main import app
@@ -24,6 +29,7 @@ def make_user(role: str) -> User:
         last_name="User",
         email="test@example.com",
         password_hash=get_password_hash("secret-password"),
+        pin_hash=get_pin_hash("1234"),
         role=role,
         is_active=True,
         created_at=datetime.now(timezone.utc),
@@ -184,6 +190,55 @@ def test_login_rejects_wrong_password(monkeypatch):
         json={
             "email": test_user.email,
             "password": "wrong-password",
+        },
+    )
+
+    assert response.status_code == 401
+
+
+def test_pin_login_returns_access_token(monkeypatch):
+    test_user = make_user("WAITER")
+
+    async def get(_db, id: int):
+        if id == test_user.id:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get", get)
+
+    response = client.post(
+        "/api/v1/auth/pin-login",
+        json={
+            "user_id": test_user.id,
+            "pin": "1234",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert body["user"]["email"] == test_user.email
+
+    payload = decode_access_token(body["access_token"])
+    assert payload["sub"] == str(test_user.id)
+    assert payload["role"] == "WAITER"
+
+
+def test_pin_login_rejects_wrong_pin(monkeypatch):
+    test_user = make_user("WAITER")
+
+    async def get(_db, id: int):
+        if id == test_user.id:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get", get)
+
+    response = client.post(
+        "/api/v1/auth/pin-login",
+        json={
+            "user_id": test_user.id,
+            "pin": "9999",
         },
     )
 
