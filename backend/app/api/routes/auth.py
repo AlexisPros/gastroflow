@@ -1,4 +1,7 @@
-from fastapi import APIRouter, HTTPException, status
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr
 
 from app.api.deps import (
@@ -92,6 +95,25 @@ async def login(body: LoginRequest, db: DbSession):
         db,
         email=body.email,
         password=body.password,
+    )
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid email or password.",
+        )
+
+    return build_token_response(user)
+
+
+@router.post("/auth/token", response_model=TokenResponse)
+async def token_login(
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    db: DbSession,
+):
+    user = await user_service.authenticate_by_password(
+        db,
+        email=form_data.username,
+        password=form_data.password,
     )
     if user is None:
         raise HTTPException(

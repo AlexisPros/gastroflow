@@ -11,6 +11,8 @@ from app.core.security import (
     decode_access_token,
     get_password_hash,
     get_pin_hash,
+    verify_password,
+    verify_pin,
 )
 from app.crud import restaurant_table as crud_restaurant_table
 from app.crud import user as crud_user
@@ -67,11 +69,24 @@ def test_create_and_decode_access_token():
     assert "exp" in payload
 
 
+def test_invalid_hashes_do_not_raise():
+    assert verify_password("secret-password", "not-a-valid-bcrypt-hash") is False
+    assert verify_pin("1234", "not-a-valid-bcrypt-hash") is False
+
+
 def test_openapi_builds():
     response = client.get("/openapi.json")
 
     assert response.status_code == 200
-    assert "/api/v1/auth/login" in response.json()["paths"]
+    openapi = response.json()
+    assert "/api/v1/auth/login" in openapi["paths"]
+    assert "/api/v1/auth/token" in openapi["paths"]
+    assert (
+        openapi["components"]["securitySchemes"]["OAuth2PasswordBearer"][
+            "flows"
+        ]["password"]["tokenUrl"]
+        == "/api/v1/auth/token"
+    )
 
 
 def test_auth_me_requires_token():
@@ -194,6 +209,34 @@ def test_login_rejects_wrong_password(monkeypatch):
     )
 
     assert response.status_code == 401
+
+
+def test_token_login_returns_access_token_for_swagger(monkeypatch):
+    test_user = make_user("ADMIN")
+
+    async def get_by_email(_db, *, email: str):
+        if email == test_user.email:
+            return test_user
+        return None
+
+    monkeypatch.setattr(crud_user, "get_by_email", get_by_email)
+
+    response = client.post(
+        "/api/v1/auth/token",
+        data={
+            "username": test_user.email,
+            "password": "secret-password",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["token_type"] == "bearer"
+    assert body["user"]["email"] == test_user.email
+
+    payload = decode_access_token(body["access_token"])
+    assert payload["sub"] == str(test_user.id)
+    assert payload["role"] == "ADMIN"
 
 
 def test_pin_login_returns_access_token(monkeypatch):

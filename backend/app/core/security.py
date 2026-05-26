@@ -20,10 +20,13 @@ def get_password_hash(password: str) -> str:
 
 
 def verify_password(plain_password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(
-        _sha256_digest(plain_password),
-        password_hash.encode("utf-8"),
-    )
+    try:
+        return bcrypt.checkpw(
+            _sha256_digest(plain_password),
+            password_hash.encode("utf-8"),
+        )
+    except ValueError:
+        return False
 
 
 def get_pin_hash(pin: str) -> str:
@@ -34,10 +37,13 @@ def get_pin_hash(pin: str) -> str:
 
 
 def verify_pin(plain_pin: str, pin_hash: str) -> bool:
-    return bcrypt.checkpw(
-        _sha256_digest(plain_pin),
-        pin_hash.encode("utf-8"),
-    )
+    try:
+        return bcrypt.checkpw(
+            _sha256_digest(plain_pin),
+            pin_hash.encode("utf-8"),
+        )
+    except ValueError:
+        return False
 
 
 def create_access_token(

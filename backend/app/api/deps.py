@@ -11,7 +11,7 @@ from app.db.session import get_db
 from app.models.user import User
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
 
 
 async def get_or_404(

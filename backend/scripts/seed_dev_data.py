@@ -97,32 +97,32 @@ async def get_or_create(
 
 async def seed_users(db: AsyncSession) -> None:
     users = [
-        ("Admin", "User", "admin@gastroflow.local", "ADMIN"),
-        ("Manager", "User", "manager@gastroflow.local", "MANAGER"),
-        ("Waiter", "User", "waiter@gastroflow.local", "WAITER"),
-        ("Kitchen", "User", "kitchen@gastroflow.local", "KITCHEN"),
-        ("Bartender", "User", "bar@gastroflow.local", "BARTENDER"),
+        ("Admin", "User", "admin@gastroflow.dev", "ADMIN"),
+        ("Manager", "User", "manager@gastroflow.dev", "MANAGER"),
+        ("Waiter", "User", "waiter@gastroflow.dev", "WAITER"),
+        ("Kitchen", "User", "kitchen@gastroflow.dev", "KITCHEN"),
+        ("Bartender", "User", "bar@gastroflow.dev", "BARTENDER"),
     ]
 
     for first_name, last_name, email, role in users:
-        user, created = await get_or_create(
-            db,
-            User,
-            email=email,
-            defaults={
-                "first_name": first_name,
-                "last_name": last_name,
-                "password_hash": get_password_hash(DEV_PASSWORD),
-                "pin_hash": get_pin_hash(DEV_PIN),
-                "role": role,
-                "is_active": True,
-            },
-        )
-        if not created:
-            user.first_name = first_name
-            user.last_name = last_name
-            user.role = role
-            user.is_active = True
+        legacy_email = email.replace("@gastroflow.dev", "@gastroflow.local")
+        user = await get_one(db, User, email=email)
+        if user is None:
+            user = await get_one(db, User, email=legacy_email)
+
+        if user is None:
+            user = User(email=email)
+            db.add(user)
+
+        user.first_name = first_name
+        user.last_name = last_name
+        user.email = email
+        user.password_hash = get_password_hash(DEV_PASSWORD)
+        user.pin_hash = get_pin_hash(DEV_PIN)
+        user.role = role
+        user.is_active = True
+
+    await db.flush()
 
 
 async def seed_restaurant_config(db: AsyncSession) -> RestaurantConfig:
