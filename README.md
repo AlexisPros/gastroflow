@@ -30,21 +30,20 @@ http://127.0.0.1:8000/docs
 
 ## Demo Users
 
-All seeded users use the same password and PIN:
+All seeded users use the same password:
 
 ```text
 password: demo1234
-PIN: 1234
 ```
 
-Available demo accounts:
+Seeded users use different PINs so QR order confirmation can identify exactly which worker accepted the order:
 
 ```text
-admin@gastroflow.dev
-manager@gastroflow.dev
-waiter@gastroflow.dev
-kitchen@gastroflow.dev
-bar@gastroflow.dev
+admin@gastroflow.dev    PIN: 1001
+manager@gastroflow.dev  PIN: 1002
+waiter@gastroflow.dev   PIN: 1234
+kitchen@gastroflow.dev  PIN: 2001
+bar@gastroflow.dev      PIN: 3001
 ```
 
 ## Swagger Authorization
@@ -84,7 +83,7 @@ Body:
 ```json
 {
   "user_id": 1,
-  "pin": "1234"
+  "pin": "1001"
 }
 ```
 
@@ -231,7 +230,7 @@ The KSeF endpoint is a mock and only simulates sending the invoice.
 
 ## Seed Data Strategy
 
-The development seed keeps reference data ready, but leaves operational data empty for realistic testing.
+The development seed keeps reference data ready, but leaves operational data empty for realistic testing. Every seed run clears operational data before recreating/updating reference data.
 
 Seeded data:
 
