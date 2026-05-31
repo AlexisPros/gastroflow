@@ -276,6 +276,25 @@ Restaurant tables are created by the floor plan editor through:
 POST /api/v1/floor-plans/{floor_plan_id}/tables/create-restaurant-table
 ```
 
+When a restaurant table is created, the backend generates permanent QR data:
+
+```text
+qr_token
+qr_code_url
+```
+
+The token is stable and should not be regenerated during normal table updates. By default, QR URLs use:
+
+```text
+http://localhost:3000/qr/{qr_token}
+```
+
+For another frontend domain, set:
+
+```text
+PUBLIC_MENU_BASE_URL=https://menu.example.com/qr
+```
+
 ## Kitchen Preparation Steps
 
 Products are not assigned to only one kitchen section. A menu product can have multiple kitchen preparation steps.

@@ -7,6 +7,7 @@ from app.models.floor_plan import FloorPlan
 from app.models.floor_plan_table import FloorPlanTable
 from app.models.restaurant_table import RestaurantTable
 from app.schemas.floor_plan_table import FloorPlanTablePositionUpdate
+from app.services.qr_code_service import qr_code_service
 
 
 class FloorPlanService:
@@ -82,8 +83,16 @@ class FloorPlanService:
         await self._validate_new_restaurant_table(
             db,
             table_number=table_number,
+            qr_token=None,
             qr_code_url=qr_code_url,
             current_guests=current_guests,
+        )
+        qr_token = await self._generate_unique_qr_token(
+            db,
+            table_number=table_number,
+        )
+        qr_code_url = qr_code_url or qr_code_service.build_table_url(
+            qr_token=qr_token,
         )
 
         table = RestaurantTable(
@@ -91,6 +100,7 @@ class FloorPlanService:
             current_guests=current_guests,
             status="FREE",
             qr_code_url=qr_code_url,
+            qr_token=qr_token,
             is_active=is_active,
         )
         db.add(table)
@@ -169,6 +179,7 @@ class FloorPlanService:
         db: AsyncSession,
         *,
         table_number: str,
+        qr_token: str | None,
         qr_code_url: str | None,
         current_guests: int | None,
     ) -> None:
@@ -183,6 +194,15 @@ class FloorPlanService:
         if result.scalar_one_or_none() is not None:
             raise ValueError("Restaurant table number already exists.")
 
+        if qr_token is not None:
+            result = await db.execute(
+                select(RestaurantTable).where(
+                    RestaurantTable.qr_token == qr_token,
+                ),
+            )
+            if result.scalar_one_or_none() is not None:
+                raise ValueError("Restaurant table QR token already exists.")
+
         if qr_code_url is None:
             return
 
@@ -193,6 +213,26 @@ class FloorPlanService:
         )
         if result.scalar_one_or_none() is not None:
             raise ValueError("Restaurant table QR code URL already exists.")
+
+    async def _generate_unique_qr_token(
+        self,
+        db: AsyncSession,
+        *,
+        table_number: str,
+    ) -> str:
+        for _ in range(5):
+            qr_token = qr_code_service.generate_table_token(
+                table_number=table_number,
+            )
+            result = await db.execute(
+                select(RestaurantTable).where(
+                    RestaurantTable.qr_token == qr_token,
+                ),
+            )
+            if result.scalar_one_or_none() is None:
+                return qr_token
+
+        raise ValueError("Could not generate unique QR token.")
 
 
 floor_plan_service = FloorPlanService()

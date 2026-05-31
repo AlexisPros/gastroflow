@@ -1,7 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_password, verify_pin
-from app.crud import user
+from app.crud.user import user
 from app.models.user import User
 
 
