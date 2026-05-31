@@ -9,6 +9,7 @@ from app.models.product_category import ProductCategory
 from app.models.product import Product
 from app.models.modifier import Modifier
 from app.models.product_modifier import ProductModifier
+from app.models.product_kitchen_step import ProductKitchenStep
 
 from app.models.order import Order
 from app.models.order_item import OrderItem

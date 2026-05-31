@@ -1,5 +1,7 @@
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from importlib import import_module
 
 from fastapi.testclient import TestClient
 
@@ -8,9 +10,14 @@ from app.crud import order as crud_order
 from app.main import app
 from app.models.order import Order
 from app.models.order_action_log import OrderActionLog
+from app.models.order_item import OrderItem
+from app.models.product import Product
+from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.order_transfer_log import OrderTransferLog
 from app.models.user import User
 from app.services import discount_service, order_service
+
+order_service_module = import_module("app.services.order_service")
 
 
 client = TestClient(app)
@@ -41,6 +48,7 @@ def make_order() -> Order:
         closed_at=None,
         total_amount=Decimal("25.00"),
         tip_amount=Decimal("0.00"),
+        estimated_time=20,
     )
 
 
@@ -128,6 +136,97 @@ def test_create_order_with_items_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["id"] == 1
     assert response.json()["total_amount"] == "25.00"
+
+
+def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.added = []
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def flush(self):
+            return None
+
+    product = Product(
+        id=1,
+        category_id=1,
+        kitchen_section_id=None,
+        name="Salatka cezar",
+        description=None,
+        price=Decimal("28.00"),
+        preparation_time=None,
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    steps = [
+        ProductKitchenStep(
+            id=1,
+            product_id=1,
+            kitchen_section_id=2,
+            name="Przygotowanie salatki",
+            sequence=1,
+            estimated_time=7,
+            is_active=True,
+        ),
+        ProductKitchenStep(
+            id=2,
+            product_id=1,
+            kitchen_section_id=3,
+            name="Przygotowanie dodatku miesnego",
+            sequence=2,
+            estimated_time=8,
+            is_active=True,
+        ),
+    ]
+
+    async def get_active_product(_db, *, product_id: int):
+        assert product_id == 1
+        return product
+
+    async def get_active_by_product(_db, *, product_id: int):
+        assert product_id == 1
+        return steps
+
+    monkeypatch.setattr(order_service, "_get_active_product", get_active_product)
+    monkeypatch.setattr(
+        order_service_module.product_kitchen_step,
+        "get_active_by_product",
+        get_active_by_product,
+    )
+
+    db = FakeDb()
+    order_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        unit_price=Decimal("28.00"),
+        total_price=Decimal("28.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    estimated_time = asyncio.run(
+        order_service._create_kitchen_task_for_item(
+            db,
+            order_item=order_item,
+        ),
+    )
+
+    assert len(db.added) == 2
+    assert [task.kitchen_section_id for task in db.added] == [2, 3]
+    assert [task.product_kitchen_step_id for task in db.added] == [1, 2]
+    assert estimated_time == 8
+
+
+def test_product_estimated_time_uses_longest_parallel_step():
+    estimated_time = order_service._calculate_product_estimated_time(
+        [7, 10, None],
+    )
+
+    assert estimated_time == 10
 
 
 def test_close_order_reaches_crud(monkeypatch):

@@ -10,6 +10,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.kitchen_task import KitchenTask
     from app.models.product import Product
+    from app.models.product_kitchen_step import ProductKitchenStep
 
 
 class KitchenSection(Base):
@@ -36,5 +37,10 @@ class KitchenSection(Base):
 
     kitchen_tasks: Mapped[list[KitchenTask]] = relationship(
         "KitchenTask",
+        back_populates="kitchen_section",
+    )
+
+    product_steps: Mapped[list[ProductKitchenStep]] = relationship(
+        "ProductKitchenStep",
         back_populates="kitchen_section",
     )

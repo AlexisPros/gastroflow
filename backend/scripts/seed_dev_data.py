@@ -15,16 +15,15 @@ from app.core.security import get_password_hash, get_pin_hash
 from app.db.session import AsyncSessionLocal
 from app.models.discount import Discount
 from app.models.floor_plan import FloorPlan
-from app.models.floor_plan_table import FloorPlanTable
 from app.models.ingredient import Ingredient
 from app.models.kitchen_section import KitchenSection
 from app.models.modifier import Modifier
 from app.models.product import Product
 from app.models.product_category import ProductCategory
 from app.models.product_ingredient import ProductIngredient
+from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_config import RestaurantConfig
-from app.models.restaurant_table import RestaurantTable
 from app.models.stock_item import StockItem
 from app.models.system_module import SystemModule
 from app.models.user import User
@@ -43,6 +42,7 @@ TABLES_WITH_SERIAL_ID = [
     "product_categories",
     "products",
     "product_ingredients",
+    "product_kitchen_steps",
     "product_modifiers",
     "restaurant_config",
     "restaurant_tables",
@@ -159,39 +159,6 @@ async def seed_restaurant_config(db: AsyncSession) -> RestaurantConfig:
     return config
 
 
-async def seed_tables(db: AsyncSession) -> list[RestaurantTable]:
-    tables: list[RestaurantTable] = []
-
-    for number, seats in [
-        ("A1", 2),
-        ("A2", 2),
-        ("B1", 4),
-        ("B2", 4),
-        ("C1", 6),
-        ("BAR1", 2),
-    ]:
-        table, _ = await get_or_create(
-            db,
-            RestaurantTable,
-            table_number=number,
-            defaults={
-                "current_guests": None,
-                "status": "FREE",
-                "qr_code_url": f"https://gastroflow.local/qr/{number.lower()}",
-                "is_active": True,
-            },
-        )
-        table.current_guests = None
-        table.status = "FREE"
-        table.is_active = True
-        if table.qr_code_url is None:
-            table.qr_code_url = f"https://gastroflow.local/qr/{number.lower()}"
-
-        tables.append(table)
-
-    return tables
-
-
 async def seed_menu(db: AsyncSession) -> dict[str, Any]:
     hot, _ = await get_or_create(
         db,
@@ -205,12 +172,30 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         name="Kuchnia zimna",
         defaults={"is_active": True},
     )
+    meat, _ = await get_or_create(
+        db,
+        KitchenSection,
+        name="Stanowisko miesne",
+        defaults={"is_active": True},
+    )
+    pass_section, _ = await get_or_create(
+        db,
+        KitchenSection,
+        name="Wydawka",
+        defaults={"is_active": True},
+    )
     bar, _ = await get_or_create(
         db,
         KitchenSection,
         name="Bar",
         defaults={"is_active": True},
     )
+
+    hot.is_active = True
+    cold.is_active = True
+    meat.is_active = True
+    pass_section.is_active = True
+    bar.is_active = True
 
     food_category, _ = await get_or_create(
         db,
@@ -229,7 +214,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         (
             "Burger klasyczny",
             food_category,
-            hot,
+            meat,
             Decimal("35.00"),
             "Wolowina, ser, salata, sos",
             15,
@@ -260,7 +245,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             name=name,
             defaults={
                 "category_id": category.id,
-                "kitchen_section_id": section.id,
+                "kitchen_section_id": None,
                 "description": description,
                 "price": price,
                 "preparation_time": preparation_time,
@@ -268,7 +253,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             },
         )
         product.category_id = category.id
-        product.kitchen_section_id = section.id
+        product.kitchen_section_id = None
         product.description = description
         product.price = price
         product.preparation_time = preparation_time
@@ -299,11 +284,59 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
     await link_product_modifier(db, products["Burger klasyczny"], modifiers["Bekon"])
     await link_product_modifier(db, products["Lemoniada"], modifiers["Bez lodu"])
 
+    await link_product_kitchen_step(
+        db,
+        product=products["Burger klasyczny"],
+        section=meat,
+        name="Przygotowanie miesa",
+        description="Przygotowanie i obrobka miesa do burgera.",
+        sequence=1,
+        estimated_time=12,
+    )
+    await link_product_kitchen_step(
+        db,
+        product=products["Burger klasyczny"],
+        section=hot,
+        name="Zlozenie burgera",
+        description="Zlozenie burgera i przygotowanie cieplych dodatkow.",
+        sequence=2,
+        estimated_time=5,
+    )
+    await link_product_kitchen_step(
+        db,
+        product=products["Salatka cezar"],
+        section=cold,
+        name="Przygotowanie salatki",
+        description="Przygotowanie warzyw, sosu i skladanie salatki.",
+        sequence=1,
+        estimated_time=7,
+    )
+    await link_product_kitchen_step(
+        db,
+        product=products["Salatka cezar"],
+        section=meat,
+        name="Przygotowanie dodatku miesnego",
+        description="Przygotowanie kurczaka lub krewetek do salatki.",
+        sequence=2,
+        estimated_time=8,
+    )
+    await link_product_kitchen_step(
+        db,
+        product=products["Lemoniada"],
+        section=bar,
+        name="Przygotowanie napoju",
+        description="Przygotowanie napoju na barze.",
+        sequence=1,
+        estimated_time=3,
+    )
+
     return {
         "products": products,
         "sections": {
             "hot": hot,
             "cold": cold,
+            "meat": meat,
+            "pass": pass_section,
             "bar": bar,
         },
     }
@@ -326,6 +359,37 @@ async def link_product_modifier(
     )
     product_modifier.is_active = True
     return product_modifier
+
+
+async def link_product_kitchen_step(
+    db: AsyncSession,
+    *,
+    product: Product,
+    section: KitchenSection,
+    name: str,
+    description: str,
+    sequence: int,
+    estimated_time: int,
+) -> ProductKitchenStep:
+    step, _ = await get_or_create(
+        db,
+        ProductKitchenStep,
+        product_id=product.id,
+        sequence=sequence,
+        defaults={
+            "kitchen_section_id": section.id,
+            "name": name,
+            "description": description,
+            "estimated_time": estimated_time,
+            "is_active": True,
+        },
+    )
+    step.kitchen_section_id = section.id
+    step.name = name
+    step.description = description
+    step.estimated_time = estimated_time
+    step.is_active = True
+    return step
 
 
 async def seed_stock(
@@ -419,10 +483,7 @@ async def seed_discounts(db: AsyncSession) -> None:
         discount.is_active = True
 
 
-async def seed_floor_plan(
-    db: AsyncSession,
-    tables: list[RestaurantTable],
-) -> None:
+async def seed_floor_plan(db: AsyncSession) -> None:
     floor_plan, _ = await get_or_create(
         db,
         FloorPlan,
@@ -430,43 +491,14 @@ async def seed_floor_plan(
         defaults={
             "width": 1200,
             "height": 800,
+            "background_image_url": None,
             "is_active": True,
         },
     )
     floor_plan.width = 1200
     floor_plan.height = 800
+    floor_plan.background_image_url = None
     floor_plan.is_active = True
-
-    positions = [
-        (Decimal("80.00"), Decimal("80.00")),
-        (Decimal("260.00"), Decimal("80.00")),
-        (Decimal("80.00"), Decimal("240.00")),
-        (Decimal("260.00"), Decimal("240.00")),
-        (Decimal("480.00"), Decimal("160.00")),
-        (Decimal("760.00"), Decimal("80.00")),
-    ]
-
-    for table, (x, y) in zip(tables, positions, strict=True):
-        floor_plan_table, _ = await get_or_create(
-            db,
-            FloorPlanTable,
-            floor_plan_id=floor_plan.id,
-            table_id=table.id,
-            defaults={
-                "x": x,
-                "y": y,
-                "width": Decimal("120.00"),
-                "height": Decimal("80.00"),
-                "rotation": Decimal("0.00"),
-                "shape": "RECTANGLE",
-            },
-        )
-        floor_plan_table.x = x
-        floor_plan_table.y = y
-        floor_plan_table.width = Decimal("120.00")
-        floor_plan_table.height = Decimal("80.00")
-        floor_plan_table.rotation = Decimal("0.00")
-        floor_plan_table.shape = "RECTANGLE"
 
 
 async def seed() -> None:
@@ -474,11 +506,10 @@ async def seed() -> None:
         await reset_primary_key_sequences(db)
         await seed_users(db)
         await seed_restaurant_config(db)
-        tables = await seed_tables(db)
         menu = await seed_menu(db)
         await seed_stock(db, menu["products"])
         await seed_discounts(db)
-        await seed_floor_plan(db, tables)
+        await seed_floor_plan(db)
         await db.commit()
 
 

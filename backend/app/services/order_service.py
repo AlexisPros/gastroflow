@@ -4,7 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crud import order_action_log, order_transfer_log
+from app.crud import order_action_log, order_transfer_log, product_kitchen_step
 from app.models.kitchen_task import KitchenTask
 from app.models.modifier import Modifier
 from app.models.order import Order
@@ -45,6 +45,7 @@ class OrderService:
         await db.flush()
 
         total_amount = Decimal("0.00")
+        item_estimates: list[int] = []
 
         for item_request in items:
             order_item, item_total = await self._create_order_item(
@@ -53,9 +54,15 @@ class OrderService:
                 item_request=item_request,
             )
             total_amount += item_total
-            await self._create_kitchen_task_for_item(db, order_item=order_item)
+            item_estimated_time = await self._create_kitchen_task_for_item(
+                db,
+                order_item=order_item,
+            )
+            if item_estimated_time is not None:
+                item_estimates.append(item_estimated_time)
 
         order.total_amount = total_amount
+        order.estimated_time = max(item_estimates) if item_estimates else None
 
         db.add(order)
         await db.commit()
@@ -71,6 +78,10 @@ class OrderService:
         order.total_amount = sum(
             (item.total_price for item in order_items),
             Decimal("0.00"),
+        )
+        order.estimated_time = await self._calculate_order_estimated_time(
+            db,
+            order_items=list(order_items),
         )
 
         db.add(order)
@@ -160,10 +171,29 @@ class OrderService:
         db: AsyncSession,
         *,
         order_item: OrderItem,
-    ) -> None:
+    ) -> int | None:
         product = await self._get_active_product(db, product_id=order_item.product_id)
+        kitchen_steps = await product_kitchen_step.get_active_by_product(
+            db,
+            product_id=product.id,
+        )
+        if kitchen_steps:
+            for step in kitchen_steps:
+                db.add(
+                    KitchenTask(
+                        order_item_id=order_item.id,
+                        kitchen_section_id=step.kitchen_section_id,
+                        product_kitchen_step_id=step.id,
+                        estimated_time=step.estimated_time,
+                    ),
+                )
+            await db.flush()
+            return self._calculate_product_estimated_time(
+                [step.estimated_time for step in kitchen_steps],
+            )
+
         if product.kitchen_section_id is None:
-            return
+            return None
 
         db.add(
             KitchenTask(
@@ -173,6 +203,37 @@ class OrderService:
             ),
         )
         await db.flush()
+        return product.preparation_time
+
+    def _calculate_product_estimated_time(
+        self,
+        step_estimates: list[int | None],
+    ) -> int | None:
+        known_estimates = [
+            estimate
+            for estimate in step_estimates
+            if estimate is not None
+        ]
+        return max(known_estimates) if known_estimates else None
+
+    async def _calculate_order_estimated_time(
+        self,
+        db: AsyncSession,
+        *,
+        order_items: list[OrderItem],
+    ) -> int | None:
+        order_item_ids = [item.id for item in order_items]
+        if not order_item_ids:
+            return None
+
+        result = await db.execute(
+            select(KitchenTask.estimated_time).where(
+                KitchenTask.order_item_id.in_(order_item_ids),
+                KitchenTask.estimated_time.is_not(None),
+            ),
+        )
+        estimates = list(result.scalars().all())
+        return max(estimates) if estimates else None
 
     async def _get_active_product(self, db: AsyncSession, *, product_id: int) -> Product:
         result = await db.execute(

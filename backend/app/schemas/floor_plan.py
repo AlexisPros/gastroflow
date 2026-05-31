@@ -7,6 +7,7 @@ class FloorPlanBase(OrmBaseModel):
     name: str
     width: int = 1200
     height: int = 800
+    background_image_url: str | None = None
     is_active: bool = True
 
 
@@ -18,6 +19,7 @@ class FloorPlanUpdate(OrmBaseModel):
     name: str | None = None
     width: int | None = None
     height: int | None = None
+    background_image_url: str | None = None
     is_active: bool | None = None
 
 

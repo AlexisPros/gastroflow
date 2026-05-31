@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from app.models.order_item import OrderItem
     from app.models.product_category import ProductCategory
     from app.models.product_ingredient import ProductIngredient
+    from app.models.product_kitchen_step import ProductKitchenStep
     from app.models.product_modifier import ProductModifier
 
 
@@ -82,6 +83,12 @@ class Product(Base):
 
     product_ingredients: Mapped[list[ProductIngredient]] = relationship(
         "ProductIngredient",
+        back_populates="product",
+        cascade="all, delete-orphan",
+    )
+
+    kitchen_steps: Mapped[list[ProductKitchenStep]] = relationship(
+        "ProductKitchenStep",
         back_populates="product",
         cascade="all, delete-orphan",
     )
