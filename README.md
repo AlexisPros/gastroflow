@@ -310,6 +310,8 @@ status: PENDING_CONFIRMATION
 waiter_id: null
 ```
 
+The backend accepts a new QR order only when the table is active, has status `FREE`, and has no active order with status `PENDING_CONFIRMATION` or `OPEN`.
+
 Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
 
 Waiters, managers, and admins can list QR orders waiting for confirmation:
@@ -334,6 +336,23 @@ Body:
 
 After confirmation, the backend assigns the waiter, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks.
 The confirmation step also records an `QR_ORDER_CONFIRMED` action log and avoids creating duplicate kitchen tasks if tasks already exist for the order items.
+
+Any waiter can reject a pending QR order by entering a PIN:
+
+```text
+POST /api/v1/qr/orders/{order_id}/reject
+```
+
+Body:
+
+```json
+{
+  "pin": "1234",
+  "reason": "Guest left the table"
+}
+```
+
+After rejection, the backend assigns the rejecting waiter, changes the order status to `REJECTED`, and records a `QR_ORDER_REJECTED` action log.
 
 ## Kitchen Preparation Steps
 

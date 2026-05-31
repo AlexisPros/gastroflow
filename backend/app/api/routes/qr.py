@@ -35,6 +35,11 @@ class ConfirmQRPendingOrderRequest(BaseModel):
     pin: str = Field(min_length=4, max_length=12)
 
 
+class RejectQRPendingOrderRequest(BaseModel):
+    pin: str = Field(min_length=4, max_length=12)
+    reason: str | None = Field(default=None, max_length=255)
+
+
 async def get_table_by_qr_token(qr_token: str, db: DbSession):
     table = await crud_restaurant_table.get_by_qr_token(
         db,
@@ -81,6 +86,24 @@ async def create_qr_pending_order(
         raise_bad_request(exc)
 
 
+async def get_service_order_user_by_pin(pin: str, db: DbSession):
+    try:
+        waiter = await user_service.find_service_order_user_by_pin(
+            db,
+            pin=pin,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+    if waiter is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid PIN.",
+        )
+
+    return waiter
+
+
 @router.get(
     "/qr/orders/pending",
     response_model=list[OrderRead],
@@ -111,25 +134,39 @@ async def confirm_qr_pending_order(
             detail="QR order not found.",
         )
 
-    try:
-        waiter = await user_service.find_service_order_user_by_pin(
-            db,
-            pin=body.pin,
-        )
-    except ValueError as exc:
-        raise_bad_request(exc)
-
-    if waiter is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid PIN.",
-        )
+    waiter = await get_service_order_user_by_pin(body.pin, db)
 
     try:
         return await order_service.confirm_pending_qr_order(
             db,
             order=order,
             waiter_id=waiter.id,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.post("/qr/orders/{order_id}/reject", response_model=OrderRead)
+async def reject_qr_pending_order(
+    order_id: int,
+    body: RejectQRPendingOrderRequest,
+    db: DbSession,
+):
+    order = await crud_order.get(db, order_id)
+    if order is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="QR order not found.",
+        )
+
+    waiter = await get_service_order_user_by_pin(body.pin, db)
+
+    try:
+        return await order_service.reject_pending_qr_order(
+            db,
+            order=order,
+            waiter_id=waiter.id,
+            reason=body.reason,
         )
     except ValueError as exc:
         raise_bad_request(exc)

@@ -74,6 +74,13 @@ def make_confirmed_qr_order() -> Order:
     return order
 
 
+def make_rejected_qr_order() -> Order:
+    order = make_pending_qr_order()
+    order.waiter_id = 7
+    order.status = "REJECTED"
+    return order
+
+
 def test_get_qr_table_is_public(monkeypatch):
     async def get_by_qr_token(_db, *, qr_token: str):
         assert qr_token == "a1-token"
@@ -265,3 +272,43 @@ def test_confirm_qr_pending_order_rejects_invalid_pin(monkeypatch):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid PIN."
+
+
+def test_reject_qr_pending_order_uses_pin_user(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_pending_qr_order()
+
+    async def find_service_order_user_by_pin(_db, *, pin: str):
+        assert pin == "1234"
+        return make_user("WAITER")
+
+    async def reject_pending_qr_order(_db, *, order, waiter_id: int, reason: str | None):
+        assert order.id == 1
+        assert waiter_id == 7
+        assert reason == "Guest left the table"
+        return make_rejected_qr_order()
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(
+        user_service,
+        "find_service_order_user_by_pin",
+        find_service_order_user_by_pin,
+    )
+    monkeypatch.setattr(
+        order_service,
+        "reject_pending_qr_order",
+        reject_pending_qr_order,
+    )
+
+    response = client.post(
+        "/api/v1/qr/orders/1/reject",
+        json={
+            "pin": "1234",
+            "reason": "Guest left the table",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "REJECTED"
+    assert response.json()["waiter_id"] == 7

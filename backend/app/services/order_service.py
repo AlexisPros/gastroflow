@@ -13,6 +13,7 @@ from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
 from app.models.product import Product
 from app.models.product_modifier import ProductModifier
+from app.models.restaurant_table import RestaurantTable
 
 
 @dataclass(slots=True)
@@ -84,6 +85,8 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
+        await self._ensure_table_accepts_qr_order(db, table_id=table_id)
+
         order = Order(
             table_id=table_id,
             waiter_id=None,
@@ -112,6 +115,36 @@ class OrderService:
         await db.refresh(order)
         return order
 
+    async def reject_pending_qr_order(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        waiter_id: int,
+        reason: str | None = None,
+    ) -> Order:
+        if order.source != "QR":
+            raise ValueError("Only QR orders can be rejected with this operation.")
+
+        if order.status != "PENDING_CONFIRMATION":
+            raise ValueError("QR order is not pending confirmation.")
+
+        order.waiter_id = waiter_id
+        order.status = "REJECTED"
+
+        db.add(
+            OrderActionLog(
+                order_id=order.id,
+                user_id=waiter_id,
+                action_type="QR_ORDER_REJECTED",
+                description=reason or "QR order rejected by waiter PIN.",
+            ),
+        )
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        return order
+
     async def recalculate_total(self, db: AsyncSession, *, order: Order) -> Order:
         result = await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id),
@@ -131,6 +164,37 @@ class OrderService:
         await db.commit()
         await db.refresh(order)
         return order
+
+    async def _ensure_table_accepts_qr_order(
+        self,
+        db: AsyncSession,
+        *,
+        table_id: int,
+    ) -> None:
+        result = await db.execute(
+            select(RestaurantTable).where(RestaurantTable.id == table_id),
+        )
+        table = result.scalar_one_or_none()
+
+        if table is None:
+            raise ValueError("Restaurant table does not exist.")
+
+        if not table.is_active:
+            raise ValueError("Restaurant table is not active.")
+
+        if table.status != "FREE":
+            raise ValueError("Restaurant table is not free.")
+
+        active_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == table_id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+            )
+            .limit(1),
+        )
+        if active_order_result.scalar_one_or_none() is not None:
+            raise ValueError("Restaurant table already has an active order.")
 
     async def confirm_pending_qr_order(
         self,
