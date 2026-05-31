@@ -12,6 +12,19 @@ from app.services.qr_code_service import qr_code_service
 class CRUDRestaurantTable(
     CRUDBase[RestaurantTable, RestaurantTableCreate, RestaurantTableUpdate],
 ):
+    async def get_by_qr_token(
+        self,
+        db: AsyncSession,
+        *,
+        qr_token: str,
+    ) -> RestaurantTable | None:
+        result = await db.execute(
+            select(RestaurantTable).where(
+                RestaurantTable.qr_token == qr_token,
+            ),
+        )
+        return result.scalar_one_or_none()
+
     async def create(
         self,
         db: AsyncSession,

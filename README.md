@@ -295,6 +295,23 @@ For another frontend domain, set:
 PUBLIC_MENU_BASE_URL=https://menu.example.com/qr
 ```
 
+The public QR flow starts with these endpoints and does not require JWT authorization:
+
+```text
+GET /api/v1/qr/{qr_token}/table
+POST /api/v1/qr/{qr_token}/orders
+```
+
+The QR order endpoint creates an order with:
+
+```text
+source: QR
+status: PENDING_CONFIRMATION
+waiter_id: null
+```
+
+Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
+
 ## Kitchen Preparation Steps
 
 Products are not assigned to only one kitchen section. A menu product can have multiple kitchen preparation steps.

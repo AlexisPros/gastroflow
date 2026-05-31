@@ -69,6 +69,48 @@ class OrderService:
         await db.refresh(order)
         return order
 
+    async def create_pending_qr_order(
+        self,
+        db: AsyncSession,
+        *,
+        table_id: int,
+        guest_count: int,
+        items: list[OrderItemRequest],
+    ) -> Order:
+        if guest_count <= 0:
+            raise ValueError("Guest count must be greater than zero.")
+
+        if not items:
+            raise ValueError("Order must contain at least one item.")
+
+        order = Order(
+            table_id=table_id,
+            waiter_id=None,
+            guest_count=guest_count,
+            source="QR",
+            status="PENDING_CONFIRMATION",
+            total_amount=Decimal("0.00"),
+        )
+        db.add(order)
+        await db.flush()
+
+        total_amount = Decimal("0.00")
+
+        for item_request in items:
+            _, item_total = await self._create_order_item(
+                db,
+                order_id=order.id,
+                item_request=item_request,
+            )
+            total_amount += item_total
+
+        order.total_amount = total_amount
+
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        return order
+
     async def recalculate_total(self, db: AsyncSession, *, order: Order) -> Order:
         result = await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id),
