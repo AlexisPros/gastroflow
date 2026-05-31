@@ -79,6 +79,11 @@ class Order(Base):
         default=Decimal("0.00"),
     )
 
+    estimated_time: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     table: Mapped[RestaurantTable | None] = relationship(
         "RestaurantTable",
         back_populates="orders",

@@ -92,15 +92,55 @@ Body:
 
 Use this flow in Swagger to check the main POS scenario.
 
-1. Check seeded tables:
+1. Check the active floor plan:
+
+```text
+GET /api/v1/floor-plans/active
+```
+
+Save the returned floor plan `id`.
+
+2. Create a restaurant table from the floor plan editor flow:
+
+```text
+POST /api/v1/floor-plans/{floor_plan_id}/tables/create-restaurant-table
+```
+
+Example body:
+
+```json
+{
+  "table_number": "A1",
+  "current_guests": null,
+  "qr_code_url": null,
+  "is_active": true,
+  "position": {
+    "x": "80.00",
+    "y": "80.00",
+    "width": "120.00",
+    "height": "80.00",
+    "rotation": "0.00",
+    "shape": "RECTANGLE"
+  }
+}
+```
+
+The backend creates both records:
+
+```text
+restaurant_tables
+floor_plan_tables
+```
+
+Save the returned `table_id`.
+
+3. Check created tables:
 
 ```text
 GET /api/v1/restaurant-tables
 ```
 
-Save one `id`, for example `1`.
-
-2. Check seeded products:
+4. Check seeded products:
 
 ```text
 GET /api/v1/products
@@ -108,7 +148,7 @@ GET /api/v1/products
 
 Save one `id`, for example `1`.
 
-3. Create an order:
+5. Create an order:
 
 ```text
 POST /api/v1/orders/with-items
@@ -133,7 +173,7 @@ Example body:
 
 Save the returned order `id`.
 
-4. Check created kitchen tasks:
+6. Check created kitchen tasks:
 
 ```text
 GET /api/v1/kitchen-tasks
@@ -141,19 +181,19 @@ GET /api/v1/kitchen-tasks
 
 Save the task `id`.
 
-5. Start the kitchen task:
+7. Start the kitchen task:
 
 ```text
 POST /api/v1/kitchen-tasks/{task_id}/start
 ```
 
-6. Complete the kitchen task:
+8. Complete the kitchen task:
 
 ```text
 POST /api/v1/kitchen-tasks/{task_id}/complete
 ```
 
-7. Register payment for the order:
+9. Register payment for the order:
 
 ```text
 POST /api/v1/orders/{order_id}/payments
@@ -171,7 +211,7 @@ Example body:
 }
 ```
 
-8. Generate mock receipt PDF:
+10. Generate mock receipt PDF:
 
 ```text
 POST /api/v1/orders/{order_id}/receipt/pdf
@@ -179,7 +219,7 @@ POST /api/v1/orders/{order_id}/receipt/pdf
 
 This returns a PDF that simulates thermal printer output.
 
-9. Optional invoice flow:
+11. Optional invoice flow:
 
 ```text
 POST /api/v1/orders/{order_id}/invoice
@@ -188,6 +228,94 @@ POST /api/v1/invoices/{invoice_id}/send-ksef-mock
 ```
 
 The KSeF endpoint is a mock and only simulates sending the invoice.
+
+## Seed Data Strategy
+
+The development seed keeps reference data ready, but leaves operational data empty for realistic testing.
+
+Seeded data:
+
+```text
+users
+restaurant_config
+system_modules
+kitchen_sections
+product_categories
+products
+modifiers
+product_modifiers
+product_kitchen_steps
+ingredients
+warehouses
+stock_items
+product_ingredients
+discounts
+floor_plans
+```
+
+Intentionally empty data:
+
+```text
+restaurant_tables
+floor_plan_tables
+orders
+order_items
+kitchen_tasks
+payments
+reservations
+reservation_tables
+invoices
+order_action_logs
+order_transfer_logs
+stock_movements
+```
+
+Restaurant tables are created by the floor plan editor through:
+
+```text
+POST /api/v1/floor-plans/{floor_plan_id}/tables/create-restaurant-table
+```
+
+## Kitchen Preparation Steps
+
+Products are not assigned to only one kitchen section. A menu product can have multiple kitchen preparation steps.
+
+Example:
+
+```text
+Salatka cezar
+- Kuchnia zimna: prepare salad base
+- Stanowisko miesne: prepare chicken or shrimp
+```
+
+When an order item is created, the backend creates one kitchen task for each active product kitchen step.
+
+Kitchen steps for one product are treated as parallel work. The product estimated time is the longest active step, not the sum of all steps. The whole order estimated time is the longest product in the order.
+
+Example:
+
+```text
+Salatka cezar
+- Kuchnia zimna: 7 min
+- Stanowisko miesne: 10 min
+Product estimated time: 10 min
+
+Order:
+- Salatka cezar: 10 min
+- Steak: 20 min
+Order estimated time: 20 min
+```
+
+Preparation steps are managed through:
+
+```text
+GET /api/v1/product-kitchen-steps
+POST /api/v1/product-kitchen-steps
+PATCH /api/v1/product-kitchen-steps/{item_id}
+DELETE /api/v1/product-kitchen-steps/{item_id}
+```
+
+`product_ingredients` describe stock/recipe usage. `product_kitchen_steps` describe who prepares which part of the dish.
 
 ## Tests
 

@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.kitchen_section import KitchenSection
     from app.models.order_item import OrderItem
+    from app.models.product_kitchen_step import ProductKitchenStep
     from app.models.user import User
 
 
@@ -31,6 +32,11 @@ class KitchenTask(Base):
     kitchen_section_id: Mapped[int] = mapped_column(
         ForeignKey("kitchen_sections.id"),
         nullable=False,
+    )
+
+    product_kitchen_step_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_kitchen_steps.id"),
+        nullable=True,
     )
 
     assigned_user_id: Mapped[int | None] = mapped_column(
@@ -66,6 +72,11 @@ class KitchenTask(Base):
 
     kitchen_section: Mapped[KitchenSection] = relationship(
         "KitchenSection",
+        back_populates="kitchen_tasks",
+    )
+
+    product_kitchen_step: Mapped[ProductKitchenStep | None] = relationship(
+        "ProductKitchenStep",
         back_populates="kitchen_tasks",
     )
 

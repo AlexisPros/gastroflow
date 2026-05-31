@@ -202,6 +202,60 @@ def test_add_table_to_floor_plan_reaches_service(monkeypatch):
     assert response.json()["table_id"] == 1
 
 
+def test_create_restaurant_table_on_floor_plan_reaches_service(monkeypatch):
+    async def get_floor_plan(_db, id: int):
+        assert id == 1
+        return make_floor_plan()
+
+    async def create_restaurant_table_on_plan(
+        _db,
+        *,
+        floor_plan,
+        table_number,
+        current_guests,
+        qr_code_url,
+        is_active,
+        position,
+    ):
+        assert floor_plan.id == 1
+        assert table_number == "A1"
+        assert current_guests is None
+        assert qr_code_url is None
+        assert is_active is True
+        assert position.x == Decimal("10.00")
+        return make_floor_plan_table()
+
+    monkeypatch.setattr(crud_floor_plan, "get", get_floor_plan)
+    monkeypatch.setattr(
+        floor_plan_service,
+        "create_restaurant_table_on_plan",
+        create_restaurant_table_on_plan,
+    )
+    override_current_user("MANAGER")
+
+    try:
+        response = client.post(
+            "/api/v1/floor-plans/1/tables/create-restaurant-table",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "table_number": "A1",
+                "position": {
+                    "x": "10.00",
+                    "y": "20.00",
+                    "width": "100.00",
+                    "height": "80.00",
+                    "rotation": "0.00",
+                    "shape": "RECTANGLE",
+                },
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["table_id"] == 1
+
+
 def test_update_floor_plan_table_position_reaches_service(monkeypatch):
     async def get_floor_plan(_db, id: int):
         assert id == 1

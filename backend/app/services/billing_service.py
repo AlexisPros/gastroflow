@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.kitchen_task import KitchenTask
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
@@ -116,6 +117,10 @@ class BillingService:
                 (item.total_price for item in items),
                 Decimal("0.00"),
             )
+            order.estimated_time = await self._calculate_estimated_time(
+                db,
+                order_items=list(items),
+            )
             db.add(order)
 
         await db.commit()
@@ -141,6 +146,25 @@ class BillingService:
             raise ValueError("Some order items do not belong to source order.")
 
         return items
+
+    async def _calculate_estimated_time(
+        self,
+        db: AsyncSession,
+        *,
+        order_items,
+    ) -> int | None:
+        order_item_ids = [item.id for item in order_items]
+        if not order_item_ids:
+            return None
+
+        result = await db.execute(
+            select(KitchenTask.estimated_time).where(
+                KitchenTask.order_item_id.in_(order_item_ids),
+                KitchenTask.estimated_time.is_not(None),
+            ),
+        )
+        estimates = list(result.scalars().all())
+        return max(estimates) if estimates else None
 
     async def _copy_modifiers(
         self,

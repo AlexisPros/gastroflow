@@ -11,6 +11,7 @@ class OrderBase(OrmBaseModel):
     source: str = "WAITER"
     total_amount: Decimal = Decimal("0.00")
     tip_amount: Decimal = Decimal("0.00")
+    estimated_time: int | None = None
 
 
 class OrderCreate(OrderBase):
@@ -25,6 +26,7 @@ class OrderUpdate(OrmBaseModel):
     status: str | None = None
     total_amount: Decimal | None = None
     tip_amount: Decimal | None = None
+    estimated_time: int | None = None
 
 
 class OrderRead(OrderBase):

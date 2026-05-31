@@ -30,6 +30,7 @@ from app.crud import (
     product,
     product_category,
     product_ingredient,
+    product_kitchen_step,
     product_modifier,
     reservation,
     reservation_table,
@@ -91,6 +92,9 @@ from app.schemas import (
     ProductIngredientCreate,
     ProductIngredientRead,
     ProductIngredientUpdate,
+    ProductKitchenStepCreate,
+    ProductKitchenStepRead,
+    ProductKitchenStepUpdate,
     ProductModifierCreate,
     ProductModifierRead,
     ProductModifierUpdate,
@@ -419,6 +423,17 @@ register_crud_routes(
     entity_name="product_ingredient",
     tag="Menu",
     read_roles=KITCHEN_ROLES,
+    write_roles=ADMIN_MANAGER_ROLES,
+)
+register_crud_routes(
+    path="/product-kitchen-steps",
+    crud_obj=product_kitchen_step,
+    create_schema=ProductKitchenStepCreate,
+    update_schema=ProductKitchenStepUpdate,
+    read_schema=ProductKitchenStepRead,
+    entity_name="product_kitchen_step",
+    tag="Menu",
+    read_roles=STAFF_ROLES,
     write_roles=ADMIN_MANAGER_ROLES,
 )
 register_crud_routes(

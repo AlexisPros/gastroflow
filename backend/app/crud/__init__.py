@@ -15,6 +15,7 @@ from app.crud.payment import payment
 from app.crud.product import product
 from app.crud.product_category import product_category
 from app.crud.product_ingredient import product_ingredient
+from app.crud.product_kitchen_step import product_kitchen_step
 from app.crud.product_modifier import product_modifier
 from app.crud.reservation import reservation
 from app.crud.reservation_table import reservation_table

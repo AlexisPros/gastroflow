@@ -44,6 +44,11 @@ from app.schemas.product_ingredient import (
     ProductIngredientRead,
     ProductIngredientUpdate,
 )
+from app.schemas.product_kitchen_step import (
+    ProductKitchenStepCreate,
+    ProductKitchenStepRead,
+    ProductKitchenStepUpdate,
+)
 from app.schemas.product_modifier import (
     ProductModifierCreate,
     ProductModifierRead,

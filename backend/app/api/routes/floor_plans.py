@@ -23,6 +23,14 @@ class AddTableToFloorPlanRequest(BaseModel):
     position: FloorPlanTablePositionUpdate
 
 
+class CreateTableOnFloorPlanRequest(BaseModel):
+    table_number: str
+    current_guests: int | None = None
+    qr_code_url: str | None = None
+    is_active: bool = True
+    position: FloorPlanTablePositionUpdate
+
+
 @router.get("/floor-plans/active", response_model=FloorPlanRead)
 async def get_active_floor_plan(db: DbSession):
     floor_plan = await crud_floor_plan.get_active(db)
@@ -129,6 +137,35 @@ async def add_table_to_floor_plan(
             db,
             floor_plan=floor_plan,
             table_id=body.table_id,
+            position=body.position,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.post(
+    "/floor-plans/{floor_plan_id}/tables/create-restaurant-table",
+    response_model=FloorPlanTableRead,
+)
+async def create_restaurant_table_on_floor_plan(
+    floor_plan_id: int,
+    body: CreateTableOnFloorPlanRequest,
+    db: DbSession,
+):
+    floor_plan = await get_or_404(
+        crud_obj=crud_floor_plan,
+        db=db,
+        id=floor_plan_id,
+        entity_name="floor plan",
+    )
+    try:
+        return await floor_plan_service.create_restaurant_table_on_plan(
+            db,
+            floor_plan=floor_plan,
+            table_number=body.table_number,
+            current_guests=body.current_guests,
+            qr_code_url=body.qr_code_url,
+            is_active=body.is_active,
             position=body.position,
         )
     except ValueError as exc:
