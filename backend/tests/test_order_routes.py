@@ -189,7 +189,16 @@ def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
         assert product_id == 1
         return steps
 
+    async def get_existing_kitchen_task_estimated_time(_db, *, order_item_id: int):
+        assert order_item_id == 1
+        return False, None
+
     monkeypatch.setattr(order_service, "_get_active_product", get_active_product)
+    monkeypatch.setattr(
+        order_service,
+        "_get_existing_kitchen_task_estimated_time",
+        get_existing_kitchen_task_estimated_time,
+    )
     monkeypatch.setattr(
         order_service_module.product_kitchen_step,
         "get_active_by_product",
@@ -219,6 +228,136 @@ def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
     assert [task.kitchen_section_id for task in db.added] == [2, 3]
     assert [task.product_kitchen_step_id for task in db.added] == [1, 2]
     assert estimated_time == 8
+
+
+def test_order_item_does_not_duplicate_existing_kitchen_tasks(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.added = []
+
+        def add(self, obj):
+            self.added.append(obj)
+
+    async def get_existing_kitchen_task_estimated_time(_db, *, order_item_id: int):
+        assert order_item_id == 1
+        return True, 12
+
+    async def get_active_product(_db, *, product_id: int):
+        raise AssertionError("Product should not be loaded when tasks already exist.")
+
+    monkeypatch.setattr(
+        order_service,
+        "_get_existing_kitchen_task_estimated_time",
+        get_existing_kitchen_task_estimated_time,
+    )
+    monkeypatch.setattr(order_service, "_get_active_product", get_active_product)
+
+    db = FakeDb()
+    order_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        unit_price=Decimal("28.00"),
+        total_price=Decimal("28.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    estimated_time = asyncio.run(
+        order_service._create_kitchen_task_for_item(
+            db,
+            order_item=order_item,
+        ),
+    )
+
+    assert db.added == []
+    assert estimated_time == 12
+
+
+def test_confirm_pending_qr_order_records_action_log(monkeypatch):
+    class FakeResult:
+        def __init__(self, values):
+            self.values = values
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.values
+
+    class FakeDb:
+        def __init__(self, order_items):
+            self.order_items = order_items
+            self.added = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            return FakeResult(self.order_items)
+
+        def add(self, obj):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = Order(
+        id=1,
+        table_id=1,
+        waiter_id=None,
+        discount_id=None,
+        source="QR",
+        status="PENDING_CONFIRMATION",
+        created_at=datetime.now(timezone.utc),
+        closed_at=None,
+        total_amount=Decimal("28.00"),
+        tip_amount=Decimal("0.00"),
+    )
+    order_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        unit_price=Decimal("28.00"),
+        total_price=Decimal("28.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    async def create_kitchen_task_for_item(_db, *, order_item):
+        assert order_item.id == 1
+        return 9
+
+    monkeypatch.setattr(
+        order_service,
+        "_create_kitchen_task_for_item",
+        create_kitchen_task_for_item,
+    )
+
+    db = FakeDb([order_item])
+    confirmed_order = asyncio.run(
+        order_service.confirm_pending_qr_order(
+            db,
+            order=order,
+            waiter_id=7,
+        ),
+    )
+
+    action_logs = [
+        obj
+        for obj in db.added
+        if isinstance(obj, OrderActionLog)
+    ]
+    assert confirmed_order.status == "OPEN"
+    assert confirmed_order.waiter_id == 7
+    assert confirmed_order.estimated_time == 9
+    assert len(action_logs) == 1
+    assert action_logs[0].action_type == "QR_ORDER_CONFIRMED"
+    assert action_logs[0].user_id == 7
+    assert db.committed is True
 
 
 def test_product_estimated_time_uses_longest_parallel_step():

@@ -333,6 +333,7 @@ Body:
 ```
 
 After confirmation, the backend assigns the waiter, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks.
+The confirmation step also records an `QR_ORDER_CONFIRMED` action log and avoids creating duplicate kitchen tasks if tasks already exist for the order items.
 
 ## Kitchen Preparation Steps
 

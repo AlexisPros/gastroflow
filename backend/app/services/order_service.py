@@ -8,6 +8,7 @@ from app.crud import order_action_log, order_transfer_log, product_kitchen_step
 from app.models.kitchen_task import KitchenTask
 from app.models.modifier import Modifier
 from app.models.order import Order
+from app.models.order_action_log import OrderActionLog
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
 from app.models.product import Product
@@ -165,6 +166,14 @@ class OrderService:
         order.status = "OPEN"
         order.estimated_time = max(item_estimates) if item_estimates else None
 
+        db.add(
+            OrderActionLog(
+                order_id=order.id,
+                user_id=waiter_id,
+                action_type="QR_ORDER_CONFIRMED",
+                description="QR order confirmed by waiter PIN.",
+            ),
+        )
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -253,6 +262,16 @@ class OrderService:
         *,
         order_item: OrderItem,
     ) -> int | None:
+        (
+            has_existing_tasks,
+            existing_estimated_time,
+        ) = await self._get_existing_kitchen_task_estimated_time(
+            db,
+            order_item_id=order_item.id,
+        )
+        if has_existing_tasks:
+            return existing_estimated_time
+
         product = await self._get_active_product(db, product_id=order_item.product_id)
         kitchen_steps = await product_kitchen_step.get_active_by_product(
             db,
@@ -286,6 +305,25 @@ class OrderService:
         await db.flush()
         return product.preparation_time
 
+    async def _get_existing_kitchen_task_estimated_time(
+        self,
+        db: AsyncSession,
+        *,
+        order_item_id: int,
+    ) -> tuple[bool, int | None]:
+        result = await db.execute(
+            select(KitchenTask.estimated_time).where(
+                KitchenTask.order_item_id == order_item_id,
+            ),
+        )
+        estimates = list(result.scalars().all())
+        known_estimates = [
+            estimate
+            for estimate in estimates
+            if estimate is not None
+        ]
+        return bool(estimates), max(known_estimates) if known_estimates else None
+
     def _calculate_product_estimated_time(
         self,
         step_estimates: list[int | None],
@@ -313,7 +351,11 @@ class OrderService:
                 KitchenTask.estimated_time.is_not(None),
             ),
         )
-        estimates = list(result.scalars().all())
+        estimates = [
+            estimate
+            for estimate in result.scalars().all()
+            if estimate is not None
+        ]
         return max(estimates) if estimates else None
 
     async def _get_active_product(self, db: AsyncSession, *, product_id: int) -> Product:
