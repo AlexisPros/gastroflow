@@ -131,6 +131,45 @@ class OrderService:
         await db.refresh(order)
         return order
 
+    async def confirm_pending_qr_order(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        waiter_id: int,
+    ) -> Order:
+        if order.source != "QR":
+            raise ValueError("Only QR orders can be confirmed with this operation.")
+
+        if order.status != "PENDING_CONFIRMATION":
+            raise ValueError("QR order is not pending confirmation.")
+
+        result = await db.execute(
+            select(OrderItem).where(OrderItem.order_id == order.id),
+        )
+        order_items = list(result.scalars().all())
+
+        if not order_items:
+            raise ValueError("QR order must contain at least one item.")
+
+        item_estimates: list[int] = []
+        for order_item in order_items:
+            item_estimated_time = await self._create_kitchen_task_for_item(
+                db,
+                order_item=order_item,
+            )
+            if item_estimated_time is not None:
+                item_estimates.append(item_estimated_time)
+
+        order.waiter_id = waiter_id
+        order.status = "OPEN"
+        order.estimated_time = max(item_estimates) if item_estimates else None
+
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        return order
+
     async def transfer_order(
         self,
         db: AsyncSession,

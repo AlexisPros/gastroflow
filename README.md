@@ -312,6 +312,28 @@ waiter_id: null
 
 Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
 
+Waiters, managers, and admins can list QR orders waiting for confirmation:
+
+```text
+GET /api/v1/qr/orders/pending
+```
+
+Any waiter can accept a pending QR order by entering a PIN:
+
+```text
+POST /api/v1/qr/orders/{order_id}/confirm
+```
+
+Body:
+
+```json
+{
+  "pin": "1234"
+}
+```
+
+After confirmation, the backend assigns the waiter, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks.
+
 ## Kitchen Preparation Steps
 
 Products are not assigned to only one kitchen section. A menu product can have multiple kitchen preparation steps.
