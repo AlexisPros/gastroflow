@@ -1,4 +1,6 @@
 from app.models.user import User
+from app.models.employee_shift import EmployeeShift
+from app.models.employee_shift_report import EmployeeShiftReport
 from app.models.restaurant_table import RestaurantTable
 from app.models.reservation import Reservation
 from app.models.reservation_table import ReservationTable

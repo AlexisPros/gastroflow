@@ -266,6 +266,8 @@ reservation_tables
 invoices
 order_action_logs
 order_transfer_logs
+employee_shifts
+employee_shift_reports
 stock_movements
 ```
 

@@ -39,6 +39,8 @@ DEV_USERS = [
 ]
 
 OPERATIONAL_TABLES = [
+    "employee_shift_reports",
+    "employee_shifts",
     "order_action_logs",
     "order_transfer_logs",
     "invoices",
@@ -56,6 +58,8 @@ OPERATIONAL_TABLES = [
 
 TABLES_WITH_SERIAL_ID = [
     "discounts",
+    "employee_shift_reports",
+    "employee_shifts",
     "floor_plans",
     "floor_plan_tables",
     "ingredients",
