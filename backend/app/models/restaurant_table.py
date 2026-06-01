@@ -42,6 +42,13 @@ class RestaurantTable(Base):
         nullable=True,
     )
 
+    qr_token: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+        index=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

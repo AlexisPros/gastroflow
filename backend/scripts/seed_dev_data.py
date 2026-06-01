@@ -30,27 +30,65 @@ from app.models.user import User
 from app.models.warehouse import Warehouse
 
 DEV_PASSWORD = "demo1234"
-DEV_PIN = "1234"
+DEV_USERS = [
+    ("Admin", "User", "admin@gastroflow.dev", "ADMIN", "1001"),
+    ("Manager", "User", "manager@gastroflow.dev", "MANAGER", "1002"),
+    ("Waiter", "User", "waiter@gastroflow.dev", "WAITER", "1234"),
+    ("Kitchen", "User", "kitchen@gastroflow.dev", "KITCHEN", "2001"),
+    ("Bartender", "User", "bar@gastroflow.dev", "BARTENDER", "3001"),
+]
+
+OPERATIONAL_TABLES = [
+    "order_action_logs",
+    "order_transfer_logs",
+    "invoices",
+    "payments",
+    "kitchen_tasks",
+    "order_item_modifiers",
+    "order_items",
+    "orders",
+    "reservation_tables",
+    "reservations",
+    "floor_plan_tables",
+    "restaurant_tables",
+    "stock_movements",
+]
 
 TABLES_WITH_SERIAL_ID = [
     "discounts",
     "floor_plans",
     "floor_plan_tables",
     "ingredients",
+    "invoices",
     "kitchen_sections",
+    "kitchen_tasks",
     "modifiers",
+    "order_action_logs",
+    "order_item_modifiers",
+    "order_items",
+    "order_transfer_logs",
+    "orders",
+    "payments",
     "product_categories",
     "products",
     "product_ingredients",
     "product_kitchen_steps",
     "product_modifiers",
+    "reservations",
+    "reservation_tables",
     "restaurant_config",
     "restaurant_tables",
     "stock_items",
+    "stock_movements",
     "system_modules",
     "users",
     "warehouses",
 ]
+
+
+async def clear_operational_data(db: AsyncSession) -> None:
+    for table_name in OPERATIONAL_TABLES:
+        await db.execute(text(f"DELETE FROM {table_name}"))
 
 
 async def reset_primary_key_sequences(db: AsyncSession) -> None:
@@ -96,15 +134,7 @@ async def get_or_create(
 
 
 async def seed_users(db: AsyncSession) -> None:
-    users = [
-        ("Admin", "User", "admin@gastroflow.dev", "ADMIN"),
-        ("Manager", "User", "manager@gastroflow.dev", "MANAGER"),
-        ("Waiter", "User", "waiter@gastroflow.dev", "WAITER"),
-        ("Kitchen", "User", "kitchen@gastroflow.dev", "KITCHEN"),
-        ("Bartender", "User", "bar@gastroflow.dev", "BARTENDER"),
-    ]
-
-    for first_name, last_name, email, role in users:
+    for first_name, last_name, email, role, pin in DEV_USERS:
         legacy_email = email.replace("@gastroflow.dev", "@gastroflow.local")
         user = await get_one(db, User, email=email)
         if user is None:
@@ -118,7 +148,7 @@ async def seed_users(db: AsyncSession) -> None:
         user.last_name = last_name
         user.email = email
         user.password_hash = get_password_hash(DEV_PASSWORD)
-        user.pin_hash = get_pin_hash(DEV_PIN)
+        user.pin_hash = get_pin_hash(pin)
         user.role = role
         user.is_active = True
 
@@ -503,13 +533,14 @@ async def seed_floor_plan(db: AsyncSession) -> None:
 
 async def seed() -> None:
     async with AsyncSessionLocal() as db:
-        await reset_primary_key_sequences(db)
+        await clear_operational_data(db)
         await seed_users(db)
         await seed_restaurant_config(db)
         menu = await seed_menu(db)
         await seed_stock(db, menu["products"])
         await seed_discounts(db)
         await seed_floor_plan(db)
+        await reset_primary_key_sequences(db)
         await db.commit()
 
 
@@ -517,4 +548,6 @@ if __name__ == "__main__":
     asyncio.run(seed())
     print("Seed data created.")
     print("Demo password for all users:", DEV_PASSWORD)
-    print("Demo PIN for all users:", DEV_PIN)
+    print("Demo users:")
+    for _, _, email, role, pin in DEV_USERS:
+        print(f"- {email} ({role}), PIN: {pin}")

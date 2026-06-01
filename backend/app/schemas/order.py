@@ -8,6 +8,7 @@ class OrderBase(OrmBaseModel):
     table_id: int | None = None
     waiter_id: int | None = None
     discount_id: int | None = None
+    guest_count: int | None = None
     source: str = "WAITER"
     total_amount: Decimal = Decimal("0.00")
     tip_amount: Decimal = Decimal("0.00")
@@ -22,6 +23,7 @@ class OrderUpdate(OrmBaseModel):
     table_id: int | None = None
     waiter_id: int | None = None
     discount_id: int | None = None
+    guest_count: int | None = None
     source: str | None = None
     status: str | None = None
     total_amount: Decimal | None = None

@@ -30,21 +30,20 @@ http://127.0.0.1:8000/docs
 
 ## Demo Users
 
-All seeded users use the same password and PIN:
+All seeded users use the same password:
 
 ```text
 password: demo1234
-PIN: 1234
 ```
 
-Available demo accounts:
+Seeded users use different PINs so QR order confirmation can identify exactly which worker accepted the order:
 
 ```text
-admin@gastroflow.dev
-manager@gastroflow.dev
-waiter@gastroflow.dev
-kitchen@gastroflow.dev
-bar@gastroflow.dev
+admin@gastroflow.dev    PIN: 1001
+manager@gastroflow.dev  PIN: 1002
+waiter@gastroflow.dev   PIN: 1234
+kitchen@gastroflow.dev  PIN: 2001
+bar@gastroflow.dev      PIN: 3001
 ```
 
 ## Swagger Authorization
@@ -84,7 +83,7 @@ Body:
 ```json
 {
   "user_id": 1,
-  "pin": "1234"
+  "pin": "1001"
 }
 ```
 
@@ -231,7 +230,7 @@ The KSeF endpoint is a mock and only simulates sending the invoice.
 
 ## Seed Data Strategy
 
-The development seed keeps reference data ready, but leaves operational data empty for realistic testing.
+The development seed keeps reference data ready, but leaves operational data empty for realistic testing. Every seed run clears operational data before recreating/updating reference data.
 
 Seeded data:
 
@@ -275,6 +274,92 @@ Restaurant tables are created by the floor plan editor through:
 ```text
 POST /api/v1/floor-plans/{floor_plan_id}/tables/create-restaurant-table
 ```
+
+When a restaurant table is created, the backend generates permanent QR data:
+
+```text
+qr_token
+qr_code_url
+```
+
+The token is stable and should not be regenerated during normal table updates. By default, QR URLs use:
+
+```text
+http://localhost:3000/qr/{qr_token}
+```
+
+For another frontend domain, set:
+
+```text
+PUBLIC_MENU_BASE_URL=https://menu.example.com/qr
+```
+
+The public QR flow starts with these endpoints and does not require JWT authorization:
+
+```text
+GET /api/v1/qr/{qr_token}/table
+POST /api/v1/qr/{qr_token}/orders
+```
+
+The QR order endpoint creates an order with:
+
+```text
+source: QR
+status: PENDING_CONFIRMATION
+waiter_id: null
+```
+
+The backend accepts a new QR order only when the table is active, has status `FREE`, and has no active order with status `PENDING_CONFIRMATION` or `OPEN`.
+
+QR order flow updates table status:
+
+```text
+QR order created   -> table.status = PENDING_ORDER
+QR order confirmed -> table.status = OCCUPIED
+QR order rejected  -> table.status = FREE
+```
+
+Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
+
+Waiters, managers, and admins can list QR orders waiting for confirmation:
+
+```text
+GET /api/v1/qr/orders/pending
+```
+
+Any waiter can accept a pending QR order by entering a PIN:
+
+```text
+POST /api/v1/qr/orders/{order_id}/confirm
+```
+
+Body:
+
+```json
+{
+  "pin": "1234"
+}
+```
+
+After confirmation, the backend assigns the waiter, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks.
+The confirmation step also records an `QR_ORDER_CONFIRMED` action log and avoids creating duplicate kitchen tasks if tasks already exist for the order items.
+
+Any waiter can reject a pending QR order by entering a PIN:
+
+```text
+POST /api/v1/qr/orders/{order_id}/reject
+```
+
+Body:
+
+```json
+{
+  "pin": "1234",
+  "reason": "Guest left the table"
+}
+```
+
+After rejection, the backend assigns the rejecting waiter, changes the order status to `REJECTED`, and records a `QR_ORDER_REJECTED` action log.
 
 ## Kitchen Preparation Steps
 

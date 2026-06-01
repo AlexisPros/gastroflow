@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.base import CRUDBase
@@ -9,6 +10,25 @@ from app.schemas.order import OrderCreate, OrderUpdate
 
 
 class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
+    async def get_pending_qr_orders(
+        self,
+        db: AsyncSession,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> list[Order]:
+        result = await db.execute(
+            select(Order)
+            .where(
+                Order.source == "QR",
+                Order.status == "PENDING_CONFIRMATION",
+            )
+            .order_by(Order.created_at.asc())
+            .offset(skip)
+            .limit(limit),
+        )
+        return list(result.scalars().all())
+
     async def change_table(
         self,
         db: AsyncSession,

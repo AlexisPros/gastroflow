@@ -44,6 +44,11 @@ class Order(Base):
         nullable=True,
     )
 
+    guest_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     source: Mapped[str] = mapped_column(
         String(50),
         nullable=False,

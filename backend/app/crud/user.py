@@ -70,5 +70,19 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         )
         return result.scalar_one_or_none()
 
+    async def get_active_by_roles(
+        self,
+        db: AsyncSession,
+        *,
+        roles: set[str],
+    ) -> list[User]:
+        result = await db.execute(
+            select(User).where(
+                User.is_active.is_(True),
+                User.role.in_(roles),
+            ),
+        )
+        return list(result.scalars().all())
+
 
 user = CRUDUser(User)

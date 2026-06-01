@@ -5,6 +5,7 @@ class RestaurantTableBase(OrmBaseModel):
     table_number: str
     current_guests: int | None = None
     qr_code_url: str | None = None
+    qr_token: str | None = None
     is_active: bool = True
 
 
@@ -17,6 +18,7 @@ class RestaurantTableUpdate(OrmBaseModel):
     current_guests: int | None = None
     status: str | None = None
     qr_code_url: str | None = None
+    qr_token: str | None = None
     is_active: bool | None = None
 
 

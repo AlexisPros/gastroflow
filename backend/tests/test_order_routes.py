@@ -1,12 +1,14 @@
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
-from importlib import import_module
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.crud import order as crud_order
+from app.crud import product_kitchen_step as product_kitchen_step_crud
 from app.main import app
 from app.models.order import Order
 from app.models.order_action_log import OrderActionLog
@@ -14,10 +16,10 @@ from app.models.order_item import OrderItem
 from app.models.product import Product
 from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.order_transfer_log import OrderTransferLog
+from app.models.restaurant_table import RestaurantTable
 from app.models.user import User
 from app.services import discount_service, order_service
-
-order_service_module = import_module("app.services.order_service")
+from app.services.order_service import OrderItemRequest
 
 
 client = TestClient(app)
@@ -141,9 +143,9 @@ def test_create_order_with_items_reaches_service(monkeypatch):
 def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
     class FakeDb:
         def __init__(self):
-            self.added = []
+            self.added: list[Any] = []
 
-        def add(self, obj):
+        def add(self, obj: Any):
             self.added.append(obj)
 
         async def flush(self):
@@ -189,9 +191,18 @@ def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
         assert product_id == 1
         return steps
 
+    async def get_existing_kitchen_task_estimated_time(_db, *, order_item_id: int):
+        assert order_item_id == 1
+        return False, None
+
     monkeypatch.setattr(order_service, "_get_active_product", get_active_product)
     monkeypatch.setattr(
-        order_service_module.product_kitchen_step,
+        order_service,
+        "_get_existing_kitchen_task_estimated_time",
+        get_existing_kitchen_task_estimated_time,
+    )
+    monkeypatch.setattr(
+        product_kitchen_step_crud,
         "get_active_by_product",
         get_active_by_product,
     )
@@ -210,7 +221,7 @@ def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
 
     estimated_time = asyncio.run(
         order_service._create_kitchen_task_for_item(
-            db,
+            cast(AsyncSession, db),
             order_item=order_item,
         ),
     )
@@ -219,6 +230,419 @@ def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
     assert [task.kitchen_section_id for task in db.added] == [2, 3]
     assert [task.product_kitchen_step_id for task in db.added] == [1, 2]
     assert estimated_time == 8
+
+
+def test_order_item_does_not_duplicate_existing_kitchen_tasks(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+    async def get_existing_kitchen_task_estimated_time(_db, *, order_item_id: int):
+        assert order_item_id == 1
+        return True, 12
+
+    async def get_active_product(_db, *, product_id: int):
+        raise AssertionError("Product should not be loaded when tasks already exist.")
+
+    monkeypatch.setattr(
+        order_service,
+        "_get_existing_kitchen_task_estimated_time",
+        get_existing_kitchen_task_estimated_time,
+    )
+    monkeypatch.setattr(order_service, "_get_active_product", get_active_product)
+
+    db = FakeDb()
+    order_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        unit_price=Decimal("28.00"),
+        total_price=Decimal("28.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    estimated_time = asyncio.run(
+        order_service._create_kitchen_task_for_item(
+            cast(AsyncSession, db),
+            order_item=order_item,
+        ),
+    )
+
+    assert db.added == []
+    assert estimated_time == 12
+
+
+def test_confirm_pending_qr_order_records_action_log(monkeypatch):
+    class FakeResult:
+        def __init__(self, values: list[Any] | None = None, value: Any = None):
+            self.values = values
+            self.value = value
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.values
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self, order_items, table):
+            self.order_items = order_items
+            self.table = table
+            self.execute_count = 0
+            self.added: list[Any] = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            self.execute_count += 1
+            if self.execute_count == 1:
+                return FakeResult(values=self.order_items)
+
+            return FakeResult(value=self.table)
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = Order(
+        id=1,
+        table_id=1,
+        waiter_id=None,
+        discount_id=None,
+        source="QR",
+        status="PENDING_CONFIRMATION",
+        created_at=datetime.now(timezone.utc),
+        closed_at=None,
+        total_amount=Decimal("28.00"),
+        tip_amount=Decimal("0.00"),
+    )
+    order_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        unit_price=Decimal("28.00"),
+        total_price=Decimal("28.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    async def create_kitchen_task_for_item(_db, *, order_item):
+        assert order_item.id == 1
+        return 9
+
+    monkeypatch.setattr(
+        order_service,
+        "_create_kitchen_task_for_item",
+        create_kitchen_task_for_item,
+    )
+
+    table = RestaurantTable(
+        id=1,
+        table_number="A1",
+        current_guests=None,
+        status="PENDING_ORDER",
+        qr_code_url="http://localhost:3000/qr/a1-token",
+        qr_token="a1-token",
+        is_active=True,
+    )
+    db = FakeDb([order_item], table)
+    confirmed_order = asyncio.run(
+        order_service.confirm_pending_qr_order(
+            cast(AsyncSession, db),
+            order=order,
+            waiter_id=7,
+        ),
+    )
+
+    action_logs = [
+        obj
+        for obj in db.added
+        if isinstance(obj, OrderActionLog)
+    ]
+    assert confirmed_order.status == "OPEN"
+    assert confirmed_order.waiter_id == 7
+    assert confirmed_order.estimated_time == 9
+    assert table.status == "OCCUPIED"
+    assert len(action_logs) == 1
+    assert action_logs[0].action_type == "QR_ORDER_CONFIRMED"
+    assert action_logs[0].user_id == 7
+    assert db.committed is True
+
+
+def test_reject_pending_qr_order_records_action_log():
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self, table):
+            self.table = table
+            self.added: list[Any] = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            return FakeResult(self.table)
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = Order(
+        id=1,
+        table_id=1,
+        waiter_id=None,
+        discount_id=None,
+        source="QR",
+        status="PENDING_CONFIRMATION",
+        created_at=datetime.now(timezone.utc),
+        closed_at=None,
+        total_amount=Decimal("28.00"),
+        tip_amount=Decimal("0.00"),
+    )
+
+    table = RestaurantTable(
+        id=1,
+        table_number="A1",
+        current_guests=None,
+        status="PENDING_ORDER",
+        qr_code_url="http://localhost:3000/qr/a1-token",
+        qr_token="a1-token",
+        is_active=True,
+    )
+    db = FakeDb(table)
+    rejected_order = asyncio.run(
+        order_service.reject_pending_qr_order(
+            cast(AsyncSession, db),
+            order=order,
+            waiter_id=7,
+            reason="Guest left the table",
+        ),
+    )
+
+    action_logs = [
+        obj
+        for obj in db.added
+        if isinstance(obj, OrderActionLog)
+    ]
+    assert rejected_order.status == "REJECTED"
+    assert rejected_order.waiter_id == 7
+    assert table.status == "FREE"
+    assert len(action_logs) == 1
+    assert action_logs[0].action_type == "QR_ORDER_REJECTED"
+    assert action_logs[0].description == "Guest left the table"
+    assert db.committed is True
+
+
+def test_create_pending_qr_order_rejects_occupied_table():
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+
+        async def execute(self, _statement):
+            return FakeResult(
+                RestaurantTable(
+                    id=1,
+                    table_number="A1",
+                    current_guests=2,
+                    status="OCCUPIED",
+                    qr_code_url="http://localhost:3000/qr/a1-token",
+                    qr_token="a1-token",
+                    is_active=True,
+                ),
+            )
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+    db = FakeDb()
+
+    try:
+        asyncio.run(
+            order_service.create_pending_qr_order(
+                cast(AsyncSession, db),
+                table_id=1,
+                guest_count=2,
+                items=[
+                    OrderItemRequest(
+                        product_id=1,
+                        quantity=1,
+                    ),
+                ],
+            ),
+        )
+    except ValueError as exc:
+        assert str(exc) == "Restaurant table is not free."
+    else:
+        raise AssertionError("Expected occupied table to reject QR order.")
+
+    assert db.added == []
+
+
+def test_create_pending_qr_order_rejects_table_with_active_order():
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self):
+            self.execute_count = 0
+            self.added: list[Any] = []
+
+        async def execute(self, _statement):
+            self.execute_count += 1
+            if self.execute_count == 1:
+                return FakeResult(
+                    RestaurantTable(
+                        id=1,
+                        table_number="A1",
+                        current_guests=None,
+                        status="FREE",
+                        qr_code_url="http://localhost:3000/qr/a1-token",
+                        qr_token="a1-token",
+                        is_active=True,
+                    ),
+                )
+
+            return FakeResult(make_order())
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+    db = FakeDb()
+
+    try:
+        asyncio.run(
+            order_service.create_pending_qr_order(
+                cast(AsyncSession, db),
+                table_id=1,
+                guest_count=2,
+                items=[
+                    OrderItemRequest(
+                        product_id=1,
+                        quantity=1,
+                    ),
+                ],
+            ),
+        )
+    except ValueError as exc:
+        assert str(exc) == "Restaurant table already has an active order."
+    else:
+        raise AssertionError("Expected active table order to reject QR order.")
+
+    assert db.added == []
+
+
+def test_create_pending_qr_order_sets_table_pending_status(monkeypatch):
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self, table):
+            self.table = table
+            self.execute_count = 0
+            self.added: list[Any] = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            self.execute_count += 1
+            if self.execute_count == 1:
+                return FakeResult(self.table)
+
+            return FakeResult(None)
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def flush(self):
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    async def create_order_item(_db, *, order_id, item_request):
+        return (
+            OrderItem(
+                id=1,
+                order_id=order_id,
+                product_id=item_request.product_id,
+                quantity=item_request.quantity,
+                unit_price=Decimal("28.00"),
+                total_price=Decimal("28.00"),
+                status="NEW",
+                notes=None,
+            ),
+            Decimal("28.00"),
+        )
+
+    monkeypatch.setattr(order_service, "_create_order_item", create_order_item)
+
+    table = RestaurantTable(
+        id=1,
+        table_number="A1",
+        current_guests=None,
+        status="FREE",
+        qr_code_url="http://localhost:3000/qr/a1-token",
+        qr_token="a1-token",
+        is_active=True,
+    )
+    db = FakeDb(table)
+
+    order = asyncio.run(
+        order_service.create_pending_qr_order(
+            cast(AsyncSession, db),
+            table_id=1,
+            guest_count=2,
+            items=[
+                OrderItemRequest(
+                    product_id=1,
+                    quantity=1,
+                ),
+            ],
+        ),
+    )
+
+    assert order.status == "PENDING_CONFIRMATION"
+    assert table.status == "PENDING_ORDER"
+    assert table in db.added
+    assert db.committed is True
 
 
 def test_product_estimated_time_uses_longest_parallel_step():
