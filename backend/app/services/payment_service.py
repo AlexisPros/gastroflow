@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.crud import order as crud_order
 from app.models.order import Order
 from app.models.payment import Payment
 
@@ -28,14 +28,11 @@ class PaymentService:
         db.add(payment)
 
         if close_order:
-            order.status = "CLOSED"
-            order.closed_at = datetime.now(timezone.utc)
-            db.add(order)
+            await crud_order.close(db, db_obj=order)
+        else:
+            await db.commit()
 
-        await db.commit()
         await db.refresh(payment)
-        if close_order:
-            await db.refresh(order)
 
         return payment
 

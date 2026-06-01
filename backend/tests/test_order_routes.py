@@ -653,6 +653,107 @@ def test_product_estimated_time_uses_longest_parallel_step():
     assert estimated_time == 10
 
 
+def test_close_order_releases_table_when_no_other_active_orders():
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self, table):
+            self.table = table
+            self.execute_count = 0
+            self.added: list[Any] = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            self.execute_count += 1
+            if self.execute_count == 1:
+                return FakeResult(None)
+
+            return FakeResult(self.table)
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = make_order()
+    table = RestaurantTable(
+        id=1,
+        table_number="A1",
+        current_guests=2,
+        status="OCCUPIED",
+        qr_code_url="http://localhost:3000/qr/a1-token",
+        qr_token="a1-token",
+        is_active=True,
+    )
+    db = FakeDb(table)
+
+    closed_order = asyncio.run(
+        crud_order.close(
+            cast(AsyncSession, db),
+            db_obj=order,
+        ),
+    )
+
+    assert closed_order.status == "CLOSED"
+    assert closed_order.closed_at is not None
+    assert table.status == "FREE"
+    assert table.current_guests is None
+    assert table in db.added
+    assert db.committed is True
+
+
+def test_close_order_keeps_table_occupied_when_other_order_is_active():
+    class FakeResult:
+        def __init__(self, value: Any):
+            self.value = value
+
+        def scalar_one_or_none(self):
+            return self.value
+
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+            self.committed = False
+
+        async def execute(self, _statement):
+            other_order = make_order()
+            other_order.id = 2
+            return FakeResult(other_order)
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = make_order()
+    db = FakeDb()
+
+    closed_order = asyncio.run(
+        crud_order.close(
+            cast(AsyncSession, db),
+            db_obj=order,
+        ),
+    )
+
+    assert closed_order.status == "CLOSED"
+    assert closed_order.closed_at is not None
+    assert db.added == [order]
+    assert db.committed is True
+
+
 def test_close_order_reaches_crud(monkeypatch):
     async def get(_db, id: int):
         assert id == 1

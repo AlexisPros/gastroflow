@@ -1,7 +1,10 @@
+import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import Any, cast
 
 from fastapi.testclient import TestClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.crud import kitchen_task as crud_kitchen_task
@@ -221,6 +224,45 @@ def test_payment_register_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["method"] == "CARD"
     assert response.json()["amount"] == "25.00"
+
+
+def test_payment_register_with_close_order_uses_order_close(monkeypatch):
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+            self.refreshed: list[Any] = []
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def refresh(self, obj: Any):
+            self.refreshed.append(obj)
+
+    async def close(_db, *, db_obj):
+        assert db_obj.id == 1
+        db_obj.status = "CLOSED"
+        db_obj.closed_at = datetime.now(timezone.utc)
+        return db_obj
+
+    monkeypatch.setattr(crud_order, "close", close)
+
+    order = make_order()
+    db = FakeDb()
+    payment = asyncio.run(
+        payment_service.register_payment(
+            cast(AsyncSession, db),
+            order=order,
+            method="CARD",
+            amount=Decimal("25.00"),
+            close_order=True,
+        ),
+    )
+
+    assert payment.method == "CARD"
+    assert payment.amount == Decimal("25.00")
+    assert order.status == "CLOSED"
+    assert payment in db.added
+    assert payment in db.refreshed
 
 
 def test_payment_cancel_reaches_service(monkeypatch):
