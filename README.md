@@ -317,7 +317,10 @@ QR order flow updates table status:
 QR order created   -> table.status = PENDING_ORDER
 QR order confirmed -> table.status = OCCUPIED
 QR order rejected  -> table.status = FREE
+Order closed       -> table.status = FREE
 ```
+
+When an order is closed, the backend releases the table only if there is no other active order for the same table. It also clears `current_guests`.
 
 Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
 
