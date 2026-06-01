@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from app.api.deps import DbSession, RequireOrderRole, get_or_404, raise_bad_request
+from app.core.websocket_manager import websocket_manager
 from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
 from app.services import (
@@ -145,7 +146,18 @@ async def close_order(order_id: int, db: DbSession):
         id=order_id,
         entity_name="order",
     )
-    return await crud_order.close(db, db_obj=order)
+    order = await crud_order.close(db, db_obj=order)
+    await websocket_manager.broadcast_many(
+        channels=["waiters", "floor", "managers"],
+        event="order_closed",
+        data={
+            "order_id": order.id,
+            "table_id": order.table_id,
+            "status": order.status,
+            "table_status": "FREE",
+        },
+    )
+    return order
 
 
 @router.post("/orders/{order_id}/transfer", response_model=OrderTransferLogRead)

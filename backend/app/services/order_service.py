@@ -4,6 +4,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.websocket_manager import websocket_manager
 from app.crud import order_action_log, order_transfer_log, product_kitchen_step
 from app.crud import employee_shift as crud_employee_shift
 from app.models.kitchen_task import KitchenTask
@@ -83,6 +84,17 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor"],
+            event="order_created",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "waiter_id": order.waiter_id,
+                "source": order.source,
+                "status": order.status,
+            },
+        )
         return order
 
     async def create_pending_qr_order(
@@ -131,6 +143,17 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor"],
+            event="qr_order_created",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "guest_count": order.guest_count,
+                "status": order.status,
+                "table_status": table.status,
+            },
+        )
         return order
 
     async def reject_pending_qr_order(
@@ -166,6 +189,17 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor"],
+            event="qr_order_rejected",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "waiter_id": order.waiter_id,
+                "status": order.status,
+                "table_status": "FREE",
+            },
+        )
         return order
 
     async def recalculate_total(self, db: AsyncSession, *, order: Order) -> Order:
@@ -191,6 +225,19 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar", "floor"],
+            event="qr_order_confirmed",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "waiter_id": order.waiter_id,
+                "shift_id": order.shift_id,
+                "status": order.status,
+                "estimated_time": order.estimated_time,
+                "table_status": "OCCUPIED",
+            },
+        )
         return order
 
     async def _ensure_table_accepts_qr_order(

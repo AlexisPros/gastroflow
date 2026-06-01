@@ -111,6 +111,39 @@ GET /api/v1/reports/operations/daily
 Each endpoint accepts an optional `report_date` query parameter, for example `2026-05-26`.
 Sales totals are counted from closed orders and completed payments. Kitchen and bar production totals are counted from kitchen tasks grouped by section.
 
+## WebSocket Live Updates
+
+The backend exposes WebSocket channels for live POS updates:
+
+```text
+WS /api/v1/ws/waiters?token={JWT}
+WS /api/v1/ws/kitchen?token={JWT}
+WS /api/v1/ws/bar?token={JWT}
+WS /api/v1/ws/floor?token={JWT}
+WS /api/v1/ws/managers?token={JWT}
+```
+
+The `token` value is the same JWT access token returned by login.
+
+Main events:
+
+```text
+order_created
+qr_order_created
+qr_order_confirmed
+qr_order_rejected
+kitchen_task_started
+kitchen_task_completed
+payment_registered
+payment_cancelled
+payment_refunded
+order_closed
+```
+
+Frontend screens should subscribe only to the channels they need. For example, waiter tablets subscribe to `waiters`, the kitchen display subscribes to `kitchen`, the bar display subscribes to `bar`, and the floor plan subscribes to `floor`.
+
+Channel access is role-based: managers/admins can access manager reports and operational channels, waiters can access waiter/floor updates, kitchen workers can access kitchen updates, and bartenders can access bar updates.
+
 ## Manual API Smoke Test
 
 Use this flow in Swagger to check the main POS scenario.
