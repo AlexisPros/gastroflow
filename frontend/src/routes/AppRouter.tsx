@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 import { AppLayout } from "../layouts/AppLayout";
 import { DashboardPage } from "../pages/DashboardPage";
+import { FloorPlanPage } from "../pages/FloorPlanPage";
 import { LoginPage } from "../pages/LoginPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -27,12 +28,7 @@ const router = createBrowserRouter([
             children: [
               {
                 path: routes.floor,
-                element: (
-                  <PlaceholderPage
-                    title="Floor Plan"
-                    description="Room map, table selection and live table statuses."
-                  />
-                ),
+                element: <FloorPlanPage />,
               },
               {
                 path: routes.waiter,
