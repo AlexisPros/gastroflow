@@ -1,0 +1,280 @@
+:root {
+  color: #172026;
+  background: #f4f7f5;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 32px;
+  background:
+    linear-gradient(120deg, rgba(22, 96, 88, 0.12), transparent 45%),
+    #f4f7f5;
+}
+
+.login-panel {
+  display: grid;
+  width: min(420px, 100%);
+  gap: 28px;
+  padding: 32px;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(19, 35, 32, 0.08);
+}
+
+.login-panel h1,
+.page-stack h1 {
+  margin-top: 8px;
+  font-size: 32px;
+  line-height: 1.1;
+}
+
+.form-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.form-stack label {
+  display: grid;
+  gap: 8px;
+  color: #40514c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.form-stack input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid #c8d2cc;
+  border-radius: 6px;
+  background: #fbfcfb;
+  color: #172026;
+}
+
+.form-stack input:focus {
+  border-color: #1f7a68;
+  outline: 3px solid rgba(31, 122, 104, 0.16);
+}
+
+.primary-button,
+.ghost-button {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.primary-button {
+  background: #1f7a68;
+  color: #ffffff;
+}
+
+.primary-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.ghost-button {
+  border-color: #c8d2cc;
+  background: #ffffff;
+  color: #172026;
+}
+
+.error-box {
+  padding: 12px;
+  border: 1px solid #f0b8ae;
+  border-radius: 6px;
+  background: #fff1ee;
+  color: #9f2f20;
+}
+
+.app-shell {
+  display: grid;
+  min-height: 100vh;
+  grid-template-columns: 248px minmax(0, 1fr);
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding: 24px;
+  border-right: 1px solid #d7dfda;
+  background: #ffffff;
+}
+
+.brand {
+  font-size: 22px;
+  font-weight: 900;
+}
+
+.nav-list {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-link {
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #53645f;
+  font-weight: 800;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  background: #e7f0ed;
+  color: #176353;
+}
+
+.workspace {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: auto 1fr;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 72px;
+  padding: 16px 28px;
+  border-bottom: 1px solid #d7dfda;
+  background: #ffffff;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.role-pill {
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: #172026;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.page-surface {
+  padding: 28px;
+}
+
+.page-stack {
+  display: grid;
+  gap: 24px;
+}
+
+.eyebrow {
+  color: #60716c;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.muted {
+  margin-top: 10px;
+  color: #60716c;
+  line-height: 1.55;
+}
+
+.action-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 14px;
+}
+
+.action-card,
+.module-placeholder {
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.action-card {
+  display: grid;
+  min-height: 136px;
+  gap: 12px;
+  padding: 18px;
+}
+
+.action-card:hover {
+  border-color: #1f7a68;
+  box-shadow: 0 12px 28px rgba(19, 35, 32, 0.08);
+}
+
+.action-card h2 {
+  font-size: 18px;
+}
+
+.action-card p,
+.module-placeholder p {
+  color: #60716c;
+  line-height: 1.5;
+}
+
+.module-placeholder {
+  display: grid;
+  gap: 8px;
+  padding: 22px;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    gap: 16px;
+    border-right: 0;
+    border-bottom: 1px solid #d7dfda;
+  }
+
+  .nav-list {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
