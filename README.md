@@ -99,6 +99,18 @@ GET /api/v1/shift-reports
 When a shift is closed, the backend saves a shift report with sales, tips, discounts, payment methods, and sold item breakdown.
 The backend rejects shift closing while the shift still has orders with `OPEN` or `PENDING_CONFIRMATION` status.
 
+Daily manager reports are generated from closed orders and production tasks:
+
+```text
+GET /api/v1/reports/sales/daily
+GET /api/v1/reports/kitchen/daily
+GET /api/v1/reports/bar/daily
+GET /api/v1/reports/operations/daily
+```
+
+Each endpoint accepts an optional `report_date` query parameter, for example `2026-05-26`.
+Sales totals are counted from closed orders and completed payments. Kitchen and bar production totals are counted from kitchen tasks grouped by section.
+
 ## Manual API Smoke Test
 
 Use this flow in Swagger to check the main POS scenario.
@@ -250,7 +262,16 @@ This returns a PDF that simulates thermal printer output.
 POST /api/v1/shifts/current/close
 ```
 
-11. Optional invoice flow:
+13. Check daily manager reports:
+
+```text
+GET /api/v1/reports/sales/daily
+GET /api/v1/reports/kitchen/daily
+GET /api/v1/reports/bar/daily
+GET /api/v1/reports/operations/daily
+```
+
+14. Optional invoice flow:
 
 ```text
 POST /api/v1/orders/{order_id}/invoice

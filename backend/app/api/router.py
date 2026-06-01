@@ -10,6 +10,7 @@ from app.api.routes import (
     payments,
     qr,
     reservations,
+    reports,
     resources,
     shifts,
     stock,
@@ -25,6 +26,7 @@ api_router.include_router(qr.router)
 api_router.include_router(shifts.router)
 api_router.include_router(stock.router)
 api_router.include_router(reservations.router)
+api_router.include_router(reports.router)
 api_router.include_router(floor_plans.router)
 api_router.include_router(invoices.router)
 api_router.include_router(fiscal.router)
