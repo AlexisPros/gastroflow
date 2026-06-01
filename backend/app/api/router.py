@@ -14,6 +14,7 @@ from app.api.routes import (
     resources,
     shifts,
     stock,
+    websockets,
 )
 
 api_router = APIRouter(prefix="/api/v1")
@@ -31,3 +32,4 @@ api_router.include_router(floor_plans.router)
 api_router.include_router(invoices.router)
 api_router.include_router(fiscal.router)
 api_router.include_router(resources.router)
+api_router.include_router(websockets.router)
