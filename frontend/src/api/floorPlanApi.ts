@@ -43,6 +43,15 @@ export type FloorTableView = FloorPlanTable & {
   table: RestaurantTable | null;
 };
 
+export type FloorPlanTablePositionInput = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation?: number;
+  shape?: "RECTANGLE" | "CIRCLE";
+};
+
 export async function getActiveFloorPlan(token: string): Promise<FloorPlan> {
   return apiRequest<FloorPlan>("/floor-plans/active", { token });
 }
@@ -58,6 +67,42 @@ export async function getFloorPlanTables(
 
 export async function getRestaurantTables(token: string): Promise<RestaurantTable[]> {
   return apiRequest<RestaurantTable[]>("/restaurant-tables", { token });
+}
+
+export async function createRestaurantTableOnFloorPlan(
+  token: string,
+  floorPlanId: number,
+  body: {
+    table_number: string;
+    current_guests?: number | null;
+    is_active?: boolean;
+    position: FloorPlanTablePositionInput;
+  },
+): Promise<FloorPlanTable> {
+  return apiRequest<FloorPlanTable>(
+    `/floor-plans/${floorPlanId}/tables/create-restaurant-table`,
+    {
+      method: "POST",
+      token,
+      body,
+    },
+  );
+}
+
+export async function updateFloorPlanTablePosition(
+  token: string,
+  floorPlanId: number,
+  floorPlanTableId: number,
+  position: FloorPlanTablePositionInput,
+): Promise<FloorPlanTable> {
+  return apiRequest<FloorPlanTable>(
+    `/floor-plans/${floorPlanId}/tables/${floorPlanTableId}/position`,
+    {
+      method: "PATCH",
+      token,
+      body: position,
+    },
+  );
 }
 
 export async function getFloorPlanView(token: string): Promise<{

@@ -116,6 +116,11 @@ p {
   color: #172026;
 }
 
+.ghost-button.danger {
+  border-color: #f0b8ae;
+  color: #9f2f20;
+}
+
 .error-box {
   padding: 12px;
   border: 1px solid #f0b8ae;
@@ -403,6 +408,24 @@ p {
   outline: 3px solid rgba(23, 32, 38, 0.12);
 }
 
+.decor-object {
+  position: absolute;
+  border: 0;
+  border-radius: 4px;
+  background: #252b2d;
+  cursor: pointer;
+  opacity: 0.82;
+  transform-origin: center;
+}
+
+.decor-object.circle {
+  border-radius: 999px;
+}
+
+.decor-object.selected {
+  outline: 3px solid rgba(31, 122, 104, 0.35);
+}
+
 .status-free {
   background: #dff2e7;
   color: #17633c;
@@ -462,6 +485,65 @@ p {
   font-size: 12px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.editor-panel,
+.position-editor {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid #edf1ef;
+}
+
+.tool-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tool-button {
+  min-height: 38px;
+  border: 1px solid #c8d2cc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #40514c;
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.tool-button.active {
+  border-color: #1f7a68;
+  background: #e7f0ed;
+  color: #176353;
+}
+
+.compact-field {
+  display: grid;
+  gap: 6px;
+  color: #40514c;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.compact-field input {
+  min-height: 38px;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid #c8d2cc;
+  border-radius: 6px;
+  background: #fbfcfb;
+  color: #172026;
+}
+
+.position-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.editor-actions {
+  display: flex;
+  gap: 8px;
 }
 
 @media (max-width: 760px) {
