@@ -24,6 +24,8 @@ class DiscountService:
         )
 
         order.discount_id = discount.id
+        order.subtotal_amount = base_total
+        order.discount_amount = discount_amount
         order.total_amount = max(base_total - discount_amount, Decimal("0.00"))
 
         db.add(order)
@@ -32,8 +34,12 @@ class DiscountService:
         return order
 
     async def remove_discount(self, db: AsyncSession, *, order: Order) -> Order:
+        base_total = await self._get_order_items_total(db, order_id=order.id)
+
         order.discount_id = None
-        order.total_amount = await self._get_order_items_total(db, order_id=order.id)
+        order.subtotal_amount = base_total
+        order.discount_amount = Decimal("0.00")
+        order.total_amount = base_total
 
         db.add(order)
         await db.commit()

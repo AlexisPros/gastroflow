@@ -11,6 +11,7 @@ from app.db.base import Base
 
 if TYPE_CHECKING:
     from app.models.discount import Discount
+    from app.models.employee_shift import EmployeeShift
     from app.models.invoice import Invoice
     from app.models.order_action_log import OrderActionLog
     from app.models.order_item import OrderItem
@@ -42,6 +43,12 @@ class Order(Base):
     discount_id: Mapped[int | None] = mapped_column(
         ForeignKey("discounts.id"),
         nullable=True,
+    )
+
+    shift_id: Mapped[int | None] = mapped_column(
+        ForeignKey("employee_shifts.id"),
+        nullable=True,
+        index=True,
     )
 
     guest_count: Mapped[int | None] = mapped_column(
@@ -78,6 +85,18 @@ class Order(Base):
         default=Decimal("0.00"),
     )
 
+    subtotal_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
+    discount_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
     tip_amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
@@ -102,6 +121,11 @@ class Order(Base):
 
     discount: Mapped[Discount | None] = relationship(
         "Discount",
+        back_populates="orders",
+    )
+
+    shift: Mapped[EmployeeShift | None] = relationship(
+        "EmployeeShift",
         back_populates="orders",
     )
 

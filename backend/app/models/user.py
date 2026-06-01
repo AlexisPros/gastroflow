@@ -9,6 +9,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.employee_shift import EmployeeShift
+    from app.models.employee_shift_report import EmployeeShiftReport
     from app.models.kitchen_task import KitchenTask
     from app.models.order import Order
     from app.models.order_action_log import OrderActionLog
@@ -83,5 +85,15 @@ class User(Base):
 
     action_logs: Mapped[list[OrderActionLog]] = relationship(
         "OrderActionLog",
+        back_populates="user",
+    )
+
+    employee_shifts: Mapped[list[EmployeeShift]] = relationship(
+        "EmployeeShift",
+        back_populates="user",
+    )
+
+    employee_shift_reports: Mapped[list[EmployeeShiftReport]] = relationship(
+        "EmployeeShiftReport",
         back_populates="user",
     )

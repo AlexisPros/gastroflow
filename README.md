@@ -87,6 +87,18 @@ Body:
 }
 ```
 
+Employee shifts are started manually, not automatically at login:
+
+```text
+POST /api/v1/shifts/start
+GET /api/v1/shifts/current
+POST /api/v1/shifts/current/close
+GET /api/v1/shift-reports
+```
+
+When a shift is closed, the backend saves a shift report with sales, tips, discounts, payment methods, and sold item breakdown.
+The backend rejects shift closing while the shift still has orders with `OPEN` or `PENDING_CONFIRMATION` status.
+
 ## Manual API Smoke Test
 
 Use this flow in Swagger to check the main POS scenario.
@@ -147,7 +159,21 @@ GET /api/v1/products
 
 Save one `id`, for example `1`.
 
-5. Create an order:
+5. Start an employee shift before creating waiter orders:
+
+```text
+POST /api/v1/shifts/start
+```
+
+Example body:
+
+```json
+{
+  "opening_note": "Morning shift"
+}
+```
+
+6. Create an order:
 
 ```text
 POST /api/v1/orders/with-items
@@ -172,7 +198,7 @@ Example body:
 
 Save the returned order `id`.
 
-6. Check created kitchen tasks:
+7. Check created kitchen tasks:
 
 ```text
 GET /api/v1/kitchen-tasks
@@ -180,19 +206,19 @@ GET /api/v1/kitchen-tasks
 
 Save the task `id`.
 
-7. Start the kitchen task:
+8. Start the kitchen task:
 
 ```text
 POST /api/v1/kitchen-tasks/{task_id}/start
 ```
 
-8. Complete the kitchen task:
+9. Complete the kitchen task:
 
 ```text
 POST /api/v1/kitchen-tasks/{task_id}/complete
 ```
 
-9. Register payment for the order:
+10. Register payment for the order:
 
 ```text
 POST /api/v1/orders/{order_id}/payments
@@ -210,13 +236,19 @@ Example body:
 }
 ```
 
-10. Generate mock receipt PDF:
+11. Generate mock receipt PDF:
 
 ```text
 POST /api/v1/orders/{order_id}/receipt/pdf
 ```
 
 This returns a PDF that simulates thermal printer output.
+
+12. Close the employee shift and generate a report:
+
+```text
+POST /api/v1/shifts/current/close
+```
 
 11. Optional invoice flow:
 
@@ -266,6 +298,8 @@ reservation_tables
 invoices
 order_action_logs
 order_transfer_logs
+employee_shifts
+employee_shift_reports
 stock_movements
 ```
 
@@ -344,7 +378,7 @@ Body:
 }
 ```
 
-After confirmation, the backend assigns the waiter, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks.
+After confirmation, the backend assigns the waiter, attaches the order to the waiter's open shift, changes the order status to `OPEN`, calculates estimated time, and creates kitchen tasks. If the waiter has no open shift, the backend returns `Start shift first.`
 The confirmation step also records an `QR_ORDER_CONFIRMED` action log and avoids creating duplicate kitchen tasks if tasks already exist for the order items.
 
 Any waiter can reject a pending QR order by entering a PIN:
