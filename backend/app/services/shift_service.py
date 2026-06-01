@@ -80,6 +80,8 @@ class ShiftService:
         if existing_report is not None:
             return existing_report
 
+        await self._ensure_shift_has_no_active_orders(db, shift=shift)
+
         await crud_employee_shift.close(
             db,
             db_obj=shift,
@@ -91,6 +93,22 @@ class ShiftService:
         await db.commit()
         await db.refresh(report)
         return report
+
+    async def _ensure_shift_has_no_active_orders(
+        self,
+        db: AsyncSession,
+        *,
+        shift: EmployeeShift,
+    ) -> None:
+        result = await db.execute(
+            select(Order).where(
+                Order.shift_id == shift.id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+            ),
+        )
+        active_order = result.scalar_one_or_none()
+        if active_order is not None:
+            raise ValueError("Close active orders before ending shift.")
 
     async def _build_report(
         self,

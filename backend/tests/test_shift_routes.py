@@ -134,6 +134,28 @@ def test_close_current_shift_returns_report(monkeypatch):
     assert response.json()["total_sales"] == "100.00"
 
 
+def test_close_current_shift_rejects_active_orders(monkeypatch):
+    async def close_current_shift(_db, *, user, closing_note):
+        assert user.id == 1
+        assert closing_note is None
+        raise ValueError("Close active orders before ending shift.")
+
+    monkeypatch.setattr(shift_service, "close_current_shift", close_current_shift)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/shifts/current/close",
+            headers={"Authorization": "Bearer fake-token"},
+            json={},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Close active orders before ending shift."
+
+
 def test_list_shift_reports_requires_manager_role(monkeypatch):
     async def get_multi(_db, *, skip, limit):
         assert skip == 0

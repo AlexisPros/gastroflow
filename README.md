@@ -97,6 +97,7 @@ GET /api/v1/shift-reports
 ```
 
 When a shift is closed, the backend saves a shift report with sales, tips, discounts, payment methods, and sold item breakdown.
+The backend rejects shift closing while the shift still has orders with `OPEN` or `PENDING_CONFIRMATION` status.
 
 ## Manual API Smoke Test
 
