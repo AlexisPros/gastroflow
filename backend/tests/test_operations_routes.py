@@ -65,11 +65,14 @@ def make_order() -> Order:
         table_id=1,
         waiter_id=1,
         discount_id=None,
+        shift_id=None,
         source="WAITER",
         status="OPEN",
         created_at=datetime.now(timezone.utc),
         closed_at=None,
         total_amount=Decimal("25.00"),
+        subtotal_amount=Decimal("25.00"),
+        discount_amount=Decimal("0.00"),
         tip_amount=Decimal("0.00"),
     )
 

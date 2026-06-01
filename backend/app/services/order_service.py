@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud import order_action_log, order_transfer_log, product_kitchen_step
+from app.crud import employee_shift as crud_employee_shift
 from app.models.kitchen_task import KitchenTask
 from app.models.modifier import Modifier
 from app.models.order import Order
@@ -37,9 +38,20 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
+        shift_id: int | None = None
+        if waiter_id is not None:
+            shift = await crud_employee_shift.get_open_by_user(
+                db,
+                user_id=waiter_id,
+            )
+            if shift is None:
+                raise ValueError("Start shift first.")
+            shift_id = shift.id
+
         order = Order(
             table_id=table_id,
             waiter_id=waiter_id,
+            shift_id=shift_id,
             source=source,
             total_amount=Decimal("0.00"),
         )
@@ -64,6 +76,8 @@ class OrderService:
                 item_estimates.append(item_estimated_time)
 
         order.total_amount = total_amount
+        order.subtotal_amount = total_amount
+        order.discount_amount = Decimal("0.00")
         order.estimated_time = max(item_estimates) if item_estimates else None
 
         db.add(order)
@@ -109,6 +123,8 @@ class OrderService:
             total_amount += item_total
 
         order.total_amount = total_amount
+        order.subtotal_amount = total_amount
+        order.discount_amount = Decimal("0.00")
         table.status = "PENDING_ORDER"
 
         db.add(table)
@@ -158,8 +174,13 @@ class OrderService:
         )
         order_items = result.scalars().all()
 
-        order.total_amount = sum(
+        subtotal_amount = sum(
             (item.total_price for item in order_items),
+            Decimal("0.00"),
+        )
+        order.subtotal_amount = subtotal_amount
+        order.total_amount = max(
+            subtotal_amount - order.discount_amount,
             Decimal("0.00"),
         )
         order.estimated_time = await self._calculate_order_estimated_time(
@@ -256,6 +277,11 @@ class OrderService:
                 item_estimates.append(item_estimated_time)
 
         order.waiter_id = waiter_id
+        shift = await crud_employee_shift.get_open_by_user(db, user_id=waiter_id)
+        if shift is None:
+            raise ValueError("Start shift first.")
+
+        order.shift_id = shift.id
         order.status = "OPEN"
         order.estimated_time = max(item_estimates) if item_estimates else None
 

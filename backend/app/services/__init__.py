@@ -9,5 +9,6 @@ from app.services.mock_printer_service import mock_printer_service
 from app.services.order_service import OrderItemRequest, order_service
 from app.services.payment_service import payment_service
 from app.services.reservation_service import reservation_service
+from app.services.shift_service import shift_service
 from app.services.stock_service import stock_service
 from app.services.user_service import user_service

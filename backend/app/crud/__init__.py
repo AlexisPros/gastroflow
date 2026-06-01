@@ -1,4 +1,6 @@
 from app.crud.discount import discount
+from app.crud.employee_shift import employee_shift
+from app.crud.employee_shift_report import employee_shift_report
 from app.crud.floor_plan import floor_plan
 from app.crud.floor_plan_table import floor_plan_table
 from app.crud.ingredient import ingredient

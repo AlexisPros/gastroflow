@@ -1,4 +1,14 @@
 from app.schemas.discount import DiscountCreate, DiscountRead, DiscountUpdate
+from app.schemas.employee_shift import (
+    EmployeeShiftCreate,
+    EmployeeShiftRead,
+    EmployeeShiftUpdate,
+)
+from app.schemas.employee_shift_report import (
+    EmployeeShiftReportCreate,
+    EmployeeShiftReportRead,
+    EmployeeShiftReportUpdate,
+)
 from app.schemas.floor_plan import FloorPlanCreate, FloorPlanRead, FloorPlanUpdate
 from app.schemas.floor_plan_table import (
     FloorPlanTableCreate,
