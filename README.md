@@ -28,6 +28,29 @@ Open Swagger:
 http://127.0.0.1:8000/docs
 ```
 
+## Frontend Quick Start
+
+Run commands from the frontend directory:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open the frontend:
+
+```text
+http://127.0.0.1:5173
+```
+
+The frontend reads backend URLs from optional Vite environment variables:
+
+```text
+VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1
+VITE_WS_BASE_URL=ws://127.0.0.1:8000/api/v1
+```
+
 ## Demo Users
 
 All seeded users use the same password:
