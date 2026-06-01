@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.floor_plan_decoration import FloorPlanDecoration
     from app.models.floor_plan_table import FloorPlanTable
 
 
@@ -57,6 +58,12 @@ class FloorPlan(Base):
 
     tables: Mapped[list[FloorPlanTable]] = relationship(
         "FloorPlanTable",
+        back_populates="floor_plan",
+        cascade="all, delete-orphan",
+    )
+
+    decorations: Mapped[list[FloorPlanDecoration]] = relationship(
+        "FloorPlanDecoration",
         back_populates="floor_plan",
         cascade="all, delete-orphan",
     )

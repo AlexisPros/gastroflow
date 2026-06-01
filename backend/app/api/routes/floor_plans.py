@@ -3,9 +3,13 @@ from pydantic import BaseModel
 
 from app.api.deps import DbSession, RequireFloorPlanRole, get_or_404, raise_bad_request
 from app.crud import floor_plan as crud_floor_plan
+from app.crud import floor_plan_decoration as crud_floor_plan_decoration
 from app.crud import floor_plan_table as crud_floor_plan_table
 from app.crud import restaurant_table as crud_restaurant_table
 from app.schemas import (
+    FloorPlanDecorationCreate,
+    FloorPlanDecorationRead,
+    FloorPlanDecorationUpdate,
     FloorPlanRead,
     FloorPlanTablePositionUpdate,
     FloorPlanTableRead,
@@ -80,6 +84,120 @@ async def list_floor_plan_tables(floor_plan_id: int, db: DbSession):
         db,
         floor_plan_id=floor_plan_id,
     )
+
+
+@router.get(
+    "/floor-plans/{floor_plan_id}/decorations",
+    response_model=list[FloorPlanDecorationRead],
+)
+async def list_floor_plan_decorations(floor_plan_id: int, db: DbSession):
+    await get_or_404(
+        crud_obj=crud_floor_plan,
+        db=db,
+        id=floor_plan_id,
+        entity_name="floor plan",
+    )
+    return await crud_floor_plan_decoration.get_by_plan(
+        db,
+        floor_plan_id=floor_plan_id,
+    )
+
+
+@router.post(
+    "/floor-plans/{floor_plan_id}/decorations",
+    response_model=FloorPlanDecorationRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_floor_plan_decoration(
+    floor_plan_id: int,
+    body: FloorPlanDecorationCreate,
+    db: DbSession,
+):
+    await get_or_404(
+        crud_obj=crud_floor_plan,
+        db=db,
+        id=floor_plan_id,
+        entity_name="floor plan",
+    )
+    if body.floor_plan_id != floor_plan_id:
+        raise_bad_request(
+            ValueError("Decoration does not belong to this floor plan."),
+        )
+
+    return await crud_floor_plan_decoration.create(db, obj_in=body)
+
+
+@router.patch(
+    "/floor-plans/{floor_plan_id}/decorations/{decoration_id}",
+    response_model=FloorPlanDecorationRead,
+)
+async def update_floor_plan_decoration(
+    floor_plan_id: int,
+    decoration_id: int,
+    body: FloorPlanDecorationUpdate,
+    db: DbSession,
+):
+    await get_or_404(
+        crud_obj=crud_floor_plan,
+        db=db,
+        id=floor_plan_id,
+        entity_name="floor plan",
+    )
+    decoration = await get_or_404(
+        crud_obj=crud_floor_plan_decoration,
+        db=db,
+        id=decoration_id,
+        entity_name="floor plan decoration",
+    )
+    if decoration.floor_plan_id != floor_plan_id:
+        raise_bad_request(
+            ValueError("Decoration does not belong to this floor plan."),
+        )
+
+    return await crud_floor_plan_decoration.update(
+        db,
+        db_obj=decoration,
+        obj_in=body,
+    )
+
+
+@router.delete(
+    "/floor-plans/{floor_plan_id}/decorations/{decoration_id}",
+    response_model=FloorPlanDecorationRead,
+)
+async def delete_floor_plan_decoration(
+    floor_plan_id: int,
+    decoration_id: int,
+    db: DbSession,
+):
+    await get_or_404(
+        crud_obj=crud_floor_plan,
+        db=db,
+        id=floor_plan_id,
+        entity_name="floor plan",
+    )
+    decoration = await get_or_404(
+        crud_obj=crud_floor_plan_decoration,
+        db=db,
+        id=decoration_id,
+        entity_name="floor plan decoration",
+    )
+    if decoration.floor_plan_id != floor_plan_id:
+        raise_bad_request(
+            ValueError("Decoration does not belong to this floor plan."),
+        )
+
+    deleted_decoration = await crud_floor_plan_decoration.delete(
+        db,
+        id=decoration_id,
+    )
+    if deleted_decoration is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="floor plan decoration not found.",
+        )
+
+    return deleted_decoration
 
 
 @router.get(

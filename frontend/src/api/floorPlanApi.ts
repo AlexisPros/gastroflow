@@ -22,6 +22,19 @@ export type FloorPlanTable = {
   shape: "RECTANGLE" | "CIRCLE" | string;
 };
 
+export type FloorPlanDecoration = {
+  id: number;
+  floor_plan_id: number;
+  x: string;
+  y: string;
+  width: string;
+  height: string;
+  rotation: string;
+  shape: "RECTANGLE" | "CIRCLE" | string;
+  color: string;
+  label: string | null;
+};
+
 export type RestaurantTableStatus =
   | "FREE"
   | "PENDING_ORDER"
@@ -69,6 +82,16 @@ export async function getRestaurantTables(token: string): Promise<RestaurantTabl
   return apiRequest<RestaurantTable[]>("/restaurant-tables", { token });
 }
 
+export async function getFloorPlanDecorations(
+  token: string,
+  floorPlanId: number,
+): Promise<FloorPlanDecoration[]> {
+  return apiRequest<FloorPlanDecoration[]>(
+    `/floor-plans/${floorPlanId}/decorations`,
+    { token },
+  );
+}
+
 export async function createRestaurantTableOnFloorPlan(
   token: string,
   floorPlanId: number,
@@ -105,14 +128,104 @@ export async function updateFloorPlanTablePosition(
   );
 }
 
+export async function deleteFloorPlanTable(
+  token: string,
+  floorPlanId: number,
+  floorPlanTableId: number,
+): Promise<FloorPlanTable> {
+  return apiRequest<FloorPlanTable>(
+    `/floor-plans/${floorPlanId}/tables/${floorPlanTableId}`,
+    {
+      method: "DELETE",
+      token,
+    },
+  );
+}
+
+export async function deleteRestaurantTable(
+  token: string,
+  tableId: number,
+): Promise<RestaurantTable> {
+  return apiRequest<RestaurantTable>(`/restaurant-tables/${tableId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export async function createFloorPlanDecoration(
+  token: string,
+  floorPlanId: number,
+  body: {
+    floor_plan_id: number;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation?: number;
+    shape?: "RECTANGLE" | "CIRCLE";
+    color?: string;
+    label?: string | null;
+  },
+): Promise<FloorPlanDecoration> {
+  return apiRequest<FloorPlanDecoration>(
+    `/floor-plans/${floorPlanId}/decorations`,
+    {
+      method: "POST",
+      token,
+      body,
+    },
+  );
+}
+
+export async function updateFloorPlanDecoration(
+  token: string,
+  floorPlanId: number,
+  decorationId: number,
+  body: Partial<{
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    rotation: number;
+    shape: "RECTANGLE" | "CIRCLE";
+    color: string;
+    label: string | null;
+  }>,
+): Promise<FloorPlanDecoration> {
+  return apiRequest<FloorPlanDecoration>(
+    `/floor-plans/${floorPlanId}/decorations/${decorationId}`,
+    {
+      method: "PATCH",
+      token,
+      body,
+    },
+  );
+}
+
+export async function deleteFloorPlanDecoration(
+  token: string,
+  floorPlanId: number,
+  decorationId: number,
+): Promise<FloorPlanDecoration> {
+  return apiRequest<FloorPlanDecoration>(
+    `/floor-plans/${floorPlanId}/decorations/${decorationId}`,
+    {
+      method: "DELETE",
+      token,
+    },
+  );
+}
+
 export async function getFloorPlanView(token: string): Promise<{
   floorPlan: FloorPlan;
   tables: FloorTableView[];
+  decorations: FloorPlanDecoration[];
 }> {
   const floorPlan = await getActiveFloorPlan(token);
-  const [positions, restaurantTables] = await Promise.all([
+  const [positions, restaurantTables, decorations] = await Promise.all([
     getFloorPlanTables(token, floorPlan.id),
     getRestaurantTables(token),
+    getFloorPlanDecorations(token, floorPlan.id),
   ]);
   const tablesById = new Map(
     restaurantTables.map((table) => [table.id, table]),
@@ -120,6 +233,7 @@ export async function getFloorPlanView(token: string): Promise<{
 
   return {
     floorPlan,
+    decorations,
     tables: positions.map((position) => ({
       ...position,
       table: tablesById.get(position.table_id) ?? null,

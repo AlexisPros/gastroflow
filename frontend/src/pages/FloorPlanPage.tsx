@@ -1,11 +1,24 @@
-import { MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  MouseEvent,
+  PointerEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import { ApiError } from "../api/apiClient";
 import {
+  createFloorPlanDecoration,
   createRestaurantTableOnFloorPlan,
+  deleteFloorPlanDecoration,
+  deleteFloorPlanTable,
+  deleteRestaurantTable,
   getFloorPlanView,
+  updateFloorPlanDecoration,
   updateFloorPlanTablePosition,
   type FloorPlan,
+  type FloorPlanDecoration,
   type FloorPlanTablePositionInput,
   type FloorTableView,
   type RestaurantTableStatus,
@@ -22,17 +35,17 @@ type EditorTool =
   | "DECOR_CIRCLE";
 type Selection =
   | { type: "TABLE"; id: number }
-  | { type: "DECOR"; id: string }
+  | { type: "DECOR"; id: number }
   | null;
-type DecorObject = {
-  id: string;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  rotation: number;
-  shape: "RECTANGLE" | "CIRCLE";
-};
+type ResizeHandle = "nw" | "ne" | "sw" | "se";
+type Interaction = {
+  mode: "MOVE" | "RESIZE";
+  selection: NonNullable<Selection>;
+  startClientX: number;
+  startClientY: number;
+  startPosition: FloorPlanTablePositionInput;
+  handle?: ResizeHandle;
+} | null;
 
 const statusLabels: Record<string, string> = {
   FREE: "Free",
@@ -40,16 +53,14 @@ const statusLabels: Record<string, string> = {
   OCCUPIED: "Occupied",
   RESERVED: "Reserved",
 };
-const DECOR_STORAGE_KEY = "gastroflow.floor.decorations";
 
 export function FloorPlanPage() {
   const { token, user } = useAuth();
   const [floorPlan, setFloorPlan] = useState<FloorPlan | null>(null);
   const [tables, setTables] = useState<FloorTableView[]>([]);
-  const [decorObjects, setDecorObjects] = useState<DecorObject[]>(() =>
-    loadDecorObjects(),
-  );
+  const [decorations, setDecorations] = useState<FloorPlanDecoration[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
+  const [interaction, setInteraction] = useState<Interaction>(null);
   const [editorTool, setEditorTool] = useState<EditorTool>("SELECT");
   const [newTableNumber, setNewTableNumber] = useState("");
   const [draftPosition, setDraftPosition] =
@@ -74,6 +85,7 @@ export function FloorPlanPage() {
       const data = await getFloorPlanView(token);
       setFloorPlan(data.floorPlan);
       setTables(data.tables);
+      setDecorations(data.decorations);
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load floor plan.");
@@ -84,10 +96,6 @@ export function FloorPlanPage() {
   useEffect(() => {
     void loadFloorPlan();
   }, [loadFloorPlan]);
-
-  useEffect(() => {
-    saveDecorObjects(decorObjects);
-  }, [decorObjects]);
 
   useEffect(() => {
     if (!token) {
@@ -114,40 +122,67 @@ export function FloorPlanPage() {
     return tables.find((item) => item.id === selection.id) ?? null;
   }, [selection, tables]);
 
-  const selectedDecor = useMemo(() => {
+  const selectedDecoration = useMemo(() => {
     if (selection?.type !== "DECOR") {
       return null;
     }
-    return decorObjects.find((item) => item.id === selection.id) ?? null;
-  }, [decorObjects, selection]);
+    return decorations.find((item) => item.id === selection.id) ?? null;
+  }, [decorations, selection]);
 
   useEffect(() => {
-    if (selectedTable) {
-      setDraftPosition({
-        x: Number(selectedTable.x),
-        y: Number(selectedTable.y),
-        width: Number(selectedTable.width),
-        height: Number(selectedTable.height),
-        rotation: Number(selectedTable.rotation),
-        shape: selectedTable.shape === "CIRCLE" ? "CIRCLE" : "RECTANGLE",
-      });
+    if (interaction) {
       return;
     }
 
-    if (selectedDecor) {
-      setDraftPosition({
-        x: selectedDecor.x,
-        y: selectedDecor.y,
-        width: selectedDecor.width,
-        height: selectedDecor.height,
-        rotation: selectedDecor.rotation,
-        shape: selectedDecor.shape,
-      });
+    if (selectedTable) {
+      setDraftPosition(toPosition(selectedTable));
+      return;
+    }
+
+    if (selectedDecoration) {
+      setDraftPosition(toPosition(selectedDecoration));
       return;
     }
 
     setDraftPosition(null);
-  }, [selectedDecor, selectedTable]);
+  }, [interaction, selectedDecoration, selectedTable]);
+
+  useEffect(() => {
+    if (!interaction) {
+      return;
+    }
+
+    const handleMove = (event: globalThis.PointerEvent) => {
+      const dx = event.clientX - interaction.startClientX;
+      const dy = event.clientY - interaction.startClientY;
+      const nextPosition =
+        interaction.mode === "MOVE"
+          ? movePosition(interaction.startPosition, dx, dy)
+          : resizePosition(interaction.startPosition, dx, dy, interaction.handle ?? "se");
+
+      applyPositionLocally(interaction.selection, nextPosition);
+      setDraftPosition(nextPosition);
+    };
+
+    const handleUp = () => {
+      const finalSelection = interaction.selection;
+      const finalPosition = getSelectedPosition(finalSelection);
+      setInteraction(null);
+      if (finalPosition) {
+        void persistPosition(finalSelection, finalPosition);
+      }
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp, { once: true });
+
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+    };
+  // The pointer effect must track the current in-flight interaction and latest objects.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interaction, decorations, tables]);
 
   const counts = useMemo(() => {
     return tables.reduce(
@@ -195,24 +230,12 @@ export function FloorPlanPage() {
         <div className="floor-map-panel">
           <div className="floor-toolbar">
             <StatusBadge label="Free" value={counts.FREE ?? 0} status="FREE" />
-            <StatusBadge
-              label="Pending"
-              value={counts.PENDING_ORDER ?? 0}
-              status="PENDING_ORDER"
-            />
-            <StatusBadge
-              label="Occupied"
-              value={counts.OCCUPIED ?? 0}
-              status="OCCUPIED"
-            />
-            <StatusBadge
-              label="Reserved"
-              value={counts.RESERVED ?? 0}
-              status="RESERVED"
-            />
+            <StatusBadge label="Pending" value={counts.PENDING_ORDER ?? 0} status="PENDING_ORDER" />
+            <StatusBadge label="Occupied" value={counts.OCCUPIED ?? 0} status="OCCUPIED" />
+            <StatusBadge label="Reserved" value={counts.RESERVED ?? 0} status="RESERVED" />
           </div>
 
-      {floorPlan ? (
+          {floorPlan ? (
             <div className="floor-map-scroll">
               <div
                 className="floor-map"
@@ -227,20 +250,32 @@ export function FloorPlanPage() {
                   void handleMapClick(event);
                 }}
               >
-                {decorObjects.map((item) => (
+                {decorations.map((item) => (
                   <DecorObjectView
                     key={item.id}
                     item={item}
+                    canEdit={canEdit}
                     isSelected={selection?.type === "DECOR" && selection.id === item.id}
-                    onSelect={() => setSelection({ type: "DECOR", id: item.id })}
+                    onPointerDown={(event) => {
+                      startInteraction(event, { type: "DECOR", id: item.id }, "MOVE");
+                    }}
+                    onResizePointerDown={(event, handle) => {
+                      startInteraction(event, { type: "DECOR", id: item.id }, "RESIZE", handle);
+                    }}
                   />
                 ))}
                 {tables.map((item) => (
                   <FloorTableButton
                     key={item.id}
                     item={item}
+                    canEdit={canEdit}
                     isSelected={selection?.type === "TABLE" && selection.id === item.id}
-                    onSelect={() => setSelection({ type: "TABLE", id: item.id })}
+                    onPointerDown={(event) => {
+                      startInteraction(event, { type: "TABLE", id: item.id }, "MOVE");
+                    }}
+                    onResizePointerDown={(event, handle) => {
+                      startInteraction(event, { type: "TABLE", id: item.id }, "RESIZE", handle);
+                    }}
                   />
                 ))}
               </div>
@@ -261,22 +296,24 @@ export function FloorPlanPage() {
             />
           )}
 
-          <h2>{selectedDecor ? "Object details" : "Table details"}</h2>
+          <h2>{selectedDecoration ? "Object details" : "Table details"}</h2>
           {selectedTable && <TableDetails item={selectedTable} />}
-          {selectedDecor && <DecorDetails item={selectedDecor} />}
-          {!selectedTable && !selectedDecor && (
+          {selectedDecoration && <DecorationDetails item={selectedDecoration} />}
+          {!selectedTable && !selectedDecoration && (
             <p className="muted">Select an object on the map.</p>
           )}
           {canEdit && draftPosition && (
             <PositionEditor
               position={draftPosition}
-              isSaving={isSaving}
               selection={selection}
+              isSaving={isSaving}
               onChange={setDraftPosition}
               onSave={() => {
                 void saveSelectedPosition();
               }}
-              onDeleteDecor={deleteSelectedDecor}
+              onDelete={() => {
+                void deleteSelectedObject();
+              }}
             />
           )}
         </aside>
@@ -307,18 +344,11 @@ export function FloorPlanPage() {
       return;
     }
 
-    setDecorObjects((items) => [
-      ...items,
-      {
-        id: crypto.randomUUID(),
-        x,
-        y,
-        width: editorTool === "DECOR_CIRCLE" ? 80 : 140,
-        height: editorTool === "DECOR_CIRCLE" ? 80 : 36,
-        rotation: 0,
-        shape: editorTool === "DECOR_CIRCLE" ? "CIRCLE" : "RECTANGLE",
-      },
-    ]);
+    await createDecorationAtPosition({
+      x,
+      y,
+      shape: editorTool === "DECOR_CIRCLE" ? "CIRCLE" : "RECTANGLE",
+    });
   }
 
   async function createTableAtPosition({
@@ -364,58 +394,157 @@ export function FloorPlanPage() {
     }
   }
 
-  async function saveSelectedPosition() {
-    if (!draftPosition) {
-      return;
-    }
-
-    if (selection?.type === "DECOR") {
-      setDecorObjects((items) =>
-        items.map((item) =>
-          item.id === selection.id
-            ? {
-                ...item,
-                x: draftPosition.x,
-                y: draftPosition.y,
-                width: draftPosition.width,
-                height: draftPosition.height,
-                rotation: draftPosition.rotation ?? 0,
-                shape: draftPosition.shape ?? item.shape,
-              }
-            : item,
-        ),
-      );
-      return;
-    }
-
-    if (!token || !floorPlan || !selectedTable || selection?.type !== "TABLE") {
+  async function createDecorationAtPosition({
+    x,
+    y,
+    shape,
+  }: {
+    x: number;
+    y: number;
+    shape: "RECTANGLE" | "CIRCLE";
+  }) {
+    if (!token || !floorPlan) {
       return;
     }
 
     setIsSaving(true);
     setEditorError(null);
     try {
-      await updateFloorPlanTablePosition(
-        token,
-        floorPlan.id,
-        selectedTable.id,
-        draftPosition,
-      );
+      await createFloorPlanDecoration(token, floorPlan.id, {
+        floor_plan_id: floorPlan.id,
+        x,
+        y,
+        width: shape === "CIRCLE" ? 80 : 140,
+        height: shape === "CIRCLE" ? 80 : 36,
+        rotation: 0,
+        shape,
+        color: "#252b2d",
+      });
       await loadFloorPlan();
     } catch (exc) {
-      setEditorError(exc instanceof ApiError ? exc.message : "Could not save position.");
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not create object.");
     } finally {
       setIsSaving(false);
     }
   }
 
-  function deleteSelectedDecor() {
-    if (selection?.type !== "DECOR") {
+  function startInteraction(
+    event: PointerEvent<HTMLElement>,
+    nextSelection: NonNullable<Selection>,
+    mode: "MOVE" | "RESIZE",
+    handle?: ResizeHandle,
+  ) {
+    event.stopPropagation();
+    setSelection(nextSelection);
+
+    if (!canEdit || editorTool !== "SELECT") {
       return;
     }
 
-    setDecorObjects((items) => items.filter((item) => item.id !== selection.id));
-    setSelection(null);
+    const startPosition = getSelectedPosition(nextSelection);
+    if (!startPosition) {
+      return;
+    }
+
+    setInteraction({
+      mode,
+      selection: nextSelection,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPosition,
+      handle,
+    });
+  }
+
+  async function saveSelectedPosition() {
+    if (!selection || !draftPosition) {
+      return;
+    }
+
+    applyPositionLocally(selection, draftPosition);
+    await persistPosition(selection, draftPosition);
+  }
+
+  async function persistPosition(
+    targetSelection: NonNullable<Selection>,
+    position: FloorPlanTablePositionInput,
+  ) {
+    if (!token || !floorPlan) {
+      return;
+    }
+
+    setIsSaving(true);
+    setEditorError(null);
+    try {
+      if (targetSelection.type === "TABLE") {
+        await updateFloorPlanTablePosition(token, floorPlan.id, targetSelection.id, position);
+      } else {
+        await updateFloorPlanDecoration(token, floorPlan.id, targetSelection.id, position);
+      }
+      await loadFloorPlan();
+    } catch (exc) {
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not save position.");
+      await loadFloorPlan();
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function deleteSelectedObject() {
+    if (!selection || !token || !floorPlan) {
+      return;
+    }
+
+    setIsSaving(true);
+    setEditorError(null);
+    try {
+      if (selection.type === "DECOR") {
+        await deleteFloorPlanDecoration(token, floorPlan.id, selection.id);
+      } else {
+        const table = tables.find((item) => item.id === selection.id);
+        if (!table) {
+          return;
+        }
+        await deleteFloorPlanTable(token, floorPlan.id, table.id);
+        await deleteRestaurantTable(token, table.table_id);
+      }
+      setSelection(null);
+      await loadFloorPlan();
+    } catch (exc) {
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not delete object.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function getSelectedPosition(targetSelection: NonNullable<Selection>) {
+    if (targetSelection.type === "TABLE") {
+      const item = tables.find((table) => table.id === targetSelection.id);
+      return item ? toPosition(item) : null;
+    }
+
+    const item = decorations.find((decoration) => decoration.id === targetSelection.id);
+    return item ? toPosition(item) : null;
+  }
+
+  function applyPositionLocally(
+    targetSelection: NonNullable<Selection>,
+    position: FloorPlanTablePositionInput,
+  ) {
+    if (targetSelection.type === "TABLE") {
+      setTables((items) =>
+        items.map((item) =>
+          item.id === targetSelection.id ? applyPosition(item, position) : item,
+        ),
+      );
+      return;
+    }
+
+    setDecorations((items) =>
+      items.map((item) =>
+        item.id === targetSelection.id ? applyPosition(item, position) : item,
+      ),
+    );
   }
 }
 
@@ -471,12 +600,19 @@ function StatusBadge({
 
 function FloorTableButton({
   item,
+  canEdit,
   isSelected,
-  onSelect,
+  onPointerDown,
+  onResizePointerDown,
 }: {
   item: FloorTableView;
+  canEdit: boolean;
   isSelected: boolean;
-  onSelect: () => void;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+  onResizePointerDown: (
+    event: PointerEvent<HTMLSpanElement>,
+    handle: ResizeHandle,
+  ) => void;
 }) {
   const tableStatus = item.table?.status ?? "UNKNOWN";
   const shapeClass = item.shape === "CIRCLE" ? "circle" : "rectangle";
@@ -494,25 +630,30 @@ function FloorTableButton({
         height: Number(item.height),
         transform: `rotate(${Number(item.rotation)}deg)`,
       }}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
+      onPointerDown={onPointerDown}
     >
       <strong>{item.table?.table_number ?? `#${item.table_id}`}</strong>
       <span>{statusLabels[tableStatus] ?? tableStatus}</span>
+      {canEdit && isSelected && <ResizeHandles onPointerDown={onResizePointerDown} />}
     </button>
   );
 }
 
 function DecorObjectView({
   item,
+  canEdit,
   isSelected,
-  onSelect,
+  onPointerDown,
+  onResizePointerDown,
 }: {
-  item: DecorObject;
+  item: FloorPlanDecoration;
+  canEdit: boolean;
   isSelected: boolean;
-  onSelect: () => void;
+  onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+  onResizePointerDown: (
+    event: PointerEvent<HTMLSpanElement>,
+    handle: ResizeHandle,
+  ) => void;
 }) {
   return (
     <button
@@ -521,18 +662,37 @@ function DecorObjectView({
         item.shape === "CIRCLE" ? "circle" : "rectangle"
       } ${isSelected ? "selected" : ""}`}
       style={{
-        left: item.x,
-        top: item.y,
-        width: item.width,
-        height: item.height,
-        transform: `rotate(${item.rotation}deg)`,
+        left: Number(item.x),
+        top: Number(item.y),
+        width: Number(item.width),
+        height: Number(item.height),
+        transform: `rotate(${Number(item.rotation)}deg)`,
+        background: item.color,
       }}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect();
-      }}
+      onPointerDown={onPointerDown}
       aria-label="Decor object"
-    />
+    >
+      {canEdit && isSelected && <ResizeHandles onPointerDown={onResizePointerDown} />}
+    </button>
+  );
+}
+
+function ResizeHandles({
+  onPointerDown,
+}: {
+  onPointerDown: (event: PointerEvent<HTMLSpanElement>, handle: ResizeHandle) => void;
+}) {
+  const handles: ResizeHandle[] = ["nw", "ne", "sw", "se"];
+  return (
+    <>
+      {handles.map((handle) => (
+        <span
+          key={handle}
+          className={`resize-handle ${handle}`}
+          onPointerDown={(event) => onPointerDown(event, handle)}
+        />
+      ))}
+    </>
   );
 }
 
@@ -554,30 +714,10 @@ function EditorPanel({
       <h2>Editor</h2>
       <div className="tool-grid">
         <ToolButton current={tool} value="SELECT" label="Select" onClick={onToolChange} />
-        <ToolButton
-          current={tool}
-          value="TABLE_RECTANGLE"
-          label="Table rect"
-          onClick={onToolChange}
-        />
-        <ToolButton
-          current={tool}
-          value="TABLE_CIRCLE"
-          label="Table circle"
-          onClick={onToolChange}
-        />
-        <ToolButton
-          current={tool}
-          value="DECOR_RECTANGLE"
-          label="Filled rect"
-          onClick={onToolChange}
-        />
-        <ToolButton
-          current={tool}
-          value="DECOR_CIRCLE"
-          label="Filled circle"
-          onClick={onToolChange}
-        />
+        <ToolButton current={tool} value="TABLE_RECTANGLE" label="Table rect" onClick={onToolChange} />
+        <ToolButton current={tool} value="TABLE_CIRCLE" label="Table circle" onClick={onToolChange} />
+        <ToolButton current={tool} value="DECOR_RECTANGLE" label="Filled rect" onClick={onToolChange} />
+        <ToolButton current={tool} value="DECOR_CIRCLE" label="Filled circle" onClick={onToolChange} />
       </div>
       <label className="compact-field">
         Table number
@@ -620,14 +760,14 @@ function PositionEditor({
   isSaving,
   onChange,
   onSave,
-  onDeleteDecor,
+  onDelete,
 }: {
   position: FloorPlanTablePositionInput;
   selection: Selection;
   isSaving: boolean;
   onChange: (position: FloorPlanTablePositionInput) => void;
   onSave: () => void;
-  onDeleteDecor: () => void;
+  onDelete: () => void;
 }) {
   const update = (field: keyof FloorPlanTablePositionInput, value: string) => {
     onChange({
@@ -642,29 +782,17 @@ function PositionEditor({
       <div className="position-grid">
         <NumberField label="X" value={position.x} onChange={(value) => update("x", value)} />
         <NumberField label="Y" value={position.y} onChange={(value) => update("y", value)} />
-        <NumberField
-          label="Width"
-          value={position.width}
-          onChange={(value) => update("width", value)}
-        />
-        <NumberField
-          label="Height"
-          value={position.height}
-          onChange={(value) => update("height", value)}
-        />
-        <NumberField
-          label="Rotation"
-          value={position.rotation ?? 0}
-          onChange={(value) => update("rotation", value)}
-        />
+        <NumberField label="Width" value={position.width} onChange={(value) => update("width", value)} />
+        <NumberField label="Height" value={position.height} onChange={(value) => update("height", value)} />
+        <NumberField label="Rotation" value={position.rotation ?? 0} onChange={(value) => update("rotation", value)} />
       </div>
       <div className="editor-actions">
         <button type="button" className="primary-button" onClick={onSave} disabled={isSaving}>
           {isSaving ? "Saving..." : "Save"}
         </button>
-        {selection?.type === "DECOR" && (
-          <button type="button" className="ghost-button danger" onClick={onDeleteDecor}>
-            Remove
+        {selection && (
+          <button type="button" className="ghost-button danger" onClick={onDelete}>
+            Delete
           </button>
         )}
       </div>
@@ -731,7 +859,7 @@ function TableDetails({ item }: { item: FloorTableView }) {
   );
 }
 
-function DecorDetails({ item }: { item: DecorObject }) {
+function DecorationDetails({ item }: { item: FloorPlanDecoration }) {
   return (
     <div className="table-details">
       <div>
@@ -740,30 +868,90 @@ function DecorDetails({ item }: { item: DecorObject }) {
       </div>
       <div>
         <span className="detail-label">Storage</span>
-        <strong>Local map object</strong>
+        <strong>Database object</strong>
       </div>
     </div>
   );
 }
 
+function toPosition(
+  item: FloorTableView | FloorPlanDecoration,
+): FloorPlanTablePositionInput {
+  return {
+    x: Number(item.x),
+    y: Number(item.y),
+    width: Number(item.width),
+    height: Number(item.height),
+    rotation: Number(item.rotation),
+    shape: item.shape === "CIRCLE" ? "CIRCLE" : "RECTANGLE",
+  };
+}
+
+function applyPosition<T extends FloorTableView | FloorPlanDecoration>(
+  item: T,
+  position: FloorPlanTablePositionInput,
+): T {
+  return {
+    ...item,
+    x: String(position.x),
+    y: String(position.y),
+    width: String(position.width),
+    height: String(position.height),
+    rotation: String(position.rotation ?? 0),
+    shape: position.shape ?? item.shape,
+  };
+}
+
+function movePosition(
+  position: FloorPlanTablePositionInput,
+  dx: number,
+  dy: number,
+): FloorPlanTablePositionInput {
+  return {
+    ...position,
+    x: Math.max(0, Math.round(position.x + dx)),
+    y: Math.max(0, Math.round(position.y + dy)),
+  };
+}
+
+function resizePosition(
+  position: FloorPlanTablePositionInput,
+  dx: number,
+  dy: number,
+  handle: ResizeHandle,
+): FloorPlanTablePositionInput {
+  const minSize = 24;
+  let x = position.x;
+  let y = position.y;
+  let width = position.width;
+  let height = position.height;
+
+  if (handle.includes("e")) {
+    width = Math.max(minSize, position.width + dx);
+  }
+  if (handle.includes("s")) {
+    height = Math.max(minSize, position.height + dy);
+  }
+  if (handle.includes("w")) {
+    const nextWidth = Math.max(minSize, position.width - dx);
+    x = position.x + (position.width - nextWidth);
+    width = nextWidth;
+  }
+  if (handle.includes("n")) {
+    const nextHeight = Math.max(minSize, position.height - dy);
+    y = position.y + (position.height - nextHeight);
+    height = nextHeight;
+  }
+
+  return {
+    ...position,
+    x: Math.max(0, Math.round(x)),
+    y: Math.max(0, Math.round(y)),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
 function statusClass(status: RestaurantTableStatus): string {
   return `status-${status.toLowerCase().replaceAll("_", "-")}`;
-}
-
-function loadDecorObjects(): DecorObject[] {
-  const rawValue = window.localStorage.getItem(DECOR_STORAGE_KEY);
-  if (!rawValue) {
-    return [];
-  }
-
-  try {
-    return JSON.parse(rawValue) as DecorObject[];
-  } catch {
-    window.localStorage.removeItem(DECOR_STORAGE_KEY);
-    return [];
-  }
-}
-
-function saveDecorObjects(items: DecorObject[]): void {
-  window.localStorage.setItem(DECOR_STORAGE_KEY, JSON.stringify(items));
 }

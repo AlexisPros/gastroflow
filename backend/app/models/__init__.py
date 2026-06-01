@@ -5,6 +5,7 @@ from app.models.restaurant_table import RestaurantTable
 from app.models.reservation import Reservation
 from app.models.reservation_table import ReservationTable
 from app.models.floor_plan import FloorPlan
+from app.models.floor_plan_decoration import FloorPlanDecoration
 from app.models.floor_plan_table import FloorPlanTable
 
 from app.models.product_category import ProductCategory

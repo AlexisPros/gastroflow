@@ -386,6 +386,7 @@ p {
   cursor: pointer;
   color: #172026;
   box-shadow: 0 10px 20px rgba(19, 35, 32, 0.08);
+  touch-action: none;
   transform-origin: center;
 }
 
@@ -415,6 +416,7 @@ p {
   background: #252b2d;
   cursor: pointer;
   opacity: 0.82;
+  touch-action: none;
   transform-origin: center;
 }
 
@@ -424,6 +426,42 @@ p {
 
 .decor-object.selected {
   outline: 3px solid rgba(31, 122, 104, 0.35);
+}
+
+.resize-handle {
+  position: absolute;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #172026;
+  box-shadow: 0 2px 8px rgba(19, 35, 32, 0.18);
+  touch-action: none;
+}
+
+.resize-handle.nw {
+  top: -7px;
+  left: -7px;
+  cursor: nwse-resize;
+}
+
+.resize-handle.ne {
+  top: -7px;
+  right: -7px;
+  cursor: nesw-resize;
+}
+
+.resize-handle.sw {
+  bottom: -7px;
+  left: -7px;
+  cursor: nesw-resize;
+}
+
+.resize-handle.se {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
 }
 
 .status-free {

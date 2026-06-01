@@ -19,6 +19,11 @@ from app.schemas.employee_shift_report import (
     EmployeeShiftReportUpdate,
 )
 from app.schemas.floor_plan import FloorPlanCreate, FloorPlanRead, FloorPlanUpdate
+from app.schemas.floor_plan_decoration import (
+    FloorPlanDecorationCreate,
+    FloorPlanDecorationRead,
+    FloorPlanDecorationUpdate,
+)
 from app.schemas.floor_plan_table import (
     FloorPlanTableCreate,
     FloorPlanTablePositionUpdate,
