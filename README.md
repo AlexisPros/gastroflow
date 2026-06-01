@@ -311,6 +311,14 @@ waiter_id: null
 
 The backend accepts a new QR order only when the table is active, has status `FREE`, and has no active order with status `PENDING_CONFIRMATION` or `OPEN`.
 
+QR order flow updates table status:
+
+```text
+QR order created   -> table.status = PENDING_ORDER
+QR order confirmed -> table.status = OCCUPIED
+QR order rejected  -> table.status = FREE
+```
+
 Kitchen tasks are not created yet. They should be created only after a waiter confirms the QR order.
 
 Waiters, managers, and admins can list QR orders waiting for confirmation:

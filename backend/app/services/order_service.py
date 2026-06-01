@@ -85,7 +85,7 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
-        await self._ensure_table_accepts_qr_order(db, table_id=table_id)
+        table = await self._ensure_table_accepts_qr_order(db, table_id=table_id)
 
         order = Order(
             table_id=table_id,
@@ -109,7 +109,9 @@ class OrderService:
             total_amount += item_total
 
         order.total_amount = total_amount
+        table.status = "PENDING_ORDER"
 
+        db.add(table)
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -132,6 +134,11 @@ class OrderService:
         order.waiter_id = waiter_id
         order.status = "REJECTED"
 
+        await self._set_order_table_status(
+            db,
+            order=order,
+            status="FREE",
+        )
         db.add(
             OrderActionLog(
                 order_id=order.id,
@@ -170,7 +177,7 @@ class OrderService:
         db: AsyncSession,
         *,
         table_id: int,
-    ) -> None:
+    ) -> RestaurantTable:
         result = await db.execute(
             select(RestaurantTable).where(RestaurantTable.id == table_id),
         )
@@ -195,6 +202,28 @@ class OrderService:
         )
         if active_order_result.scalar_one_or_none() is not None:
             raise ValueError("Restaurant table already has an active order.")
+
+        return table
+
+    async def _set_order_table_status(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        status: str,
+    ) -> None:
+        if order.table_id is None:
+            return
+
+        result = await db.execute(
+            select(RestaurantTable).where(RestaurantTable.id == order.table_id),
+        )
+        table = result.scalar_one_or_none()
+        if table is None:
+            raise ValueError("Restaurant table does not exist.")
+
+        table.status = status
+        db.add(table)
 
     async def confirm_pending_qr_order(
         self,
@@ -230,6 +259,11 @@ class OrderService:
         order.status = "OPEN"
         order.estimated_time = max(item_estimates) if item_estimates else None
 
+        await self._set_order_table_status(
+            db,
+            order=order,
+            status="OCCUPIED",
+        )
         db.add(
             OrderActionLog(
                 order_id=order.id,
