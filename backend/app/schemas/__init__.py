@@ -1,4 +1,13 @@
 from app.schemas.discount import DiscountCreate, DiscountRead, DiscountUpdate
+from app.schemas.daily_report import (
+    DailyOperationsReport,
+    DailyProductionReport,
+    DailySalesReport,
+    ProductionSectionReport,
+    ReportDiscount,
+    ReportPaymentMethod,
+    ReportSoldItem,
+)
 from app.schemas.employee_shift import (
     EmployeeShiftCreate,
     EmployeeShiftRead,
