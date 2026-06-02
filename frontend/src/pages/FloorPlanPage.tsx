@@ -69,6 +69,7 @@ export function FloorPlanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [mapScale, setMapScale] = useState(1);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [lastEvent, setLastEvent] = useState<string | null>(null);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
@@ -153,8 +154,8 @@ export function FloorPlanPage() {
     }
 
     const handleMove = (event: globalThis.PointerEvent) => {
-      const dx = event.clientX - interaction.startClientX;
-      const dy = event.clientY - interaction.startClientY;
+      const dx = (event.clientX - interaction.startClientX) / mapScale;
+      const dy = (event.clientY - interaction.startClientY) / mapScale;
       const nextPosition =
         interaction.mode === "MOVE"
           ? movePosition(interaction.startPosition, dx, dy)
@@ -182,7 +183,7 @@ export function FloorPlanPage() {
     };
   // The pointer effect must track the current in-flight interaction and latest objects.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interaction, decorations, tables]);
+  }, [interaction, decorations, mapScale, tables]);
 
   const counts = useMemo(() => {
     return tables.reduce(
@@ -233,15 +234,50 @@ export function FloorPlanPage() {
             <StatusBadge label="Pending" value={counts.PENDING_ORDER ?? 0} status="PENDING_ORDER" />
             <StatusBadge label="Occupied" value={counts.OCCUPIED ?? 0} status="OCCUPIED" />
             <StatusBadge label="Reserved" value={counts.RESERVED ?? 0} status="RESERVED" />
+            <div className="zoom-controls">
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => setMapScale((value) => clampScale(value - 0.1))}
+              >
+                -
+              </button>
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => setMapScale(1)}
+              >
+                {Math.round(mapScale * 100)}%
+              </button>
+              <button
+                type="button"
+                className="tool-button"
+                onClick={() => setMapScale((value) => clampScale(value + 0.1))}
+              >
+                +
+              </button>
+            </div>
           </div>
 
           {floorPlan ? (
-            <div className="floor-map-scroll">
+            <div
+              className="floor-map-scroll"
+              onWheel={(event) => {
+                if (!event.ctrlKey && !event.metaKey) {
+                  return;
+                }
+                event.preventDefault();
+                setMapScale((value) =>
+                  clampScale(value + (event.deltaY > 0 ? -0.1 : 0.1)),
+                );
+              }}
+            >
               <div
                 className="floor-map"
                 style={{
                   width: floorPlan.width,
                   height: floorPlan.height,
+                  transform: `scale(${mapScale})`,
                   backgroundImage: floorPlan.background_image_url
                     ? `url(${floorPlan.background_image_url})`
                     : undefined,
@@ -332,8 +368,8 @@ export function FloorPlanPage() {
     }
 
     const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.max(0, Math.round(event.clientX - rect.left - 45));
-    const y = Math.max(0, Math.round(event.clientY - rect.top - 35));
+    const x = Math.max(0, Math.round((event.clientX - rect.left) / mapScale - 45));
+    const y = Math.max(0, Math.round((event.clientY - rect.top) / mapScale - 35));
 
     if (editorTool === "TABLE_RECTANGLE" || editorTool === "TABLE_CIRCLE") {
       await createTableAtPosition({
@@ -954,4 +990,8 @@ function resizePosition(
 
 function statusClass(status: RestaurantTableStatus): string {
   return `status-${status.toLowerCase().replaceAll("_", "-")}`;
+}
+
+function clampScale(value: number): number {
+  return Math.min(2, Math.max(0.5, Number(value.toFixed(2))));
 }

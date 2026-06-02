@@ -336,6 +336,7 @@ p {
 .floor-toolbar {
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
   padding: 14px;
   border-bottom: 1px solid #d7dfda;
 }
@@ -360,6 +361,7 @@ p {
 .floor-map-scroll {
   overflow: auto;
   padding: 18px;
+  background: #f7faf8;
 }
 
 .floor-map {
@@ -374,6 +376,17 @@ p {
   background-position: -1px -1px;
   background-size: 40px 40px;
   box-shadow: inset 0 0 0 1px #ffffff;
+  transform-origin: top left;
+}
+
+.zoom-controls {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.zoom-controls .tool-button {
+  min-width: 44px;
 }
 
 .floor-table {
