@@ -5,6 +5,8 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { FloorPlanPage } from "../pages/FloorPlanPage";
 import { LoginPage } from "../pages/LoginPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
+import { ReportsPage } from "../pages/ReportsPage";
+import { WaiterPage } from "../pages/WaiterPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { routes } from "./routePaths";
 
@@ -32,12 +34,7 @@ const router = createBrowserRouter([
               },
               {
                 path: routes.waiter,
-                element: (
-                  <PlaceholderPage
-                    title="Waiter POS"
-                    description="Order creation, QR confirmation, payments and receipts."
-                  />
-                ),
+                element: <WaiterPage />,
               },
             ],
           },
@@ -70,16 +67,11 @@ const router = createBrowserRouter([
             ],
           },
           {
-            element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER"]} />,
+            element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "WAITER"]} />,
             children: [
               {
                 path: routes.reports,
-                element: (
-                  <PlaceholderPage
-                    title="Reports"
-                    description="Shift reports, daily sales, kitchen and bar reporting."
-                  />
-                ),
+                element: <ReportsPage />,
               },
             ],
           },

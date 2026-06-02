@@ -97,11 +97,13 @@ def test_create_order_with_items_reaches_service(monkeypatch):
         *,
         table_id,
         waiter_id,
+        guest_count,
         source,
         items,
     ):
         assert table_id == 1
         assert waiter_id == 1
+        assert guest_count == 3
         assert source == "WAITER"
         assert len(items) == 1
         assert items[0].product_id == 1
@@ -124,6 +126,7 @@ def test_create_order_with_items_reaches_service(monkeypatch):
             json={
                 "table_id": 1,
                 "waiter_id": 1,
+                "guest_count": 3,
                 "source": "WAITER",
                 "items": [
                     {

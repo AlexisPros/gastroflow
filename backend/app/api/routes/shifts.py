@@ -3,7 +3,11 @@ from pydantic import BaseModel
 
 from app.api.deps import CurrentUser, DbSession, RequireAdminManager, raise_bad_request
 from app.crud import employee_shift_report as crud_employee_shift_report
-from app.schemas import EmployeeShiftRead, EmployeeShiftReportRead
+from app.schemas import (
+    EmployeeShiftRead,
+    EmployeeShiftReportPreview,
+    EmployeeShiftReportRead,
+)
 from app.services import shift_service
 
 router = APIRouter(tags=["Shifts"])
@@ -33,6 +37,11 @@ async def start_shift(
 @router.get("/shifts/current", response_model=EmployeeShiftRead | None)
 async def get_current_shift(current_user: CurrentUser, db: DbSession):
     return await shift_service.get_current_shift(db, user=current_user)
+
+
+@router.get("/shifts/current/report", response_model=EmployeeShiftReportPreview | None)
+async def preview_current_shift_report(current_user: CurrentUser, db: DbSession):
+    return await shift_service.preview_current_shift_report(db, user=current_user)
 
 
 @router.post("/shifts/current/close", response_model=EmployeeShiftReportRead)

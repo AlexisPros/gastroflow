@@ -33,11 +33,15 @@ class OrderService:
         *,
         table_id: int | None = None,
         waiter_id: int | None = None,
+        guest_count: int | None = None,
         source: str = "WAITER",
         items: list[OrderItemRequest],
     ) -> Order:
         if not items:
             raise ValueError("Order must contain at least one item.")
+
+        if guest_count is not None and guest_count <= 0:
+            raise ValueError("Guest count must be greater than zero.")
 
         shift_id: int | None = None
         if waiter_id is not None:
@@ -52,6 +56,7 @@ class OrderService:
         order = Order(
             table_id=table_id,
             waiter_id=waiter_id,
+            guest_count=guest_count,
             shift_id=shift_id,
             source=source,
             total_amount=Decimal("0.00"),

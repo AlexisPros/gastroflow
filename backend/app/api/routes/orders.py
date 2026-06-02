@@ -36,6 +36,7 @@ class OrderItemInput(BaseModel):
 class CreateOrderWithItemsRequest(BaseModel):
     table_id: int | None = None
     waiter_id: int | None = None
+    guest_count: int | None = None
     source: str = "WAITER"
     items: list[OrderItemInput]
 
@@ -86,6 +87,7 @@ async def create_order_with_items(
             db,
             table_id=body.table_id,
             waiter_id=body.waiter_id,
+            guest_count=body.guest_count,
             source=body.source,
             items=[
                 OrderItemRequest(

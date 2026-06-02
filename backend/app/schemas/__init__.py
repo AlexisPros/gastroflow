@@ -15,6 +15,7 @@ from app.schemas.employee_shift import (
 )
 from app.schemas.employee_shift_report import (
     EmployeeShiftReportCreate,
+    EmployeeShiftReportPreview,
     EmployeeShiftReportRead,
     EmployeeShiftReportUpdate,
 )
