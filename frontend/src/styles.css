@@ -145,8 +145,15 @@ p {
 }
 
 .brand {
-  font-size: 22px;
-  font-weight: 900;
+  display: flex;
+  align-items: center;
+}
+
+.brand-logo {
+  display: block;
+  width: min(180px, 100%);
+  height: auto;
+  object-fit: contain;
 }
 
 .nav-list {

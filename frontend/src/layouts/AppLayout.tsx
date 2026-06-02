@@ -29,7 +29,7 @@ export function AppLayout() {
     <div className="app-shell">
       <aside className="sidebar">
         <NavLink to={routes.dashboard} className="brand">
-          GastroFlow
+          <img src="/logo.png" alt="GastroFlow" className="brand-logo" />
         </NavLink>
 
         <nav className="nav-list">
