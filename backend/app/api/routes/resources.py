@@ -151,7 +151,13 @@ def register_crud_routes(
         return await crud_obj.get_multi(db, skip=skip, limit=limit)
 
     async def create_item(obj_in, db):
-        return await crud_obj.create(db, obj_in=obj_in)
+        try:
+            return await crud_obj.create(db, obj_in=obj_in)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
     async def get_item(item_id: int, db: DbSession):
         return await get_or_404(
@@ -168,7 +174,13 @@ def register_crud_routes(
             id=item_id,
             entity_name=entity_name,
         )
-        return await crud_obj.update(db, db_obj=db_obj, obj_in=obj_in)
+        try:
+            return await crud_obj.update(db, db_obj=db_obj, obj_in=obj_in)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
 
     async def delete_item(item_id: int, db: DbSession):
         db_obj = await crud_obj.delete(db, id=item_id)

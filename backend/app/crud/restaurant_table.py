@@ -12,6 +12,19 @@ from app.services.qr_code_service import qr_code_service
 class CRUDRestaurantTable(
     CRUDBase[RestaurantTable, RestaurantTableCreate, RestaurantTableUpdate],
 ):
+    async def get_by_table_number(
+        self,
+        db: AsyncSession,
+        *,
+        table_number: str,
+    ) -> RestaurantTable | None:
+        result = await db.execute(
+            select(RestaurantTable).where(
+                RestaurantTable.table_number == table_number,
+            ),
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_qr_token(
         self,
         db: AsyncSession,
@@ -32,6 +45,10 @@ class CRUDRestaurantTable(
         obj_in: RestaurantTableCreate | dict[str, Any],
     ) -> RestaurantTable:
         obj_data = self._schema_to_dict(obj_in)
+        await self._validate_table_number_is_unique(
+            db,
+            table_number=obj_data["table_number"],
+        )
         await self._ensure_qr_data(db, obj_data=obj_data)
 
         db_obj = RestaurantTable(**obj_data)
@@ -39,6 +56,38 @@ class CRUDRestaurantTable(
         await db.commit()
         await db.refresh(db_obj)
         return db_obj
+
+    async def update(
+        self,
+        db: AsyncSession,
+        *,
+        db_obj: RestaurantTable,
+        obj_in: RestaurantTableUpdate | dict[str, Any],
+    ) -> RestaurantTable:
+        obj_data = self._schema_to_dict(obj_in, exclude_unset=True)
+        table_number = obj_data.get("table_number")
+        if table_number is not None and table_number != db_obj.table_number:
+            await self._validate_table_number_is_unique(
+                db,
+                table_number=table_number,
+                current_table_id=db_obj.id,
+            )
+
+        return await super().update(db, db_obj=db_obj, obj_in=obj_data)
+
+    async def _validate_table_number_is_unique(
+        self,
+        db: AsyncSession,
+        *,
+        table_number: str,
+        current_table_id: int | None = None,
+    ) -> None:
+        existing_table = await self.get_by_table_number(
+            db,
+            table_number=table_number,
+        )
+        if existing_table is not None and existing_table.id != current_table_id:
+            raise ValueError("Table number already exists.")
 
     async def _ensure_qr_data(
         self,

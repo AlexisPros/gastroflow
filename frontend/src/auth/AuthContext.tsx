@@ -1,25 +1,13 @@
 import {
-  createContext,
   useCallback,
-  useContext,
   useMemo,
   useState,
   type PropsWithChildren,
 } from "react";
 
 import { loginWithPassword } from "../api/authApi";
-import type { User } from "../shared/types";
+import { AuthContext, type AuthContextValue } from "./authContextCore";
 import { clearStoredAuth, loadStoredAuth, saveStoredAuth } from "./authStorage";
-
-type AuthContextValue = {
-  user: User | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
-};
-
-const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [auth, setAuth] = useState(() => loadStoredAuth());
@@ -51,13 +39,4 @@ export function AuthProvider({ children }: PropsWithChildren) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
-
-export function useAuth(): AuthContextValue {
-  const value = useContext(AuthContext);
-  if (!value) {
-    throw new Error("useAuth must be used inside AuthProvider.");
-  }
-
-  return value;
 }
