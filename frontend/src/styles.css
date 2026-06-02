@@ -144,6 +144,24 @@ p {
   grid-template-columns: 248px minmax(0, 1fr);
 }
 
+.pos-fullscreen .app-shell {
+  display: block;
+}
+
+.pos-fullscreen .sidebar,
+.pos-fullscreen .topbar {
+  display: none;
+}
+
+.pos-fullscreen .page-surface {
+  min-height: 100vh;
+  padding: 0;
+}
+
+.pos-fullscreen {
+  overflow: hidden;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -709,6 +727,26 @@ p {
   grid-template-columns: minmax(420px, 1fr) 360px;
 }
 
+.waiter-order-screen {
+  display: grid;
+  min-height: calc(100vh - 170px);
+  grid-template-columns: minmax(460px, 1fr) minmax(340px, 410px);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: stretch;
+}
+
+.pos-builder-mode {
+  min-height: 100vh;
+  gap: 0;
+  padding: 10px;
+  background: #f4f7f5;
+}
+
+.pos-builder-mode .waiter-order-screen {
+  min-height: calc(100vh - 20px);
+}
+
 .waiter-panel {
   min-width: 0;
   border: 1px solid #d7dfda;
@@ -731,7 +769,43 @@ p {
 .waiter-menu-panel {
   display: grid;
   gap: 16px;
+  grid-template-rows: auto auto auto 1fr auto;
   padding: 16px;
+}
+
+.pos-builder-mode .waiter-menu-panel {
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.pos-builder-mode .order-panel {
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.pos-builder-mode .order-panel .panel-heading {
+  align-items: start;
+}
+
+.pos-builder-mode .order-panel .panel-heading h2 {
+  margin-top: 3px;
+  font-size: 22px;
+  line-height: 1.1;
+}
+
+.pos-builder-mode .order-panel .panel-heading > strong {
+  margin-top: 5px;
+  color: #172026;
+  font-size: 22px;
+}
+
+.pos-builder-mode .order-panel > .muted {
+  margin-top: -4px;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .panel-heading {
@@ -993,6 +1067,12 @@ p {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(158px, 1fr));
   gap: 12px;
+  align-content: start;
+  overflow: auto;
+}
+
+.pos-builder-mode .product-grid {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
 }
 
 .product-tile {
@@ -1050,8 +1130,13 @@ p {
   display: grid;
   gap: 10px;
   min-height: 220px;
-  max-height: calc(100vh - 430px);
+  max-height: calc(100vh - 470px);
   overflow: auto;
+}
+
+.pos-builder-mode .cart-list {
+  min-height: 0;
+  max-height: calc(100vh - 190px);
 }
 
 .cart-row {
@@ -1065,6 +1150,19 @@ p {
   background: #fbfcfb;
 }
 
+.cart-row.locked {
+  border-color: #d7dfda;
+  background: #f4f7f5;
+}
+
+.cart-row.locked strong {
+  color: #102a4c;
+}
+
+.cart-row.locked b {
+  color: #60716c;
+}
+
 .cart-row div:first-child {
   display: grid;
   gap: 3px;
@@ -1074,6 +1172,24 @@ p {
   color: #60716c;
   font-size: 13px;
   font-weight: 800;
+}
+
+.cart-row small {
+  color: #40514c;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.course-separator {
+  display: grid;
+  min-height: 34px;
+  place-items: center;
+  border-radius: 999px;
+  background: #102a4c;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
 }
 
 .quantity-stepper {
@@ -1112,6 +1228,11 @@ p {
   text-align: center;
 }
 
+.pos-builder-mode .empty-ticket {
+  min-height: 300px;
+  font-size: 18px;
+}
+
 .order-detail-list {
   display: grid;
   gap: 10px;
@@ -1148,9 +1269,111 @@ p {
   gap: 8px;
 }
 
+.pos-builder-mode .ticket-actions {
+  grid-template-columns: 0.9fr 1.5fr;
+  margin-top: auto;
+}
+
 .ticket-actions .primary-button,
 .ticket-actions .ghost-button {
   min-height: 48px;
+}
+
+.pos-builder-mode .ticket-actions .primary-button,
+.pos-builder-mode .ticket-actions .ghost-button {
+  min-height: 96px;
+  font-size: 26px;
+}
+
+.menu-command-bar {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 12px;
+  border-top: 1px solid #edf1ef;
+}
+
+.pos-builder-mode .menu-command-bar {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) repeat(2, minmax(150px, 1.25fr));
+}
+
+.menu-command-bar .primary-button,
+.menu-command-bar .ghost-button {
+  min-height: 48px;
+}
+
+.pos-bottom-bar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.pos-bottom-bar .primary-button,
+.pos-bottom-bar .ghost-button {
+  min-height: 62px;
+  font-size: 18px;
+}
+
+.pos-bottom-bar .danger {
+  border-color: #f0c7c7;
+  color: #9b1c1c;
+}
+
+.secondary-send {
+  background: #102a4c;
+}
+
+.modal-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 42, 76, 0.38);
+}
+
+.product-options-modal {
+  display: grid;
+  width: min(520px, 100%);
+  gap: 16px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(16, 42, 76, 0.24);
+}
+
+.compact-field select {
+  min-height: 38px;
+  width: 100%;
+  padding: 0 10px;
+  border: 1px solid #c8d2cc;
+  border-radius: 6px;
+  background: #fbfcfb;
+  color: #172026;
+}
+
+.modifier-choice-list {
+  display: grid;
+  gap: 8px;
+}
+
+.modifier-choice {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px;
+  border: 1px solid #edf1ef;
+  border-radius: 8px;
+  background: #fbfcfb;
+  color: #172026;
+  font-weight: 850;
+}
+
+.modifier-choice strong {
+  color: #0b6a45;
 }
 
 .report-metrics-grid {
@@ -1272,7 +1495,8 @@ p {
   .waiter-grid,
   .waiter-dashboard-grid,
   .waiter-flow-grid,
-  .waiter-builder-grid {
+  .waiter-builder-grid,
+  .waiter-order-screen {
     grid-template-columns: 1fr;
   }
 
@@ -1286,6 +1510,14 @@ p {
   }
 
   .ticket-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .menu-command-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .pos-bottom-bar {
     grid-template-columns: 1fr;
   }
 }

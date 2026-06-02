@@ -3,18 +3,25 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError } from "../api/apiClient";
 import { getFloorPlanView, type FloorTableView, type RestaurantTable } from "../api/floorPlanApi";
 import {
+  addItemsToWaiterOrder,
+  cancelWaiterOrder,
   createWaiterOrder,
+  getModifiers,
   getProductCategories,
+  getProductModifiers,
   getWaiterOrderItems,
   getWaiterOrders,
   getWaiterProducts,
   isOpenOrder,
   tableStatusLabel,
+  type CartEntry,
   type CartItem,
+  type Modifier,
   type Order,
   type OrderItem,
   type Product,
   type ProductCategory,
+  type ProductModifier,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { connectLiveUpdates } from "../ws/liveUpdates";
@@ -44,13 +51,16 @@ export function WaiterPage() {
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [modifiers, setModifiers] = useState<Modifier[]>([]);
+  const [productModifiers, setProductModifiers] = useState<ProductModifier[]>([]);
   const [mode, setMode] = useState<WaiterMode>("DASHBOARD");
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [guestCount, setGuestCount] = useState(2);
   const [department, setDepartment] = useState<MenuDepartment>("KITCHEN");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "ALL">("ALL");
-  const [cart, setCart] = useState<CartItem[]>([]);
+  const [cart, setCart] = useState<CartEntry[]>([]);
+  const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -65,13 +75,23 @@ export function WaiterPage() {
     setError(null);
 
     try {
-      const [floorView, nextOrders, nextOrderItems, nextProducts, nextCategories] =
+      const [
+        floorView,
+        nextOrders,
+        nextOrderItems,
+        nextProducts,
+        nextCategories,
+        nextModifiers,
+        nextProductModifiers,
+      ] =
         await Promise.all([
           getFloorPlanView(token),
           getWaiterOrders(token),
           getWaiterOrderItems(token),
           getWaiterProducts(token),
           getProductCategories(token),
+          getModifiers(token),
+          getProductModifiers(token),
         ]);
 
       setFloorTables(floorView.tables);
@@ -79,6 +99,8 @@ export function WaiterPage() {
       setOrderItems(nextOrderItems);
       setProducts(nextProducts.filter((product) => product.is_active));
       setCategories(nextCategories.filter((category) => category.is_active));
+      setModifiers(nextModifiers.filter((modifier) => modifier.is_active));
+      setProductModifiers(nextProductModifiers.filter((item) => item.is_active));
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load waiter workspace.");
@@ -89,6 +111,11 @@ export function WaiterPage() {
   useEffect(() => {
     void loadWaiterData();
   }, [loadWaiterData]);
+
+  useEffect(() => {
+    document.body.classList.toggle("pos-fullscreen", mode === "ORDER_BUILDER");
+    return () => document.body.classList.remove("pos-fullscreen");
+  }, [mode]);
 
   useEffect(() => {
     if (!token) {
@@ -120,13 +147,20 @@ export function WaiterPage() {
   );
 
   const selectedOrderItems = useMemo(
-    () => orderItems.filter((item) => item.order_id === selectedOrderId),
+    () =>
+      [...orderItems]
+        .filter((item) => item.order_id === selectedOrderId)
+        .sort((a, b) => a.position - b.position),
     [orderItems, selectedOrderId],
   );
 
   const productsById = useMemo(
     () => new Map(products.map((product) => [product.id, product])),
     [products],
+  );
+  const modifiersById = useMemo(
+    () => new Map(modifiers.map((modifier) => [modifier.id, modifier])),
+    [modifiers],
   );
 
   const departmentCategories = useMemo(
@@ -150,8 +184,26 @@ export function WaiterPage() {
   }, [departmentCategories, products, selectedCategoryId]);
 
   const cartTotal = useMemo(
-    () => cart.reduce((total, item) => total + Number(item.product.price) * item.quantity, 0),
-    [cart],
+    () =>
+      cart.reduce((total, entry) => {
+        if (!isCartItem(entry)) {
+          return total;
+        }
+
+        const modifierTotal = entry.productModifierIds.reduce(
+          (modifierSum, productModifierId) => {
+            const productModifier = productModifiers.find(
+              (modifier) => modifier.id === productModifierId,
+            );
+            return productModifier
+              ? modifierSum + getProductModifierPrice(productModifier, modifiersById)
+              : modifierSum;
+          },
+          0,
+        );
+        return total + (Number(entry.product.price) + modifierTotal) * entry.quantity;
+      }, 0),
+    [cart, modifiersById, productModifiers],
   );
 
   if (status === "idle" || status === "loading") {
@@ -176,11 +228,11 @@ export function WaiterPage() {
   }
 
   return (
-    <section className="waiter-workspace">
-      <WaiterHeader />
+    <section className={`waiter-workspace ${mode === "ORDER_BUILDER" ? "pos-builder-mode" : ""}`}>
+      {mode !== "ORDER_BUILDER" && <WaiterHeader />}
 
-      {notice && <div className="success-box">{notice}</div>}
-      {error && <div className="error-box">{error}</div>}
+      {mode !== "ORDER_BUILDER" && notice && <div className="success-box">{notice}</div>}
+      {mode !== "ORDER_BUILDER" && error && <div className="error-box">{error}</div>}
 
       {mode === "DASHBOARD" && (
         <div className="waiter-dashboard-grid">
@@ -200,9 +252,7 @@ export function WaiterPage() {
                   type="button"
                   className="order-overview-card"
                   onClick={() => {
-                    setSelectedOrderId(order.id);
-                    setMode("ORDER_DETAILS");
-                    setNotice(null);
+                    openExistingOrder(order);
                   }}
                 >
                   <span>Order #{order.id}</span>
@@ -316,16 +366,13 @@ export function WaiterPage() {
       )}
 
       {mode === "ORDER_BUILDER" && selectedTable && (
-        <div className="waiter-builder-grid">
+        <div className="waiter-order-screen">
           <main className="waiter-panel waiter-menu-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Order for table {selectedTable.table_number}</span>
+                <span className="eyebrow">Table {selectedTable.table_number}</span>
                 <h1>Menu</h1>
               </div>
-              <button type="button" className="ghost-button" onClick={() => setMode("TABLE_PICKER")}>
-                Change table
-              </button>
             </div>
 
             <div className="department-tabs">
@@ -371,7 +418,7 @@ export function WaiterPage() {
                   key={product.id}
                   type="button"
                   className="product-tile"
-                  onClick={() => addProduct(product)}
+                  onClick={() => startProductAdd(product)}
                 >
                   <span>{product.name}</span>
                   {product.description && <small>{product.description}</small>}
@@ -382,36 +429,65 @@ export function WaiterPage() {
                 <div className="module-placeholder">No active products in this section.</div>
               )}
             </div>
+
           </main>
 
           <aside className="waiter-panel order-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Ticket</span>
-                <h2>Table {selectedTable.table_number}</h2>
+                <span className="eyebrow">TICKET</span>
+                <h2>
+                  {selectedOrder ? `Order #${selectedOrder.id}` : `Table ${selectedTable.table_number}`}
+                </h2>
               </div>
-              <strong>{formatMoney(cartTotal)}</strong>
+              <strong>{formatMoney(getTicketTotal())}</strong>
             </div>
-            <p className="muted">{guestCount} guests</p>
+            <p className="muted">
+              Table {selectedTable.table_number} · {guestCount} guests
+            </p>
 
-            <CartList cart={cart} onAdd={addProduct} onDecrement={decrementProduct} />
+            {error && <div className="error-box">{error}</div>}
 
-            <div className="ticket-actions">
-              <button type="button" className="ghost-button" onClick={resetToDashboard}>
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => {
-                  void submitOrder();
-                }}
-                disabled={cart.length === 0 || isSubmitting}
-              >
-                {isSubmitting ? "Sending..." : "Send to kitchen"}
-              </button>
-            </div>
+            <CartList
+              existingItems={selectedOrderItems}
+              cart={cart}
+              productsById={productsById}
+              getModifierLabel={getModifierLabel}
+              getItemTotal={getCartItemTotal}
+              onIncrement={incrementCartItem}
+              onDecrement={decrementCartItem}
+            />
           </aside>
+
+          <div className="pos-bottom-bar">
+            <button type="button" className="ghost-button" onClick={addCourseSeparator}>
+              Separator
+            </button>
+            <button type="button" className="ghost-button danger" onClick={voidLastEntry}>
+              Void
+            </button>
+            <button type="button" className="ghost-button" onClick={addInfoToLastItem}>
+              Info
+            </button>
+            {selectedOrder && (
+              <button type="button" className="ghost-button danger" onClick={deleteExistingOrder}>
+                Delete
+              </button>
+            )}
+            <button
+              type="button"
+              className="primary-button secondary-send"
+              onClick={() => {
+                void submitOrder("ORDER_BUILDER");
+              }}
+              disabled={!hasCartItems(cart) || isSubmitting}
+            >
+              Wyślij
+            </button>
+            <button type="button" className="ghost-button" onClick={resetToDashboard}>
+              Cancel / Wyjdź
+            </button>
+          </div>
         </div>
       )}
 
@@ -453,6 +529,22 @@ export function WaiterPage() {
           </aside>
         </div>
       )}
+
+      {pendingProduct && (
+        <ProductOptionsModal
+          product={pendingProduct}
+          productModifiers={getProductModifiersForProduct(pendingProduct.id)}
+          modifiersById={modifiersById}
+          onClose={() => setPendingProduct(null)}
+          onAdd={({ notes, productModifierIds }) => {
+            appendCartItem(pendingProduct, {
+              notes,
+              productModifierIds,
+            });
+            setPendingProduct(null);
+          }}
+        />
+      )}
     </section>
   );
 
@@ -466,28 +558,110 @@ export function WaiterPage() {
     setSelectedCategoryId("ALL");
   }
 
-  function addProduct(product: Product) {
+  function openExistingOrder(order: Order) {
+    const table = floorTables.find((item) => item.table_id === order.table_id)?.table;
+    if (!table) {
+      setError("Order table is not available on floor plan.");
+      return;
+    }
+
+    setSelectedOrderId(order.id);
+    setSelectedTable(table);
+    setGuestCount(order.guest_count ?? table.current_guests ?? 1);
+    setCart([]);
     setNotice(null);
+    setError(null);
+    setMode("ORDER_BUILDER");
+  }
+
+  function startProductAdd(product: Product) {
+    const availableModifiers = getProductModifiersForProduct(product.id);
+    if (availableModifiers.length > 0 || requiresSteakInfo(product)) {
+      setPendingProduct(product);
+      return;
+    }
+
+    appendCartItem(product, { notes: null, productModifierIds: [] });
+  }
+
+  function appendCartItem(
+    product: Product,
+    options: { notes: string | null; productModifierIds: number[] },
+  ) {
+    setNotice(null);
+    setCart((items) => [
+      ...items,
+      {
+        id: crypto.randomUUID(),
+        product,
+        quantity: 1,
+        position: items.filter(isCartItem).length,
+        courseNumber: getCurrentCourseNumber(items),
+        notes: options.notes,
+        productModifierIds: options.productModifierIds,
+      },
+    ]);
+  }
+
+  function incrementCartItem(entryId: string) {
+    setCart((items) =>
+      items.map((entry) =>
+        isCartItem(entry) && entry.id === entryId
+          ? { ...entry, quantity: entry.quantity + 1 }
+          : entry,
+      ),
+    );
+  }
+
+  function decrementCartItem(entryId: string) {
+    setCart((items) =>
+      items
+        .map((entry) =>
+          isCartItem(entry) && entry.id === entryId
+            ? { ...entry, quantity: entry.quantity - 1 }
+            : entry,
+        )
+        .filter((entry) => !isCartItem(entry) || entry.quantity > 0),
+    );
+  }
+
+  function addCourseSeparator() {
     setCart((items) => {
-      const existingItem = items.find((item) => item.product.id === product.id);
-      if (existingItem) {
-        return items.map((item) =>
-          item.product.id === product.id
-            ? { ...item, quantity: item.quantity + 1 }
-            : item,
-        );
+      if (!hasCartItems(items)) {
+        return items;
       }
-      return [...items, { product, quantity: 1 }];
+      return [
+        ...items,
+        {
+          id: crypto.randomUUID(),
+          type: "SEPARATOR",
+          nextCourseNumber: getCurrentCourseNumber(items) + 1,
+        },
+      ];
     });
   }
 
-  function decrementProduct(productId: number) {
+  function voidLastEntry() {
+    setCart((items) => items.slice(0, -1));
+  }
+
+  function addInfoToLastItem() {
+    const lastItem = [...cart].reverse().find(isCartItem);
+    if (!lastItem) {
+      return;
+    }
+
+    const nextNotes = window.prompt("Info / notes", lastItem.notes ?? "");
+    if (nextNotes === null) {
+      return;
+    }
+
     setCart((items) =>
-      items
-        .map((item) =>
-          item.product.id === productId ? { ...item, quantity: item.quantity - 1 } : item,
-        )
-        .filter((item) => item.quantity > 0),
+      items.map((entry) =>
+        isCartItem(entry) && entry.id === lastItem.id
+          ? { ...entry, notes: nextNotes.trim() || null }
+          : entry,
+      ),
     );
   }
 
@@ -499,7 +673,11 @@ export function WaiterPage() {
     setError(null);
   }
 
-  async function submitOrder() {
+  function getTicketTotal(): number {
+    return Number(selectedOrder?.total_amount ?? 0) + cartTotal;
+  }
+
+  async function submitOrder(afterSubmit: "DASHBOARD" | "ORDER_BUILDER") {
     if (!token || !user || !selectedTable) {
       return;
     }
@@ -508,20 +686,32 @@ export function WaiterPage() {
     setError(null);
     setNotice(null);
     try {
-      const order = await createWaiterOrder(token, {
-        table_id: selectedTable.id,
-        waiter_id: user.id,
-        guest_count: guestCount,
-        source: "WAITER",
-        items: cart.map((item) => ({
-          product_id: item.product.id,
-          quantity: item.quantity,
-          notes: item.notes ?? null,
-          product_modifier_ids: [],
-        })),
-      });
+      const payloadItems = cart.filter(isCartItem).map((item, index) => ({
+        product_id: item.product.id,
+        quantity: item.quantity,
+        position: index,
+        course_number: item.courseNumber,
+        notes: item.notes ?? null,
+        product_modifier_ids: item.productModifierIds,
+      }));
+      const order = selectedOrder
+        ? await addItemsToWaiterOrder(token, selectedOrder.id, {
+            items: payloadItems,
+          })
+        : await createWaiterOrder(token, {
+            table_id: selectedTable.id,
+            waiter_id: user.id,
+            guest_count: guestCount,
+            source: "WAITER",
+            items: payloadItems,
+          });
       setNotice(`Order #${order.id} sent to production.`);
-      resetToDashboard();
+      setCart([]);
+      if (afterSubmit === "DASHBOARD") {
+        resetToDashboard();
+      } else {
+        setSelectedOrderId(order.id);
+      }
       await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not create order.");
@@ -529,37 +719,122 @@ export function WaiterPage() {
       setIsSubmitting(false);
     }
   }
+
+  async function deleteExistingOrder() {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    const managerPin = window.prompt("Manager PIN");
+    if (!managerPin) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await cancelWaiterOrder(token, selectedOrder.id, managerPin);
+      setNotice(`Order #${selectedOrder.id} cancelled.`);
+      resetToDashboard();
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not delete order.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function getProductModifiersForProduct(productId: number) {
+    return productModifiers.filter((item) => item.product_id === productId);
+  }
+
+  function getModifierLabel(productModifierId: number): string {
+    const productModifier = productModifiers.find((item) => item.id === productModifierId);
+    if (!productModifier) {
+      return `Modifier #${productModifierId}`;
+    }
+    const modifier = modifiersById.get(productModifier.modifier_id);
+    const price = getProductModifierPrice(productModifier, modifiersById);
+    return `${modifier?.name ?? `Modifier #${productModifier.modifier_id}`} ${
+      price > 0 ? `+${formatMoney(price)}` : ""
+    }`.trim();
+  }
+
+  function getCartItemTotal(item: CartItem): number {
+    const modifierTotal = item.productModifierIds.reduce((total, productModifierId) => {
+      const productModifier = productModifiers.find((modifier) => modifier.id === productModifierId);
+      return productModifier
+        ? total + getProductModifierPrice(productModifier, modifiersById)
+        : total;
+    }, 0);
+    return (Number(item.product.price) + modifierTotal) * item.quantity;
+  }
 }
 
 function CartList({
+  existingItems,
   cart,
-  onAdd,
+  productsById,
+  getModifierLabel,
+  getItemTotal,
+  onIncrement,
   onDecrement,
 }: {
-  cart: CartItem[];
-  onAdd: (product: Product) => void;
-  onDecrement: (productId: number) => void;
+  existingItems: OrderItem[];
+  cart: CartEntry[];
+  productsById: Map<number, Product>;
+  getModifierLabel: (productModifierId: number) => string;
+  getItemTotal: (item: CartItem) => number;
+  onIncrement: (entryId: string) => void;
+  onDecrement: (entryId: string) => void;
 }) {
   return (
     <div className="cart-list">
-      {cart.map((item) => (
-        <div key={item.product.id} className="cart-row">
-          <div>
-            <strong>{item.product.name}</strong>
-            <span>{formatMoney(Number(item.product.price))}</span>
+      {existingItems.map((item) => {
+        const product = productsById.get(item.product_id);
+        return (
+          <div key={item.id} className="cart-row locked">
+            <div>
+              <strong>* {product?.name ?? `Product #${item.product_id}`}</strong>
+              <span>
+                Course {item.course_number} · {item.quantity} x {formatMoney(Number(item.unit_price))}
+              </span>
+              {item.notes && <small>{item.notes}</small>}
+            </div>
+            <b>{formatMoney(Number(item.total_price))}</b>
           </div>
-          <div className="quantity-stepper">
-            <button type="button" onClick={() => onDecrement(item.product.id)}>
-              -
-            </button>
-            <span>{item.quantity}</span>
-            <button type="button" onClick={() => onAdd(item.product)}>
-              +
-            </button>
+        );
+      })}
+      {cart.map((entry) =>
+        isCartItem(entry) ? (
+          <div key={entry.id} className="cart-row">
+            <div>
+              <strong>{entry.product.name}</strong>
+              <span>
+                Course {entry.courseNumber} · {formatMoney(getItemTotal(entry))}
+              </span>
+              {entry.notes && <small>{entry.notes}</small>}
+              {entry.productModifierIds.map((productModifierId) => (
+                <small key={productModifierId}>{getModifierLabel(productModifierId)}</small>
+              ))}
+            </div>
+            <div className="quantity-stepper">
+              <button type="button" onClick={() => onDecrement(entry.id)}>
+                -
+              </button>
+              <span>{entry.quantity}</span>
+              <button type="button" onClick={() => onIncrement(entry.id)}>
+                +
+              </button>
+            </div>
           </div>
-        </div>
-      ))}
-      {cart.length === 0 && (
+        ) : (
+          <div key={entry.id} className="course-separator">
+            Course {entry.nextCourseNumber}
+          </div>
+        ),
+      )}
+      {existingItems.length === 0 && !hasCartItems(cart) && (
         <div className="empty-ticket">Select products to build this order.</div>
       )}
     </div>
@@ -577,6 +852,138 @@ function WaiterHeader() {
       <img src="/logo.png" alt="GastroFlow" />
     </div>
   );
+}
+
+function ProductOptionsModal({
+  product,
+  productModifiers,
+  modifiersById,
+  onClose,
+  onAdd,
+}: {
+  product: Product;
+  productModifiers: ProductModifier[];
+  modifiersById: Map<number, Modifier>;
+  onClose: () => void;
+  onAdd: (options: { notes: string | null; productModifierIds: number[] }) => void;
+}) {
+  const [notes, setNotes] = useState("");
+  const [selectedProductModifierIds, setSelectedProductModifierIds] = useState<number[]>([]);
+
+  const roastLevels = ["Rare", "Medium rare", "Medium", "Medium well", "Well done"];
+
+  return (
+    <div className="modal-backdrop">
+      <div className="product-options-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Item options</span>
+            <h2>{product.name}</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        {requiresSteakInfo(product) && (
+          <label className="compact-field">
+            Cooking level
+            <select
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+            >
+              <option value="">Select level</option>
+              {roastLevels.map((level) => (
+                <option key={level} value={level}>
+                  {level}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <label className="compact-field">
+          Info / notes
+          <input
+            value={notes}
+            onChange={(event) => setNotes(event.target.value)}
+            placeholder="e.g. no onion"
+          />
+        </label>
+
+        {productModifiers.length > 0 && (
+          <div className="modifier-choice-list">
+            {productModifiers.map((productModifier) => {
+              const modifier = modifiersById.get(productModifier.modifier_id);
+              const price = getProductModifierPrice(productModifier, modifiersById);
+              const isSelected = selectedProductModifierIds.includes(productModifier.id);
+              return (
+                <label key={productModifier.id} className="modifier-choice">
+                  <input
+                    type="checkbox"
+                    checked={isSelected}
+                    onChange={(event) => {
+                      setSelectedProductModifierIds((ids) =>
+                        event.target.checked
+                          ? [...ids, productModifier.id]
+                          : ids.filter((id) => id !== productModifier.id),
+                      );
+                    }}
+                  />
+                  <span>{modifier?.name ?? `Modifier #${productModifier.modifier_id}`}</span>
+                  <strong>{price > 0 ? `+${formatMoney(price)}` : "Free"}</strong>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() =>
+            onAdd({
+              notes: notes.trim() || null,
+              productModifierIds: selectedProductModifierIds,
+            })
+          }
+        >
+          Add to check
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function isCartItem(entry: CartEntry): entry is CartItem {
+  return !("type" in entry);
+}
+
+function hasCartItems(entries: CartEntry[]): boolean {
+  return entries.some(isCartItem);
+}
+
+function getCurrentCourseNumber(entries: CartEntry[]): number {
+  return entries.reduce(
+    (courseNumber, entry) =>
+      isCartItem(entry) ? courseNumber : entry.nextCourseNumber,
+    1,
+  );
+}
+
+function requiresSteakInfo(product: Product): boolean {
+  const name = product.name.toLowerCase();
+  return name.includes("steak") || name.includes("stek");
+}
+
+function getProductModifierPrice(
+  productModifier: ProductModifier,
+  modifiersById: Map<number, Modifier>,
+): number {
+  if (productModifier.price_override !== null) {
+    return Number(productModifier.price_override);
+  }
+  return Number(modifiersById.get(productModifier.modifier_id)?.price ?? 0);
 }
 
 function isBarCategory(categoryName: string): boolean {

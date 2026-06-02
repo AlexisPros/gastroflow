@@ -29,6 +29,8 @@ router = APIRouter(
 class OrderItemInput(BaseModel):
     product_id: int
     quantity: int = 1
+    position: int = 0
+    course_number: int = 1
     notes: str | None = None
     product_modifier_ids: list[int] = Field(default_factory=list)
 
@@ -39,6 +41,14 @@ class CreateOrderWithItemsRequest(BaseModel):
     guest_count: int | None = None
     source: str = "WAITER"
     items: list[OrderItemInput]
+
+
+class AddItemsToOrderRequest(BaseModel):
+    items: list[OrderItemInput]
+
+
+class CancelOrderRequest(BaseModel):
+    manager_pin: str
 
 
 class ChangeOrderTableRequest(BaseModel):
@@ -93,11 +103,67 @@ async def create_order_with_items(
                 OrderItemRequest(
                     product_id=item.product_id,
                     quantity=item.quantity,
+                    position=item.position,
+                    course_number=item.course_number,
                     notes=item.notes,
                     product_modifier_ids=item.product_modifier_ids,
                 )
                 for item in body.items
             ],
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.post("/orders/{order_id}/items", response_model=OrderRead)
+async def add_items_to_order(
+    order_id: int,
+    body: AddItemsToOrderRequest,
+    db: DbSession,
+):
+    order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=order_id,
+        entity_name="order",
+    )
+    try:
+        return await order_service.add_items_to_order(
+            db,
+            order=order,
+            items=[
+                OrderItemRequest(
+                    product_id=item.product_id,
+                    quantity=item.quantity,
+                    position=item.position,
+                    course_number=item.course_number,
+                    notes=item.notes,
+                    product_modifier_ids=item.product_modifier_ids,
+                )
+                for item in body.items
+            ],
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.post("/orders/{order_id}/cancel", response_model=OrderRead)
+async def cancel_order(
+    order_id: int,
+    body: CancelOrderRequest,
+    db: DbSession,
+):
+    order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=order_id,
+        entity_name="order",
+    )
+    try:
+        return await order_service.cancel_order_with_manager_pin(
+            db,
+            order=order,
+            manager_pin=body.manager_pin,
         )
     except ValueError as exc:
         raise_bad_request(exc)

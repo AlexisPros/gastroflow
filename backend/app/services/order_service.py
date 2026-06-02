@@ -16,12 +16,16 @@ from app.models.order_item_modifier import OrderItemModifier
 from app.models.product import Product
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
+from app.models.user import User
+from app.core.security import verify_pin
 
 
 @dataclass(slots=True)
 class OrderItemRequest:
     product_id: int
     quantity: int = 1
+    position: int = 0
+    course_number: int = 1
     notes: str | None = None
     product_modifier_ids: list[int] = field(default_factory=list)
 
@@ -86,6 +90,11 @@ class OrderService:
         order.discount_amount = Decimal("0.00")
         order.estimated_time = max(item_estimates) if item_estimates else None
 
+        await self._set_order_table_status(
+            db,
+            order=order,
+            status="OCCUPIED",
+        )
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -98,6 +107,7 @@ class OrderService:
                 "waiter_id": order.waiter_id,
                 "source": order.source,
                 "status": order.status,
+                "table_status": "OCCUPIED",
             },
         )
         return order
@@ -244,6 +254,142 @@ class OrderService:
             },
         )
         return order
+
+    async def add_items_to_order(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        items: list[OrderItemRequest],
+    ) -> Order:
+        if order.status != "OPEN":
+            raise ValueError("Only open orders can receive new items.")
+
+        if not items:
+            raise ValueError("Order must contain at least one item.")
+
+        existing_items_result = await db.execute(
+            select(OrderItem).where(OrderItem.order_id == order.id),
+        )
+        existing_items = list(existing_items_result.scalars().all())
+        next_position = (
+            max((item.position for item in existing_items), default=-1) + 1
+        )
+
+        item_estimates: list[int] = []
+        for index, item_request in enumerate(items):
+            item_request.position = next_position + index
+            order_item, item_total = await self._create_order_item(
+                db,
+                order_id=order.id,
+                item_request=item_request,
+            )
+            order.subtotal_amount += item_total
+            order.total_amount += item_total
+            item_estimated_time = await self._create_kitchen_task_for_item(
+                db,
+                order_item=order_item,
+            )
+            if item_estimated_time is not None:
+                item_estimates.append(item_estimated_time)
+
+        if item_estimates:
+            order.estimated_time = max(
+                [order.estimated_time or 0, *item_estimates],
+            )
+
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar"],
+            event="order_items_added",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "status": order.status,
+            },
+        )
+        return order
+
+    async def cancel_order_with_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        manager_pin: str,
+    ) -> Order:
+        await self._authorize_manager_pin(db, manager_pin=manager_pin)
+
+        if order.status not in {"OPEN", "PENDING_CONFIRMATION"}:
+            raise ValueError("Only active orders can be cancelled.")
+
+        order.status = "CANCELLED"
+        await self._release_table_if_no_active_orders(db, order=order)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor", "managers"],
+            event="order_cancelled",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "status": order.status,
+                "table_status": "FREE",
+            },
+        )
+        return order
+
+    async def _authorize_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        manager_pin: str,
+    ) -> User:
+        result = await db.execute(
+            select(User).where(
+                User.role.in_(["ADMIN", "MANAGER"]),
+                User.is_active.is_(True),
+            ),
+        )
+        for user in result.scalars().all():
+            if user.pin_hash and verify_pin(manager_pin, user.pin_hash):
+                return user
+
+        raise ValueError("Manager PIN is invalid.")
+
+    async def _release_table_if_no_active_orders(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+    ) -> None:
+        if order.table_id is None:
+            return
+
+        active_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == order.table_id,
+                Order.id != order.id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+            )
+            .limit(1),
+        )
+        if active_order_result.scalar_one_or_none() is not None:
+            return
+
+        result = await db.execute(
+            select(RestaurantTable).where(RestaurantTable.id == order.table_id),
+        )
+        table = result.scalar_one_or_none()
+        if table is None:
+            return
+
+        table.status = "FREE"
+        table.current_guests = None
+        db.add(table)
 
     async def _ensure_table_accepts_qr_order(
         self,
@@ -395,6 +541,9 @@ class OrderService:
         if item_request.quantity <= 0:
             raise ValueError("Order item quantity must be greater than zero.")
 
+        if item_request.course_number <= 0:
+            raise ValueError("Course number must be greater than zero.")
+
         product = await self._get_active_product(db, product_id=item_request.product_id)
         modifier_total = Decimal("0.00")
 
@@ -402,6 +551,8 @@ class OrderService:
             order_id=order_id,
             product_id=product.id,
             quantity=item_request.quantity,
+            position=item_request.position,
+            course_number=item_request.course_number,
             unit_price=product.price,
             total_price=Decimal("0.00"),
             notes=item_request.notes,

@@ -146,6 +146,85 @@ def test_create_order_with_items_reaches_service(monkeypatch):
     assert response.json()["total_amount"] == "25.00"
 
 
+def test_add_items_to_order_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def add_items_to_order(_db, *, order, items):
+        assert order.id == 1
+        assert len(items) == 1
+        assert items[0].product_id == 2
+        assert items[0].quantity == 1
+        assert items[0].position == 0
+        assert items[0].course_number == 2
+        assert items[0].notes == "Medium rare"
+        assert items[0].product_modifier_ids == [3]
+        order.subtotal_amount = Decimal("45.00")
+        order.total_amount = Decimal("45.00")
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(order_service, "add_items_to_order", add_items_to_order)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/items",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "items": [
+                    {
+                        "product_id": 2,
+                        "quantity": 1,
+                        "position": 0,
+                        "course_number": 2,
+                        "notes": "Medium rare",
+                        "product_modifier_ids": [3],
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 1
+    assert response.json()["total_amount"] == "45.00"
+
+
+def test_cancel_order_with_manager_pin_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def cancel_order_with_manager_pin(_db, *, order, manager_pin: str):
+        assert order.id == 1
+        assert manager_pin == "2468"
+        order.status = "CANCELLED"
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(
+        order_service,
+        "cancel_order_with_manager_pin",
+        cancel_order_with_manager_pin,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/cancel",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+
+
 def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
     class FakeDb:
         def __init__(self):

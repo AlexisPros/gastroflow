@@ -38,11 +38,28 @@ export type Order = {
   created_at: string;
 };
 
+export type Modifier = {
+  id: number;
+  name: string;
+  price: string;
+  is_active: boolean;
+};
+
+export type ProductModifier = {
+  id: number;
+  product_id: number;
+  modifier_id: number;
+  price_override: string | null;
+  is_active: boolean;
+};
+
 export type OrderItem = {
   id: number;
   order_id: number;
   product_id: number;
   quantity: number;
+  position: number;
+  course_number: number;
   unit_price: string;
   total_price: string;
   status: string;
@@ -50,10 +67,22 @@ export type OrderItem = {
 };
 
 export type CartItem = {
+  id: string;
   product: Product;
   quantity: number;
+  position: number;
+  courseNumber: number;
   notes?: string | null;
+  productModifierIds: number[];
 };
+
+export type CartSeparator = {
+  id: string;
+  type: "SEPARATOR";
+  nextCourseNumber: number;
+};
+
+export type CartEntry = CartItem | CartSeparator;
 
 export async function getWaiterProducts(token: string): Promise<Product[]> {
   return apiRequest<Product[]>("/products?limit=500", { token });
@@ -61,6 +90,14 @@ export async function getWaiterProducts(token: string): Promise<Product[]> {
 
 export async function getProductCategories(token: string): Promise<ProductCategory[]> {
   return apiRequest<ProductCategory[]>("/product-categories?limit=500", { token });
+}
+
+export async function getModifiers(token: string): Promise<Modifier[]> {
+  return apiRequest<Modifier[]>("/modifiers?limit=500", { token });
+}
+
+export async function getProductModifiers(token: string): Promise<ProductModifier[]> {
+  return apiRequest<ProductModifier[]>("/product-modifiers?limit=1000", { token });
 }
 
 export async function getWaiterTables(token: string): Promise<RestaurantTable[]> {
@@ -85,6 +122,8 @@ export async function createWaiterOrder(
     items: Array<{
       product_id: number;
       quantity: number;
+      position: number;
+      course_number: number;
       notes?: string | null;
       product_modifier_ids?: number[];
     }>;
@@ -94,6 +133,41 @@ export async function createWaiterOrder(
     method: "POST",
     token,
     body,
+  });
+}
+
+export async function addItemsToWaiterOrder(
+  token: string,
+  orderId: number,
+  body: {
+    items: Array<{
+      product_id: number;
+      quantity: number;
+      position: number;
+      course_number: number;
+      notes?: string | null;
+      product_modifier_ids?: number[];
+    }>;
+  },
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/items`, {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function cancelWaiterOrder(
+  token: string,
+  orderId: number,
+  managerPin: string,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/cancel`, {
+    method: "POST",
+    token,
+    body: {
+      manager_pin: managerPin,
+    },
   });
 }
 
