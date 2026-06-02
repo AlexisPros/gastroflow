@@ -957,16 +957,52 @@ small,
   overflow: auto;
   border: 1px solid #c8d2cc;
   border-radius: 8px;
+}
+
+.waiter-floor-canvas {
+  position: relative;
   background:
     linear-gradient(#eef3f0 1px, transparent 1px),
     linear-gradient(90deg, #eef3f0 1px, transparent 1px),
     #fbfcfb;
   background-position: -1px -1px;
   background-size: 40px 40px;
+  background-repeat: repeat;
+}
+
+.waiter-map-decoration,
+.waiter-map-table {
+  position: absolute;
+  transform-origin: center;
+}
+
+.waiter-map-decoration {
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  color: #ffffff;
+  opacity: 0.82;
+  pointer-events: none;
+}
+
+.waiter-map-decoration.circle {
+  border-radius: 999px;
+}
+
+.waiter-map-decoration span {
+  max-width: calc(100% - 12px);
+  overflow: hidden;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: center;
+  text-overflow: ellipsis;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
 }
 
 .waiter-map-table {
-  position: absolute;
   display: grid;
   place-items: center;
   gap: 4px;

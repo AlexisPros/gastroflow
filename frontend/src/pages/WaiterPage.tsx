@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
-import { getFloorPlanView, type FloorTableView, type RestaurantTable } from "../api/floorPlanApi";
+import {
+  getFloorPlanView,
+  type FloorPlan,
+  type FloorPlanDecoration,
+  type FloorTableView,
+  type RestaurantTable,
+} from "../api/floorPlanApi";
 import {
   addItemsToWaiterOrder,
   cancelWaiterOrder,
@@ -57,7 +63,9 @@ const barCategoryWords = [
 
 export function WaiterPage() {
   const { token, user } = useAuth();
+  const [floorPlan, setFloorPlan] = useState<FloorPlan | null>(null);
   const [floorTables, setFloorTables] = useState<FloorTableView[]>([]);
+  const [floorDecorations, setFloorDecorations] = useState<FloorPlanDecoration[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -110,7 +118,9 @@ export function WaiterPage() {
           getDiscounts(token),
         ]);
 
+      setFloorPlan(floorView.floorPlan);
       setFloorTables(floorView.tables);
+      setFloorDecorations(floorView.decorations);
       setOrders(nextOrders);
       setOrderItems(nextOrderItems);
       setProducts(nextProducts.filter((product) => product.is_active));
@@ -324,33 +334,67 @@ export function WaiterPage() {
             </div>
 
             <div className="waiter-floor-map">
-              {floorTables.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`waiter-map-table status-${(item.table?.status ?? "UNKNOWN")
-                    .toLowerCase()
-                    .replaceAll("_", "-")} ${
-                    selectedTable?.id === item.table_id ? "selected" : ""
-                  }`}
+              {floorPlan ? (
+                <div
+                  className="waiter-floor-canvas"
                   style={{
-                    left: Number(item.x),
-                    top: Number(item.y),
-                    width: Number(item.width),
-                    height: Number(item.height),
-                    borderRadius: item.shape === "CIRCLE" ? 999 : 8,
-                  }}
-                  disabled={item.table?.status !== "FREE"}
-                  onClick={() => {
-                    if (item.table?.status === "FREE") {
-                      setSelectedTable(item.table);
-                    }
+                    width: floorPlan.width,
+                    height: floorPlan.height,
+                    backgroundImage: floorPlan.background_image_url
+                      ? `url(${floorPlan.background_image_url})`
+                      : undefined,
                   }}
                 >
-                  <strong>{item.table?.table_number ?? item.table_id}</strong>
-                  <span>{tableStatusLabel(item.table?.status ?? "UNKNOWN")}</span>
-                </button>
-              ))}
+                  {floorDecorations.map((item) => (
+                    <div
+                      key={item.id}
+                      className={`waiter-map-decoration ${
+                        item.shape === "CIRCLE" ? "circle" : ""
+                      }`}
+                      style={{
+                        left: Number(item.x),
+                        top: Number(item.y),
+                        width: Number(item.width),
+                        height: Number(item.height),
+                        background: item.color,
+                        transform: `rotate(${Number(item.rotation)}deg)`,
+                      }}
+                    >
+                      {item.label && <span>{item.label}</span>}
+                    </div>
+                  ))}
+                  {floorTables.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`waiter-map-table status-${(item.table?.status ?? "UNKNOWN")
+                        .toLowerCase()
+                        .replaceAll("_", "-")} ${
+                        selectedTable?.id === item.table_id ? "selected" : ""
+                      }`}
+                      style={{
+                        left: Number(item.x),
+                        top: Number(item.y),
+                        width: Number(item.width),
+                        height: Number(item.height),
+                        borderRadius: item.shape === "CIRCLE" ? 999 : 8,
+                        transform: `rotate(${Number(item.rotation)}deg)`,
+                      }}
+                      disabled={item.table?.status !== "FREE"}
+                      onClick={() => {
+                        if (item.table?.status === "FREE") {
+                          setSelectedTable(item.table);
+                        }
+                      }}
+                    >
+                      <strong>{item.table?.table_number ?? item.table_id}</strong>
+                      <span>{tableStatusLabel(item.table?.status ?? "UNKNOWN")}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-ticket">No active floor plan.</div>
+              )}
             </div>
           </main>
 
