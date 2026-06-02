@@ -26,7 +26,10 @@ class DiscountService:
         order.discount_id = discount.id
         order.subtotal_amount = base_total
         order.discount_amount = discount_amount
-        order.total_amount = max(base_total - discount_amount, Decimal("0.00"))
+        order.total_amount = (
+            max(base_total - discount_amount, Decimal("0.00"))
+            + order.tip_amount
+        )
 
         db.add(order)
         await db.commit()
@@ -39,7 +42,7 @@ class DiscountService:
         order.discount_id = None
         order.subtotal_amount = base_total
         order.discount_amount = Decimal("0.00")
-        order.total_amount = base_total
+        order.total_amount = base_total + order.tip_amount
 
         db.add(order)
         await db.commit()

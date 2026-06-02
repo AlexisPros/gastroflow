@@ -254,7 +254,10 @@ async def add_order_tip(order_id: int, body: AddTipRequest, db: DbSession):
         id=order_id,
         entity_name="order",
     )
-    return await crud_order.add_tip(db, db_obj=order, tip_amount=body.tip_amount)
+    try:
+        return await crud_order.add_tip(db, db_obj=order, tip_amount=body.tip_amount)
+    except ValueError as exc:
+        raise_bad_request(exc)
 
 
 @router.post("/orders/{order_id}/close", response_model=OrderRead)

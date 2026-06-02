@@ -229,9 +229,12 @@ class OrderService:
             Decimal("0.00"),
         )
         order.subtotal_amount = subtotal_amount
-        order.total_amount = max(
-            subtotal_amount - order.discount_amount,
-            Decimal("0.00"),
+        order.total_amount = (
+            max(
+                subtotal_amount - order.discount_amount,
+                Decimal("0.00"),
+            )
+            + order.tip_amount
         )
         order.estimated_time = await self._calculate_order_estimated_time(
             db,
@@ -404,7 +407,10 @@ class OrderService:
 
         order.subtotal_amount = base_total
         order.discount_amount = discount_amount
-        order.total_amount = max(base_total - discount_amount, Decimal("0.00"))
+        order.total_amount = (
+            max(base_total - discount_amount, Decimal("0.00"))
+            + order.tip_amount
+        )
 
         db.add(
             OrderActionLog(

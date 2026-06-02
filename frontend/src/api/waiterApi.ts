@@ -254,6 +254,20 @@ export async function removeDiscountFromWaiterOrder(
   });
 }
 
+export async function updateWaiterOrderTip(
+  token: string,
+  orderId: number,
+  tipAmount: string,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/tip`, {
+    method: "PATCH",
+    token,
+    body: {
+      tip_amount: tipAmount,
+    },
+  });
+}
+
 export async function registerWaiterPayment(
   token: string,
   orderId: number,

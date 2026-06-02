@@ -31,6 +31,7 @@ import {
   voidWaiterOrderItem,
   registerWaiterPayment,
   removeDiscountFromWaiterOrder,
+  updateWaiterOrderTip,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { connectLiveUpdates } from "../ws/liveUpdates";
@@ -72,6 +73,7 @@ export function WaiterPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "ALL">("ALL");
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [selectedTicketLine, setSelectedTicketLine] = useState<TicketSelection | null>(null);
+  const [tipInput, setTipInput] = useState("");
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -494,7 +496,11 @@ export function WaiterPage() {
               Info
             </button>
             {selectedOrder && (
-              <button type="button" className="ghost-button danger" onClick={deleteExistingOrder}>
+              <button
+                type="button"
+                className="ghost-button danger delete-button"
+                onClick={deleteExistingOrder}
+              >
                 Delete
               </button>
             )}
@@ -570,7 +576,6 @@ export function WaiterPage() {
 
             <section className="discount-section">
               <div>
-                <span className="eyebrow">Discounts</span>
                 <h2>Rabaty</h2>
               </div>
               <div className="discount-grid">
@@ -579,18 +584,68 @@ export function WaiterPage() {
                     key={discount.id}
                     type="button"
                     className={selectedOrder.discount_id === discount.id ? "selected" : ""}
-                disabled={isSubmitting}
-                onClick={() => {
+                    disabled={isSubmitting}
+                    onClick={() => {
                       void toggleDiscount(discount.id);
-                }}
+                    }}
                   >
-                    <strong>{discount.name}</strong>
-                    <span>{formatDiscountValue(discount)}</span>
+                    <strong>{formatDiscountValue(discount)}</strong>
                   </button>
                 ))}
                 {discounts.length === 0 && (
                   <div className="empty-ticket">No discounts in database.</div>
                 )}
+              </div>
+            </section>
+
+            <section className="tip-section">
+              <div>
+                <h2>Napiwek</h2>
+              </div>
+              <div className="tip-quick-grid">
+                {[10, 15, 20].map((percent) => (
+                  <button
+                    key={percent}
+                    type="button"
+                    className={isTipPercentSelected(percent) ? "selected" : ""}
+                    disabled={isSubmitting}
+                    onClick={() => {
+                      void applyTipPercent(percent);
+                    }}
+                  >
+                    {percent}%
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  className="clear-tip-button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    void applyTipAmount("0");
+                  }}
+                >
+                  Clear
+                </button>
+              </div>
+              <div className="tip-manual-row">
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={tipInput}
+                  placeholder="Kwota napiwku"
+                  onChange={(event) => setTipInput(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="ghost-button"
+                  disabled={isSubmitting}
+                  onClick={() => {
+                    void applyTipAmount(tipInput);
+                  }}
+                >
+                  Add tip
+                </button>
               </div>
             </section>
 
@@ -777,6 +832,7 @@ export function WaiterPage() {
     setSelectedOrderId(null);
     setCart([]);
     setSelectedTicketLine(null);
+    setTipInput("");
     setError(null);
   }
 
@@ -788,6 +844,7 @@ export function WaiterPage() {
     setError(null);
     setNotice(null);
     setSelectedTicketLine(null);
+    setTipInput(Number(selectedOrder.tip_amount) > 0 ? selectedOrder.tip_amount : "");
     setMode("CHECKOUT");
   }
 
@@ -823,6 +880,70 @@ export function WaiterPage() {
       await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not update discount.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function applyTipPercent(percent: number) {
+    if (!selectedOrder) {
+      return;
+    }
+
+    if (isTipPercentSelected(percent)) {
+      await applyTipAmount("0");
+      return;
+    }
+
+    const tipBase = getTipBaseAmount(selectedOrder);
+    const tipAmount = (tipBase * percent) / 100;
+    await applyTipAmount(tipAmount.toFixed(2));
+  }
+
+  function isTipPercentSelected(percent: number): boolean {
+    if (!selectedOrder) {
+      return false;
+    }
+
+    const tipAmount = Number(selectedOrder.tip_amount);
+    if (tipAmount <= 0) {
+      return false;
+    }
+
+    const expectedTip = (getTipBaseAmount(selectedOrder) * percent) / 100;
+    return Math.abs(tipAmount - expectedTip) < 0.015;
+  }
+
+  function getTipBaseAmount(order: Order): number {
+    return Math.max(Number(order.total_amount) - Number(order.tip_amount), 0);
+  }
+
+  async function applyTipAmount(rawAmount: string) {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    const amount = Number(rawAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setError("Tip amount must be zero or greater.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updatedOrder = await updateWaiterOrderTip(
+        token,
+        selectedOrder.id,
+        amount.toFixed(2),
+      );
+      replaceOrder(updatedOrder);
+      setTipInput(amount > 0 ? amount.toFixed(2) : "");
+      setNotice(amount > 0 ? "Tip added." : "Tip removed.");
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not update tip.");
     } finally {
       setIsSubmitting(false);
     }

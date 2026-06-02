@@ -65,7 +65,17 @@ class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
         db_obj: Order,
         tip_amount: Decimal,
     ) -> Order:
+        if tip_amount < Decimal("0.00"):
+            raise ValueError("Tip amount must be zero or greater.")
+
         db_obj.tip_amount = tip_amount
+        db_obj.total_amount = (
+            max(
+                db_obj.subtotal_amount - db_obj.discount_amount,
+                Decimal("0.00"),
+            )
+            + tip_amount
+        )
 
         db.add(db_obj)
         await db.commit()

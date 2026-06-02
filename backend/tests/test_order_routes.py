@@ -931,6 +931,59 @@ def test_close_order_reaches_crud(monkeypatch):
     assert response.json()["closed_at"] is not None
 
 
+def test_add_tip_recalculates_total_with_discount():
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+            self.committed = False
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = make_order()
+    order.subtotal_amount = Decimal("40.00")
+    order.discount_amount = Decimal("4.00")
+    order.tip_amount = Decimal("0.00")
+    order.total_amount = Decimal("36.00")
+    db = FakeDb()
+
+    updated_order = asyncio.run(
+        crud_order.add_tip(
+            cast(AsyncSession, db),
+            db_obj=order,
+            tip_amount=Decimal("5.00"),
+        ),
+    )
+
+    assert updated_order.tip_amount == Decimal("5.00")
+    assert updated_order.total_amount == Decimal("41.00")
+    assert db.added == [order]
+    assert db.committed is True
+
+
+def test_add_tip_rejects_negative_amount():
+    order = make_order()
+
+    try:
+        asyncio.run(
+            crud_order.add_tip(
+                cast(AsyncSession, object()),
+                db_obj=order,
+                tip_amount=Decimal("-1.00"),
+            ),
+        )
+    except ValueError as exc:
+        assert str(exc) == "Tip amount must be zero or greater."
+    else:
+        raise AssertionError("Negative tip amount should be rejected.")
+
+
 def test_apply_discount_reaches_service(monkeypatch):
     async def get(_db, id: int):
         assert id == 1
