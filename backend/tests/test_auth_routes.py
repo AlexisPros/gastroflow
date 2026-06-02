@@ -398,6 +398,32 @@ def test_resource_create_with_allowed_role_reaches_crud(monkeypatch):
     assert response.json()["table_number"] == "A2"
 
 
+def test_resource_create_duplicate_table_number_returns_400(monkeypatch):
+    async def create(_db, *, obj_in):
+        assert obj_in.table_number == "A1"
+        raise ValueError("Table number already exists.")
+
+    monkeypatch.setattr(crud_restaurant_table, "create", create)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.post(
+            "/api/v1/restaurant-tables",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "table_number": "A1",
+                "current_guests": None,
+                "qr_code_url": None,
+                "is_active": True,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Table number already exists."
+
+
 def test_resource_update_with_allowed_role_reaches_crud(monkeypatch):
     async def get(_db, id: int):
         assert id == 1
@@ -424,6 +450,33 @@ def test_resource_update_with_allowed_role_reaches_crud(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "OCCUPIED"
+
+
+def test_resource_update_duplicate_table_number_returns_400(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_restaurant_table()
+
+    async def update(_db, *, db_obj, obj_in):
+        assert db_obj.id == 1
+        assert obj_in.table_number == "A2"
+        raise ValueError("Table number already exists.")
+
+    monkeypatch.setattr(crud_restaurant_table, "get", get)
+    monkeypatch.setattr(crud_restaurant_table, "update", update)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.patch(
+            "/api/v1/restaurant-tables/1",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"table_number": "A2"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Table number already exists."
 
 
 def test_resource_delete_with_allowed_role_reaches_crud(monkeypatch):

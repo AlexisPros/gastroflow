@@ -152,6 +152,25 @@ export async function deleteRestaurantTable(
   });
 }
 
+export async function updateRestaurantTable(
+  token: string,
+  tableId: number,
+  body: Partial<{
+    table_number: string;
+    current_guests: number | null;
+    status: RestaurantTableStatus;
+    qr_code_url: string | null;
+    qr_token: string | null;
+    is_active: boolean;
+  }>,
+): Promise<RestaurantTable> {
+  return apiRequest<RestaurantTable>(`/restaurant-tables/${tableId}`, {
+    method: "PATCH",
+    token,
+    body,
+  });
+}
+
 export async function createFloorPlanDecoration(
   token: string,
   floorPlanId: number,

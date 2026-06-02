@@ -17,6 +17,7 @@ import {
   getFloorPlanView,
   updateFloorPlanDecoration,
   updateFloorPlanTablePosition,
+  updateRestaurantTable,
   type FloorPlan,
   type FloorPlanDecoration,
   type FloorPlanTablePositionInput,
@@ -337,6 +338,15 @@ export function FloorPlanPage() {
 
           <h2>{selectedDecoration ? "Object details" : "Table details"}</h2>
           {selectedTable && <TableDetails item={selectedTable} />}
+          {canEdit && selectedTable?.table && (
+            <TableNumberEditor
+              table={selectedTable.table}
+              isSaving={isSaving}
+              onSave={(tableNumber) => {
+                void saveTableNumber(selectedTable.table_id, tableNumber);
+              }}
+            />
+          )}
           {selectedDecoration && <DecorationDetails item={selectedDecoration} />}
           {canEdit && selectedDecoration && (
             <DecorationLabelEditor
@@ -473,6 +483,31 @@ export function FloorPlanPage() {
       await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create object.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveTableNumber(tableId: number, tableNumber: string) {
+    if (!token) {
+      return;
+    }
+
+    const nextTableNumber = tableNumber.trim();
+    if (!nextTableNumber) {
+      setEditorError("Table number cannot be empty.");
+      return;
+    }
+
+    setIsSaving(true);
+    setEditorError(null);
+    try {
+      await updateRestaurantTable(token, tableId, {
+        table_number: nextTableNumber,
+      });
+      await loadFloorPlan();
+    } catch (exc) {
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not save table number.");
     } finally {
       setIsSaving(false);
     }
@@ -942,6 +977,45 @@ function TableDetails({ item }: { item: FloorTableView }) {
           Open QR URL
         </a>
       )}
+    </div>
+  );
+}
+
+function TableNumberEditor({
+  table,
+  isSaving,
+  onSave,
+}: {
+  table: NonNullable<FloorTableView["table"]>;
+  isSaving: boolean;
+  onSave: (tableNumber: string) => void;
+}) {
+  const [tableNumber, setTableNumber] = useState(table.table_number);
+
+  useEffect(() => {
+    setTableNumber(table.table_number);
+  }, [table.id, table.table_number]);
+
+  return (
+    <div className="position-editor">
+      <h2>Table number</h2>
+      <label className="compact-field">
+        Table number
+        <input
+          value={tableNumber}
+          onChange={(event) => setTableNumber(event.target.value)}
+          placeholder="e.g. 12"
+          maxLength={20}
+        />
+      </label>
+      <button
+        type="button"
+        className="primary-button"
+        onClick={() => onSave(tableNumber)}
+        disabled={isSaving}
+      >
+        {isSaving ? "Saving..." : "Save table number"}
+      </button>
     </div>
   );
 }
