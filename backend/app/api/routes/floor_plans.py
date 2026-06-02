@@ -1,7 +1,13 @@
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, RequireFloorPlanRole, get_or_404, raise_bad_request
+from app.api.deps import (
+    DbSession,
+    RequireFloorPlanRole,
+    RequireStaffRole,
+    get_or_404,
+    raise_bad_request,
+)
 from app.crud import floor_plan as crud_floor_plan
 from app.crud import floor_plan_decoration as crud_floor_plan_decoration
 from app.crud import floor_plan_table as crud_floor_plan_table
@@ -18,7 +24,6 @@ from app.services import floor_plan_service
 
 router = APIRouter(
     tags=["Floor plans"],
-    dependencies=[RequireFloorPlanRole],
 )
 
 
@@ -35,7 +40,11 @@ class CreateTableOnFloorPlanRequest(BaseModel):
     position: FloorPlanTablePositionUpdate
 
 
-@router.get("/floor-plans/active", response_model=FloorPlanRead)
+@router.get(
+    "/floor-plans/active",
+    response_model=FloorPlanRead,
+    dependencies=[RequireStaffRole],
+)
 async def get_active_floor_plan(db: DbSession):
     floor_plan = await crud_floor_plan.get_active(db)
     if floor_plan is None:
@@ -47,7 +56,11 @@ async def get_active_floor_plan(db: DbSession):
     return floor_plan
 
 
-@router.post("/floor-plans/{floor_plan_id}/activate", response_model=FloorPlanRead)
+@router.post(
+    "/floor-plans/{floor_plan_id}/activate",
+    response_model=FloorPlanRead,
+    dependencies=[RequireFloorPlanRole],
+)
 async def activate_floor_plan(floor_plan_id: int, db: DbSession):
     floor_plan = await get_or_404(
         crud_obj=crud_floor_plan,
@@ -58,7 +71,11 @@ async def activate_floor_plan(floor_plan_id: int, db: DbSession):
     return await floor_plan_service.activate(db, floor_plan=floor_plan)
 
 
-@router.post("/floor-plans/{floor_plan_id}/deactivate", response_model=FloorPlanRead)
+@router.post(
+    "/floor-plans/{floor_plan_id}/deactivate",
+    response_model=FloorPlanRead,
+    dependencies=[RequireFloorPlanRole],
+)
 async def deactivate_floor_plan(floor_plan_id: int, db: DbSession):
     floor_plan = await get_or_404(
         crud_obj=crud_floor_plan,
@@ -72,6 +89,7 @@ async def deactivate_floor_plan(floor_plan_id: int, db: DbSession):
 @router.get(
     "/floor-plans/{floor_plan_id}/tables",
     response_model=list[FloorPlanTableRead],
+    dependencies=[RequireStaffRole],
 )
 async def list_floor_plan_tables(floor_plan_id: int, db: DbSession):
     await get_or_404(
@@ -89,6 +107,7 @@ async def list_floor_plan_tables(floor_plan_id: int, db: DbSession):
 @router.get(
     "/floor-plans/{floor_plan_id}/decorations",
     response_model=list[FloorPlanDecorationRead],
+    dependencies=[RequireStaffRole],
 )
 async def list_floor_plan_decorations(floor_plan_id: int, db: DbSession):
     await get_or_404(
@@ -107,6 +126,7 @@ async def list_floor_plan_decorations(floor_plan_id: int, db: DbSession):
     "/floor-plans/{floor_plan_id}/decorations",
     response_model=FloorPlanDecorationRead,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[RequireFloorPlanRole],
 )
 async def create_floor_plan_decoration(
     floor_plan_id: int,
@@ -130,6 +150,7 @@ async def create_floor_plan_decoration(
 @router.patch(
     "/floor-plans/{floor_plan_id}/decorations/{decoration_id}",
     response_model=FloorPlanDecorationRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def update_floor_plan_decoration(
     floor_plan_id: int,
@@ -164,6 +185,7 @@ async def update_floor_plan_decoration(
 @router.delete(
     "/floor-plans/{floor_plan_id}/decorations/{decoration_id}",
     response_model=FloorPlanDecorationRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def delete_floor_plan_decoration(
     floor_plan_id: int,
@@ -203,6 +225,7 @@ async def delete_floor_plan_decoration(
 @router.get(
     "/floor-plans/{floor_plan_id}/tables/by-restaurant-table/{table_id}",
     response_model=FloorPlanTableRead,
+    dependencies=[RequireStaffRole],
 )
 async def get_floor_plan_table_position(
     floor_plan_id: int,
@@ -232,6 +255,7 @@ async def get_floor_plan_table_position(
 @router.post(
     "/floor-plans/{floor_plan_id}/tables",
     response_model=FloorPlanTableRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def add_table_to_floor_plan(
     floor_plan_id: int,
@@ -264,6 +288,7 @@ async def add_table_to_floor_plan(
 @router.post(
     "/floor-plans/{floor_plan_id}/tables/create-restaurant-table",
     response_model=FloorPlanTableRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def create_restaurant_table_on_floor_plan(
     floor_plan_id: int,
@@ -293,6 +318,7 @@ async def create_restaurant_table_on_floor_plan(
 @router.patch(
     "/floor-plans/{floor_plan_id}/tables/{floor_plan_table_id}/position",
     response_model=FloorPlanTableRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def update_floor_plan_table_position(
     floor_plan_id: int,
@@ -326,6 +352,7 @@ async def update_floor_plan_table_position(
 @router.delete(
     "/floor-plans/{floor_plan_id}/tables/{floor_plan_table_id}",
     response_model=FloorPlanTableRead,
+    dependencies=[RequireFloorPlanRole],
 )
 async def remove_table_from_floor_plan(
     floor_plan_id: int,

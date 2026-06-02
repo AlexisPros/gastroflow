@@ -101,13 +101,43 @@ def make_reservation_table() -> ReservationTable:
     )
 
 
-def test_floor_plan_route_forbidden_for_waiter():
+def test_floor_plan_route_allowed_for_waiter(monkeypatch):
+    async def get_active(_db):
+        return make_floor_plan()
+
+    monkeypatch.setattr(crud_floor_plan, "get_active", get_active)
     override_current_user("WAITER")
 
     try:
         response = client.get(
             "/api/v1/floor-plans/active",
             headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "Main hall"
+
+
+def test_floor_plan_write_forbidden_for_waiter():
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/floor-plans/1/tables",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "table_id": 1,
+                "position": {
+                    "x": "10.00",
+                    "y": "20.00",
+                    "width": "100.00",
+                    "height": "80.00",
+                    "rotation": "0.00",
+                    "shape": "RECTANGLE",
+                },
+            },
         )
     finally:
         app.dependency_overrides.clear()

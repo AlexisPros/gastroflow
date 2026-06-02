@@ -148,12 +148,12 @@ def test_wrong_role_fails_role_guard():
     assert exc_info.value.status_code == 403
 
 
-def test_wrong_role_gets_403_on_protected_route():
+def test_wrong_role_gets_403_on_protected_write_route():
     override_current_user("WAITER")
 
     try:
-        response = client.get(
-            "/api/v1/floor-plans/active",
+        response = client.post(
+            "/api/v1/floor-plans/1/activate",
             headers={"Authorization": "Bearer fake-token"},
         )
     finally:
