@@ -225,6 +225,64 @@ def test_cancel_order_with_manager_pin_reaches_service(monkeypatch):
     assert response.json()["status"] == "CANCELLED"
 
 
+def test_verify_manager_pin_reaches_service(monkeypatch):
+    async def verify_manager_pin(_db, *, manager_pin: str):
+        assert manager_pin == "2468"
+        return make_user("MANAGER")
+
+    monkeypatch.setattr(order_service, "verify_manager_pin", verify_manager_pin)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/manager-pin/verify",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+def test_void_order_item_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def void_order_item(
+        _db,
+        *,
+        order,
+        order_item_id: int,
+        current_user,
+        manager_pin: str | None = None,
+    ):
+        assert order.id == 1
+        assert order_item_id == 7
+        assert current_user.role == "WAITER"
+        assert manager_pin == "2468"
+        order.total_amount = Decimal("15.00")
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(order_service, "void_order_item", void_order_item)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/items/7/void",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["total_amount"] == "15.00"
+
+
 def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
     class FakeDb:
         def __init__(self):

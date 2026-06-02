@@ -18,6 +18,7 @@ from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
 from app.models.user import User
 from app.core.security import verify_pin
+from app.services.discount_service import discount_service
 
 
 @dataclass(slots=True)
@@ -337,6 +338,94 @@ class OrderService:
                 "table_id": order.table_id,
                 "status": order.status,
                 "table_status": "FREE",
+            },
+        )
+        return order
+
+    async def verify_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        manager_pin: str,
+    ) -> User:
+        return await self._authorize_manager_pin(db, manager_pin=manager_pin)
+
+    async def void_order_item(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        order_item_id: int,
+        current_user: User,
+        manager_pin: str | None = None,
+    ) -> Order:
+        if order.status != "OPEN":
+            raise ValueError("Only open orders can be changed.")
+
+        authorized_user = current_user
+        if current_user.role not in {"ADMIN", "MANAGER"}:
+            if not manager_pin:
+                raise ValueError("Manager PIN is required.")
+            authorized_user = await self._authorize_manager_pin(
+                db,
+                manager_pin=manager_pin,
+            )
+
+        result = await db.execute(
+            select(OrderItem).where(
+                OrderItem.id == order_item_id,
+                OrderItem.order_id == order.id,
+            ),
+        )
+        order_item = result.scalar_one_or_none()
+        if order_item is None:
+            raise ValueError("Order item does not exist in this order.")
+
+        remaining_result = await db.execute(
+            select(OrderItem).where(
+                OrderItem.order_id == order.id,
+                OrderItem.id != order_item.id,
+            ),
+        )
+        base_total = sum(
+            (item.total_price for item in remaining_result.scalars().all()),
+            Decimal("0.00"),
+        )
+        discount_amount = Decimal("0.00")
+        if order.discount_id is not None:
+            discount = await discount_service._get_active_discount(
+                db,
+                discount_id=order.discount_id,
+            )
+            discount_amount = discount_service.calculate_discount_amount(
+                discount=discount,
+                base_total=base_total,
+            )
+
+        order.subtotal_amount = base_total
+        order.discount_amount = discount_amount
+        order.total_amount = max(base_total - discount_amount, Decimal("0.00"))
+
+        db.add(
+            OrderActionLog(
+                order_id=order.id,
+                user_id=authorized_user.id,
+                action_type="ORDER_ITEM_VOIDED",
+                description=f"Voided order item #{order_item.id}.",
+            ),
+        )
+        await db.delete(order_item)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar", "managers"],
+            event="order_item_voided",
+            data={
+                "order_id": order.id,
+                "order_item_id": order_item_id,
+                "status": order.status,
+                "total_amount": str(order.total_amount),
             },
         )
         return order

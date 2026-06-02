@@ -3,7 +3,7 @@ from decimal import Decimal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from app.api.deps import DbSession, RequireOrderRole, get_or_404, raise_bad_request
+from app.api.deps import CurrentUser, DbSession, RequireOrderRole, get_or_404, raise_bad_request
 from app.core.websocket_manager import websocket_manager
 from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
@@ -49,6 +49,18 @@ class AddItemsToOrderRequest(BaseModel):
 
 class CancelOrderRequest(BaseModel):
     manager_pin: str
+
+
+class VerifyManagerPinRequest(BaseModel):
+    manager_pin: str
+
+
+class VerifyManagerPinResponse(BaseModel):
+    success: bool
+
+
+class VoidOrderItemRequest(BaseModel):
+    manager_pin: str | None = None
 
 
 class ChangeOrderTableRequest(BaseModel):
@@ -163,6 +175,45 @@ async def cancel_order(
         return await order_service.cancel_order_with_manager_pin(
             db,
             order=order,
+            manager_pin=body.manager_pin,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.post("/orders/manager-pin/verify", response_model=VerifyManagerPinResponse)
+async def verify_manager_pin(
+    body: VerifyManagerPinRequest,
+    db: DbSession,
+):
+    try:
+        await order_service.verify_manager_pin(db, manager_pin=body.manager_pin)
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+    return VerifyManagerPinResponse(success=True)
+
+
+@router.post("/orders/{order_id}/items/{order_item_id}/void", response_model=OrderRead)
+async def void_order_item(
+    order_id: int,
+    order_item_id: int,
+    body: VoidOrderItemRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=order_id,
+        entity_name="order",
+    )
+    try:
+        return await order_service.void_order_item(
+            db,
+            order=order,
+            order_item_id=order_item_id,
+            current_user=current_user,
             manager_pin=body.manager_pin,
         )
     except ValueError as exc:

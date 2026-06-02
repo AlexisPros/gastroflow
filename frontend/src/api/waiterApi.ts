@@ -1,4 +1,4 @@
-import { apiRequest } from "./apiClient";
+import { apiBlobRequest, apiRequest } from "./apiClient";
 import type { RestaurantTable, RestaurantTableStatus } from "./floorPlanApi";
 
 export type ProductCategory = {
@@ -53,6 +53,33 @@ export type ProductModifier = {
   is_active: boolean;
 };
 
+export type Discount = {
+  id: number;
+  name: string;
+  type: string;
+  value: string;
+  is_active: boolean;
+};
+
+export type Payment = {
+  id: number;
+  order_id: number;
+  method: string;
+  amount: string;
+  status: string;
+  created_at: string;
+};
+
+export type Invoice = {
+  id: number;
+  order_id: number;
+  nip: string;
+  company_name: string;
+  invoice_number: string;
+  status: string;
+  created_at: string;
+};
+
 export type OrderItem = {
   id: number;
   order_id: number;
@@ -98,6 +125,10 @@ export async function getModifiers(token: string): Promise<Modifier[]> {
 
 export async function getProductModifiers(token: string): Promise<ProductModifier[]> {
   return apiRequest<ProductModifier[]>("/product-modifiers?limit=1000", { token });
+}
+
+export async function getDiscounts(token: string): Promise<Discount[]> {
+  return apiRequest<Discount[]>("/discounts?limit=500", { token });
 }
 
 export async function getWaiterTables(token: string): Promise<RestaurantTable[]> {
@@ -168,6 +199,100 @@ export async function cancelWaiterOrder(
     body: {
       manager_pin: managerPin,
     },
+  });
+}
+
+export async function verifyManagerPin(
+  token: string,
+  managerPin: string,
+): Promise<{ success: boolean }> {
+  return apiRequest<{ success: boolean }>("/orders/manager-pin/verify", {
+    method: "POST",
+    token,
+    body: {
+      manager_pin: managerPin,
+    },
+  });
+}
+
+export async function voidWaiterOrderItem(
+  token: string,
+  orderId: number,
+  orderItemId: number,
+  managerPin?: string,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/items/${orderItemId}/void`, {
+    method: "POST",
+    token,
+    body: {
+      manager_pin: managerPin ?? null,
+    },
+  });
+}
+
+export async function applyDiscountToWaiterOrder(
+  token: string,
+  orderId: number,
+  discountId: number,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/discount`, {
+    method: "POST",
+    token,
+    body: {
+      discount_id: discountId,
+    },
+  });
+}
+
+export async function removeDiscountFromWaiterOrder(
+  token: string,
+  orderId: number,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/discount`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export async function registerWaiterPayment(
+  token: string,
+  orderId: number,
+  body: {
+    method: "CARD" | "CASH";
+    amount: string;
+    close_order: boolean;
+  },
+): Promise<Payment> {
+  return apiRequest<Payment>(`/orders/${orderId}/payments`, {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function createInvoiceForWaiterOrder(
+  token: string,
+  orderId: number,
+  body: {
+    nip: string;
+    company_name: string;
+  },
+): Promise<Invoice> {
+  return apiRequest<Invoice>(`/orders/${orderId}/invoice`, {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function generateWaiterReceiptPdf(
+  token: string,
+  orderId: number,
+): Promise<Blob> {
+  return apiBlobRequest(`/orders/${orderId}/receipt/pdf`, {
+    method: "POST",
+    token,
+    timeoutMs: 20000,
   });
 }
 

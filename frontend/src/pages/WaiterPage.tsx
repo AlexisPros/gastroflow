@@ -6,6 +6,10 @@ import {
   addItemsToWaiterOrder,
   cancelWaiterOrder,
   createWaiterOrder,
+  createInvoiceForWaiterOrder,
+  applyDiscountToWaiterOrder,
+  generateWaiterReceiptPdf,
+  getDiscounts,
   getModifiers,
   getProductCategories,
   getProductModifiers,
@@ -16,19 +20,25 @@ import {
   tableStatusLabel,
   type CartEntry,
   type CartItem,
+  type Discount,
   type Modifier,
   type Order,
   type OrderItem,
   type Product,
   type ProductCategory,
   type ProductModifier,
+  verifyManagerPin,
+  voidWaiterOrderItem,
+  registerWaiterPayment,
+  removeDiscountFromWaiterOrder,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 
 type LoadingState = "idle" | "loading" | "ready" | "error";
-type WaiterMode = "DASHBOARD" | "TABLE_PICKER" | "ORDER_BUILDER" | "ORDER_DETAILS";
+type WaiterMode = "DASHBOARD" | "TABLE_PICKER" | "ORDER_BUILDER" | "CHECKOUT" | "ORDER_DETAILS";
 type MenuDepartment = "KITCHEN" | "BAR";
+type TicketSelection = { type: "existing"; id: number } | { type: "cart"; id: string };
 
 const barCategoryWords = [
   "bar",
@@ -53,6 +63,7 @@ export function WaiterPage() {
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [modifiers, setModifiers] = useState<Modifier[]>([]);
   const [productModifiers, setProductModifiers] = useState<ProductModifier[]>([]);
+  const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [mode, setMode] = useState<WaiterMode>("DASHBOARD");
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
@@ -60,6 +71,7 @@ export function WaiterPage() {
   const [department, setDepartment] = useState<MenuDepartment>("KITCHEN");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "ALL">("ALL");
   const [cart, setCart] = useState<CartEntry[]>([]);
+  const [selectedTicketLine, setSelectedTicketLine] = useState<TicketSelection | null>(null);
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +95,7 @@ export function WaiterPage() {
         nextCategories,
         nextModifiers,
         nextProductModifiers,
+        nextDiscounts,
       ] =
         await Promise.all([
           getFloorPlanView(token),
@@ -92,6 +105,7 @@ export function WaiterPage() {
           getProductCategories(token),
           getModifiers(token),
           getProductModifiers(token),
+          getDiscounts(token),
         ]);
 
       setFloorTables(floorView.tables);
@@ -101,6 +115,7 @@ export function WaiterPage() {
       setCategories(nextCategories.filter((category) => category.is_active));
       setModifiers(nextModifiers.filter((modifier) => modifier.is_active));
       setProductModifiers(nextProductModifiers.filter((item) => item.is_active));
+      setDiscounts(nextDiscounts.filter((discount) => discount.is_active));
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load waiter workspace.");
@@ -113,7 +128,7 @@ export function WaiterPage() {
   }, [loadWaiterData]);
 
   useEffect(() => {
-    document.body.classList.toggle("pos-fullscreen", mode === "ORDER_BUILDER");
+    document.body.classList.toggle("pos-fullscreen", isFullscreenMode(mode));
     return () => document.body.classList.remove("pos-fullscreen");
   }, [mode]);
 
@@ -228,11 +243,11 @@ export function WaiterPage() {
   }
 
   return (
-    <section className={`waiter-workspace ${mode === "ORDER_BUILDER" ? "pos-builder-mode" : ""}`}>
-      {mode !== "ORDER_BUILDER" && <WaiterHeader />}
+    <section className={`waiter-workspace ${isFullscreenMode(mode) ? "pos-builder-mode" : ""}`}>
+      {!isFullscreenMode(mode) && <WaiterHeader />}
 
-      {mode !== "ORDER_BUILDER" && notice && <div className="success-box">{notice}</div>}
-      {mode !== "ORDER_BUILDER" && error && <div className="error-box">{error}</div>}
+      {!isFullscreenMode(mode) && notice && <div className="success-box">{notice}</div>}
+      {!isFullscreenMode(mode) && error && <div className="error-box">{error}</div>}
 
       {mode === "DASHBOARD" && (
         <div className="waiter-dashboard-grid">
@@ -370,7 +385,6 @@ export function WaiterPage() {
           <main className="waiter-panel waiter-menu-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Table {selectedTable.table_number}</span>
                 <h1>Menu</h1>
               </div>
             </div>
@@ -451,9 +465,12 @@ export function WaiterPage() {
             <CartList
               existingItems={selectedOrderItems}
               cart={cart}
+              selectedTicketLine={selectedTicketLine}
               productsById={productsById}
               getModifierLabel={getModifierLabel}
               getItemTotal={getCartItemTotal}
+              onSelectExisting={(id) => setSelectedTicketLine({ type: "existing", id })}
+              onSelectCart={(id) => setSelectedTicketLine({ type: "cart", id })}
               onIncrement={incrementCartItem}
               onDecrement={decrementCartItem}
             />
@@ -463,7 +480,14 @@ export function WaiterPage() {
             <button type="button" className="ghost-button" onClick={addCourseSeparator}>
               Separator
             </button>
-            <button type="button" className="ghost-button danger" onClick={voidLastEntry}>
+            <button
+              type="button"
+              className="ghost-button danger"
+              onClick={() => {
+                void voidSelectedEntry();
+              }}
+              disabled={!selectedTicketLine || isSubmitting}
+            >
               Void
             </button>
             <button type="button" className="ghost-button" onClick={addInfoToLastItem}>
@@ -476,6 +500,14 @@ export function WaiterPage() {
             )}
             <button
               type="button"
+              className="ghost-button close-check-button"
+              onClick={openCheckout}
+              disabled={!selectedOrder || hasCartItems(cart) || isSubmitting}
+            >
+              Zamknij rachunek
+            </button>
+            <button
+              type="button"
               className="primary-button secondary-send"
               onClick={() => {
                 void submitOrder("ORDER_BUILDER");
@@ -484,10 +516,88 @@ export function WaiterPage() {
             >
               Wyślij
             </button>
-            <button type="button" className="ghost-button" onClick={resetToDashboard}>
+            <button type="button" className="ghost-button exit-button" onClick={resetToDashboard}>
               Cancel / Wyjdź
             </button>
           </div>
+        </div>
+      )}
+
+      {mode === "CHECKOUT" && selectedOrder && selectedTable && (
+        <div className="checkout-screen">
+          <main className="waiter-panel checkout-details-panel">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Order details</span>
+                <h1>Table {selectedTable.table_number}</h1>
+              </div>
+              <strong>{formatMoney(Number(selectedOrder.total_amount))}</strong>
+            </div>
+
+            {error && <div className="error-box">{error}</div>}
+            {notice && <div className="success-box">{notice}</div>}
+
+            <CheckoutOrderDetails
+              order={selectedOrder}
+              items={selectedOrderItems}
+              productsById={productsById}
+            />
+          </main>
+
+          <aside className="waiter-panel checkout-actions-panel">
+            <div className="payment-buttons">
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isSubmitting}
+                onClick={() => {
+                  void closeOrderWithPayment("CARD");
+                }}
+              >
+                Zamknij CARD
+              </button>
+              <button
+                type="button"
+                className="primary-button cash-button"
+                disabled={isSubmitting}
+                onClick={() => {
+                  void closeOrderWithPayment("CASH");
+                }}
+              >
+                Zamknij CASH
+              </button>
+            </div>
+
+            <section className="discount-section">
+              <div>
+                <span className="eyebrow">Discounts</span>
+                <h2>Rabaty</h2>
+              </div>
+              <div className="discount-grid">
+                {discounts.map((discount) => (
+                  <button
+                    key={discount.id}
+                    type="button"
+                    className={selectedOrder.discount_id === discount.id ? "selected" : ""}
+                disabled={isSubmitting}
+                onClick={() => {
+                      void toggleDiscount(discount.id);
+                }}
+                  >
+                    <strong>{discount.name}</strong>
+                    <span>{formatDiscountValue(discount)}</span>
+                  </button>
+                ))}
+                {discounts.length === 0 && (
+                  <div className="empty-ticket">No discounts in database.</div>
+                )}
+              </div>
+            </section>
+
+            <button type="button" className="ghost-button" onClick={() => setMode("ORDER_BUILDER")}>
+              Back
+            </button>
+          </aside>
         </div>
       )}
 
@@ -641,10 +751,6 @@ export function WaiterPage() {
     });
   }
 
-  function voidLastEntry() {
-    setCart((items) => items.slice(0, -1));
-  }
-
   function addInfoToLastItem() {
     const lastItem = [...cart].reverse().find(isCartItem);
     if (!lastItem) {
@@ -670,11 +776,124 @@ export function WaiterPage() {
     setSelectedTable(null);
     setSelectedOrderId(null);
     setCart([]);
+    setSelectedTicketLine(null);
     setError(null);
+  }
+
+  function openCheckout() {
+    if (!selectedOrder || hasCartItems(cart)) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+    setSelectedTicketLine(null);
+    setMode("CHECKOUT");
   }
 
   function getTicketTotal(): number {
     return Number(selectedOrder?.total_amount ?? 0) + cartTotal;
+  }
+
+  function replaceOrder(updatedOrder: Order) {
+    setOrders((items) =>
+      items.map((order) => (order.id === updatedOrder.id ? updatedOrder : order)),
+    );
+  }
+
+  async function toggleDiscount(discountId: number) {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updatedOrder =
+        selectedOrder.discount_id === discountId
+          ? await removeDiscountFromWaiterOrder(token, selectedOrder.id)
+          : await applyDiscountToWaiterOrder(token, selectedOrder.id, discountId);
+      replaceOrder(updatedOrder);
+      setNotice(
+        selectedOrder.discount_id === discountId
+          ? "Discount removed."
+          : "Discount applied.",
+      );
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not update discount.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function closeOrderWithPayment(method: "CARD" | "CASH") {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const invoiceNip = askForInvoiceNip();
+      if (invoiceNip === null) {
+        return;
+      }
+
+      if (invoiceNip) {
+        await createInvoiceForWaiterOrder(token, selectedOrder.id, {
+          nip: invoiceNip,
+          company_name: `Customer NIP ${invoiceNip}`,
+        });
+      }
+
+      await registerWaiterPayment(token, selectedOrder.id, {
+        method,
+        amount: selectedOrder.total_amount,
+        close_order: true,
+      });
+      await openReceiptPdf(selectedOrder.id);
+      setNotice(`Order #${selectedOrder.id} closed.`);
+      resetToDashboard();
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not close order.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function askForInvoiceNip(): string | null {
+    const wantsNip = window.confirm("Czy dodać NIP do rachunku?");
+    if (!wantsNip) {
+      return "";
+    }
+
+    const nip = window.prompt("Wpisz NIP");
+    if (nip === null) {
+      return null;
+    }
+
+    const normalizedNip = nip.trim();
+    if (!normalizedNip) {
+      setError("NIP is required when invoice data is requested.");
+      return null;
+    }
+
+    return normalizedNip;
+  }
+
+  async function openReceiptPdf(orderId: number) {
+    if (!token) {
+      return;
+    }
+
+    const receiptBlob = await generateWaiterReceiptPdf(token, orderId);
+    const receiptUrl = window.URL.createObjectURL(receiptBlob);
+    window.open(receiptUrl, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => window.URL.revokeObjectURL(receiptUrl), 60_000);
   }
 
   async function submitOrder(afterSubmit: "DASHBOARD" | "ORDER_BUILDER") {
@@ -707,6 +926,7 @@ export function WaiterPage() {
           });
       setNotice(`Order #${order.id} sent to production.`);
       setCart([]);
+      setSelectedTicketLine(null);
       if (afterSubmit === "DASHBOARD") {
         resetToDashboard();
       } else {
@@ -718,6 +938,69 @@ export function WaiterPage() {
     } finally {
       setIsSubmitting(false);
     }
+  }
+
+  async function voidSelectedEntry() {
+    if (!token || !selectedTicketLine) {
+      return;
+    }
+
+    setError(null);
+    setNotice(null);
+
+    if (selectedTicketLine.type === "cart") {
+      try {
+        const managerPin = await getManagerPinIfNeeded();
+        if (managerPin === null) {
+          return;
+        }
+        if (managerPin) {
+          await verifyManagerPin(token, managerPin);
+        }
+        setCart((items) => items.filter((entry) => entry.id !== selectedTicketLine.id));
+        setSelectedTicketLine(null);
+      } catch (exc) {
+        setError(exc instanceof ApiError ? exc.message : "Manager PIN is invalid.");
+      }
+      return;
+    }
+
+    if (!selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const managerPin = await getManagerPinIfNeeded();
+      if (managerPin === null) {
+        return;
+      }
+      await voidWaiterOrderItem(
+        token,
+        selectedOrder.id,
+        selectedTicketLine.id,
+        managerPin || undefined,
+      );
+      setSelectedTicketLine(null);
+      setNotice("Selected item was voided.");
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not void selected item.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function getManagerPinIfNeeded(): Promise<string | null> {
+    if (user?.role === "ADMIN" || user?.role === "MANAGER") {
+      return "";
+    }
+
+    const managerPin = window.prompt("Manager PIN");
+    if (!managerPin) {
+      return null;
+    }
+    return managerPin;
   }
 
   async function deleteExistingOrder() {
@@ -774,17 +1057,23 @@ export function WaiterPage() {
 function CartList({
   existingItems,
   cart,
+  selectedTicketLine,
   productsById,
   getModifierLabel,
   getItemTotal,
+  onSelectExisting,
+  onSelectCart,
   onIncrement,
   onDecrement,
 }: {
   existingItems: OrderItem[];
   cart: CartEntry[];
+  selectedTicketLine: TicketSelection | null;
   productsById: Map<number, Product>;
   getModifierLabel: (productModifierId: number) => string;
   getItemTotal: (item: CartItem) => number;
+  onSelectExisting: (itemId: number) => void;
+  onSelectCart: (entryId: string) => void;
   onIncrement: (entryId: string) => void;
   onDecrement: (entryId: string) => void;
 }) {
@@ -793,7 +1082,16 @@ function CartList({
       {existingItems.map((item) => {
         const product = productsById.get(item.product_id);
         return (
-          <div key={item.id} className="cart-row locked">
+          <button
+            key={item.id}
+            type="button"
+            className={`cart-row locked ${
+              selectedTicketLine?.type === "existing" && selectedTicketLine.id === item.id
+                ? "selected"
+                : ""
+            }`}
+            onClick={() => onSelectExisting(item.id)}
+          >
             <div>
               <strong>* {product?.name ?? `Product #${item.product_id}`}</strong>
               <span>
@@ -802,12 +1100,20 @@ function CartList({
               {item.notes && <small>{item.notes}</small>}
             </div>
             <b>{formatMoney(Number(item.total_price))}</b>
-          </div>
+          </button>
         );
       })}
       {cart.map((entry) =>
         isCartItem(entry) ? (
-          <div key={entry.id} className="cart-row">
+          <div
+            key={entry.id}
+            className={`cart-row ${
+              selectedTicketLine?.type === "cart" && selectedTicketLine.id === entry.id
+                ? "selected"
+                : ""
+            }`}
+            onClick={() => onSelectCart(entry.id)}
+          >
             <div>
               <strong>{entry.product.name}</strong>
               <span>
@@ -819,24 +1125,93 @@ function CartList({
               ))}
             </div>
             <div className="quantity-stepper">
-              <button type="button" onClick={() => onDecrement(entry.id)}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDecrement(entry.id);
+                }}
+              >
                 -
               </button>
               <span>{entry.quantity}</span>
-              <button type="button" onClick={() => onIncrement(entry.id)}>
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onIncrement(entry.id);
+                }}
+              >
                 +
               </button>
             </div>
           </div>
         ) : (
-          <div key={entry.id} className="course-separator">
+          <button
+            key={entry.id}
+            type="button"
+            className={`course-separator ${
+              selectedTicketLine?.type === "cart" && selectedTicketLine.id === entry.id
+                ? "selected"
+                : ""
+            }`}
+            onClick={() => onSelectCart(entry.id)}
+          >
             Course {entry.nextCourseNumber}
-          </div>
+          </button>
         ),
       )}
       {existingItems.length === 0 && !hasCartItems(cart) && (
         <div className="empty-ticket">Select products to build this order.</div>
       )}
+    </div>
+  );
+}
+
+function CheckoutOrderDetails({
+  order,
+  items,
+  productsById,
+}: {
+  order: Order;
+  items: OrderItem[];
+  productsById: Map<number, Product>;
+}) {
+  return (
+    <div className="checkout-ticket">
+      <div className="checkout-ticket-list">
+        {items.map((item) => {
+          const product = productsById.get(item.product_id);
+          return (
+            <div key={item.id} className="checkout-ticket-row">
+              <div>
+                <strong>{product?.name ?? `Product #${item.product_id}`}</strong>
+                <span>
+                  Course {item.course_number} · {item.quantity} x{" "}
+                  {formatMoney(Number(item.unit_price))}
+                </span>
+                {item.notes && <small>{item.notes}</small>}
+              </div>
+              <b>{formatMoney(Number(item.total_price))}</b>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="checkout-totals">
+        <span>
+          Subtotal <strong>{formatMoney(Number(order.subtotal_amount))}</strong>
+        </span>
+        <span>
+          Discount <strong>-{formatMoney(Number(order.discount_amount))}</strong>
+        </span>
+        <span>
+          Tip <strong>{formatMoney(Number(order.tip_amount))}</strong>
+        </span>
+        <b>
+          Total <strong>{formatMoney(Number(order.total_amount))}</strong>
+        </b>
+      </div>
     </div>
   );
 }
@@ -959,6 +1334,10 @@ function isCartItem(entry: CartEntry): entry is CartItem {
   return !("type" in entry);
 }
 
+function isFullscreenMode(mode: WaiterMode): boolean {
+  return mode === "ORDER_BUILDER" || mode === "CHECKOUT";
+}
+
 function hasCartItems(entries: CartEntry[]): boolean {
   return entries.some(isCartItem);
 }
@@ -989,6 +1368,17 @@ function getProductModifierPrice(
 function isBarCategory(categoryName: string): boolean {
   const normalizedName = categoryName.toLowerCase();
   return barCategoryWords.some((word) => normalizedName.includes(word));
+}
+
+function formatDiscountValue(discount: Discount): string {
+  const type = discount.type.toUpperCase();
+  const value = Number(discount.value);
+
+  if (type === "PERCENT" || type === "PERCENTAGE") {
+    return `${value}%`;
+  }
+
+  return formatMoney(value);
 }
 
 function formatMoney(value: number): string {
