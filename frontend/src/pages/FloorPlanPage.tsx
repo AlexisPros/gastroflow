@@ -63,6 +63,7 @@ export function FloorPlanPage() {
   const [interaction, setInteraction] = useState<Interaction>(null);
   const [editorTool, setEditorTool] = useState<EditorTool>("SELECT");
   const [newTableNumber, setNewTableNumber] = useState("");
+  const [newDecorationLabel, setNewDecorationLabel] = useState("");
   const [draftPosition, setDraftPosition] =
     useState<FloorPlanTablePositionInput | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
@@ -326,15 +327,26 @@ export function FloorPlanPage() {
             <EditorPanel
               tool={editorTool}
               tableNumber={newTableNumber}
+              decorationLabel={newDecorationLabel}
               error={editorError}
               onToolChange={setEditorTool}
               onTableNumberChange={setNewTableNumber}
+              onDecorationLabelChange={setNewDecorationLabel}
             />
           )}
 
           <h2>{selectedDecoration ? "Object details" : "Table details"}</h2>
           {selectedTable && <TableDetails item={selectedTable} />}
           {selectedDecoration && <DecorationDetails item={selectedDecoration} />}
+          {canEdit && selectedDecoration && (
+            <DecorationLabelEditor
+              decoration={selectedDecoration}
+              isSaving={isSaving}
+              onSave={(label) => {
+                void saveDecorationLabel(selectedDecoration.id, label);
+              }}
+            />
+          )}
           {!selectedTable && !selectedDecoration && (
             <p className="muted">Select an object on the map.</p>
           )}
@@ -455,10 +467,31 @@ export function FloorPlanPage() {
         rotation: 0,
         shape,
         color: "#252b2d",
+        label: newDecorationLabel.trim() || null,
       });
+      setNewDecorationLabel("");
       await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create object.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function saveDecorationLabel(decorationId: number, label: string) {
+    if (!token || !floorPlan) {
+      return;
+    }
+
+    setIsSaving(true);
+    setEditorError(null);
+    try {
+      await updateFloorPlanDecoration(token, floorPlan.id, decorationId, {
+        label: label.trim() || null,
+      });
+      await loadFloorPlan();
+    } catch (exc) {
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not save label.");
     } finally {
       setIsSaving(false);
     }
@@ -708,6 +741,7 @@ function DecorObjectView({
       onPointerDown={onPointerDown}
       aria-label="Decor object"
     >
+      {item.label && <span className="decor-label">{item.label}</span>}
       {canEdit && isSelected && <ResizeHandles onPointerDown={onResizePointerDown} />}
     </button>
   );
@@ -735,16 +769,22 @@ function ResizeHandles({
 function EditorPanel({
   tool,
   tableNumber,
+  decorationLabel,
   error,
   onToolChange,
   onTableNumberChange,
+  onDecorationLabelChange,
 }: {
   tool: EditorTool;
   tableNumber: string;
+  decorationLabel: string;
   error: string | null;
   onToolChange: (tool: EditorTool) => void;
   onTableNumberChange: (value: string) => void;
+  onDecorationLabelChange: (value: string) => void;
 }) {
+  const isDecorationTool = tool === "DECOR_RECTANGLE" || tool === "DECOR_CIRCLE";
+
   return (
     <div className="editor-panel">
       <h2>Editor</h2>
@@ -763,6 +803,17 @@ function EditorPanel({
           placeholder="e.g. 12"
         />
       </label>
+      {isDecorationTool && (
+        <label className="compact-field">
+          Object label
+          <input
+            value={decorationLabel}
+            onChange={(event) => onDecorationLabelChange(event.target.value)}
+            placeholder="e.g. Bar"
+            maxLength={150}
+          />
+        </label>
+      )}
       {error && <div className="error-box">{error}</div>}
     </div>
   );
@@ -899,6 +950,10 @@ function DecorationDetails({ item }: { item: FloorPlanDecoration }) {
   return (
     <div className="table-details">
       <div>
+        <span className="detail-label">Label</span>
+        <strong>{item.label || "No label"}</strong>
+      </div>
+      <div>
         <span className="detail-label">Type</span>
         <strong>Filled {item.shape.toLowerCase()}</strong>
       </div>
@@ -906,6 +961,45 @@ function DecorationDetails({ item }: { item: FloorPlanDecoration }) {
         <span className="detail-label">Storage</span>
         <strong>Database object</strong>
       </div>
+    </div>
+  );
+}
+
+function DecorationLabelEditor({
+  decoration,
+  isSaving,
+  onSave,
+}: {
+  decoration: FloorPlanDecoration;
+  isSaving: boolean;
+  onSave: (label: string) => void;
+}) {
+  const [label, setLabel] = useState(decoration.label ?? "");
+
+  useEffect(() => {
+    setLabel(decoration.label ?? "");
+  }, [decoration.id, decoration.label]);
+
+  return (
+    <div className="position-editor">
+      <h2>Label</h2>
+      <label className="compact-field">
+        Object label
+        <input
+          value={label}
+          onChange={(event) => setLabel(event.target.value)}
+          placeholder="e.g. Bar"
+          maxLength={150}
+        />
+      </label>
+      <button
+        type="button"
+        className="primary-button"
+        onClick={() => onSave(label)}
+        disabled={isSaving}
+      >
+        {isSaving ? "Saving..." : "Save label"}
+      </button>
     </div>
   );
 }
