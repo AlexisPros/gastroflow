@@ -27,6 +27,8 @@ export type Order = {
   waiter_id: number | null;
   discount_id: number | null;
   shift_id: number | null;
+  split_parent_order_id: number | null;
+  split_sequence: number | null;
   guest_count: number | null;
   source: string;
   status: string;
@@ -92,6 +94,49 @@ export type OrderItem = {
   total_price: string;
   status: string;
   notes: string | null;
+};
+
+export type BillSplitOriginalItem = {
+  id: number;
+  product_id: number;
+  product_name: string;
+  quantity: string;
+  assigned_quantity: string;
+  remaining_quantity: string;
+  unit_price: string;
+  total_price: string;
+  notes: string | null;
+};
+
+export type BillSegmentItem = {
+  id: number;
+  bill_segment_id: number;
+  original_order_item_id: number;
+  product_id: number;
+  product_name: string;
+  quantity: string;
+  unit_price: string;
+  total_price: string;
+  notes: string | null;
+  modifier_snapshot: string | null;
+};
+
+export type BillSegment = {
+  id: number;
+  order_id: number;
+  name: string;
+  position: number;
+  status: string;
+  total_amount: string;
+  created_at: string;
+  items: BillSegmentItem[];
+};
+
+export type BillSplitView = {
+  order_id: number;
+  original_items: BillSplitOriginalItem[];
+  segments: BillSegment[];
+  unassigned_total: string;
 };
 
 export type CartItem = {
@@ -212,6 +257,84 @@ export async function splitWaiterOrder(
     body: {
       order_item_ids: orderItemIds,
     },
+  });
+}
+
+export async function getWaiterBillSplit(
+  token: string,
+  orderId: number,
+): Promise<BillSplitView> {
+  return apiRequest<BillSplitView>(`/orders/${orderId}/bill-split`, { token });
+}
+
+export async function createWaiterBillSegment(
+  token: string,
+  orderId: number,
+): Promise<BillSegment> {
+  return apiRequest<BillSegment>(`/orders/${orderId}/bill-split/segments`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function deleteWaiterBillSegment(
+  token: string,
+  orderId: number,
+  segmentId: number,
+): Promise<void> {
+  return apiRequest<void>(`/orders/${orderId}/bill-split/segments/${segmentId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
+export async function moveWaiterBillSplitItems(
+  token: string,
+  orderId: number,
+  body: {
+    target_segment_id: number;
+    items: Array<{
+      order_item_id: number;
+      quantity?: string;
+    }>;
+  },
+): Promise<BillSplitView> {
+  return apiRequest<BillSplitView>(`/orders/${orderId}/bill-split/move-items`, {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function splitWaiterBillSplitItem(
+  token: string,
+  orderId: number,
+  body: {
+    order_item_id: number;
+    target_segment_ids: number[];
+  },
+): Promise<BillSplitView> {
+  return apiRequest<BillSplitView>(`/orders/${orderId}/bill-split/split-item`, {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function finalizeWaiterBillSplit(
+  token: string,
+  orderId: number,
+  body: {
+    segment_guest_counts: Array<{
+      segment_id: number;
+      guest_count: number;
+    }>;
+  },
+): Promise<Order[]> {
+  return apiRequest<Order[]>(`/orders/${orderId}/bill-split/finalize`, {
+    method: "POST",
+    token,
+    body,
   });
 }
 

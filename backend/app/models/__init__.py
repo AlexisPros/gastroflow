@@ -17,6 +17,8 @@ from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
+from app.models.bill_segment import BillSegment
+from app.models.bill_segment_item import BillSegmentItem
 
 from app.models.kitchen_section import KitchenSection
 from app.models.kitchen_task import KitchenTask

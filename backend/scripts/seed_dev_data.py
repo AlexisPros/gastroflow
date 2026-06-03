@@ -39,6 +39,8 @@ DEV_USERS = [
 ]
 
 OPERATIONAL_TABLES = [
+    "bill_segment_items",
+    "bill_segments",
     "employee_shift_reports",
     "order_action_logs",
     "order_transfer_logs",
@@ -57,6 +59,8 @@ OPERATIONAL_TABLES = [
 ]
 
 TABLES_WITH_SERIAL_ID = [
+    "bill_segment_items",
+    "bill_segments",
     "discounts",
     "employee_shift_reports",
     "employee_shifts",

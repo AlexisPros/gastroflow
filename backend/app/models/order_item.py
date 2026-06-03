@@ -9,6 +9,7 @@ from decimal import Decimal
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.bill_segment_item import BillSegmentItem
     from app.models.kitchen_task import KitchenTask
     from app.models.order import Order
     from app.models.order_item_modifier import OrderItemModifier
@@ -93,4 +94,9 @@ class OrderItem(Base):
         "KitchenTask",
         back_populates="order_item",
         cascade="all, delete-orphan",
+    )
+
+    bill_segment_items: Mapped[list[BillSegmentItem]] = relationship(
+        "BillSegmentItem",
+        back_populates="original_order_item",
     )

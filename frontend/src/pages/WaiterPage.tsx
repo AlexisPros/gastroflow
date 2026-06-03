@@ -11,11 +11,15 @@ import {
 import {
   addItemsToWaiterOrder,
   cancelWaiterOrder,
+  createWaiterBillSegment,
   createWaiterOrder,
+  deleteWaiterBillSegment,
   createInvoiceForWaiterOrder,
   applyDiscountToWaiterOrder,
+  finalizeWaiterBillSplit,
   generateWaiterGuestCheckPdf,
   generateWaiterReceiptPdf,
+  getWaiterBillSplit,
   getDiscounts,
   getModifiers,
   getProductCategories,
@@ -24,9 +28,13 @@ import {
   getWaiterOrders,
   getWaiterProducts,
   isOpenOrder,
+  moveWaiterBillSplitItems,
   tableStatusLabel,
+  splitWaiterBillSplitItem,
   type CartEntry,
   type CartItem,
+  type BillSplitOriginalItem,
+  type BillSplitView,
   type Discount,
   type Modifier,
   type Order,
@@ -38,7 +46,6 @@ import {
   voidWaiterOrderItem,
   registerWaiterPayment,
   removeDiscountFromWaiterOrder,
-  splitWaiterOrder,
   updateWaiterOrder,
   updateWaiterOrderTip,
 } from "../api/waiterApi";
@@ -87,6 +94,9 @@ export function WaiterPage() {
   const [tipInput, setTipInput] = useState("");
   const [isFunctionsMenuOpen, setIsFunctionsMenuOpen] = useState(false);
   const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
+  const [isBillSplitOpen, setIsBillSplitOpen] = useState(false);
+  const [billSplitView, setBillSplitView] = useState<BillSplitView | null>(null);
+  const [selectedBillSplitItemIds, setSelectedBillSplitItemIds] = useState<number[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState("");
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
@@ -303,7 +313,7 @@ export function WaiterPage() {
                     openExistingOrder(order);
                   }}
                 >
-                  <span>Order #{order.id}</span>
+                  <span>Order #{formatOrderNumber(order)}</span>
                   <strong>{getOrderTableLabel(order)}</strong>
                   <small>
                     {order.guest_count ?? 0} guests · {order.status}
@@ -518,7 +528,9 @@ export function WaiterPage() {
               <div>
                 <span className="eyebrow">TICKET</span>
                 <h2>
-                  {selectedOrder ? `Order #${selectedOrder.id}` : `Table ${selectedTable.table_number}`}
+                  {selectedOrder
+                    ? `Order #${formatOrderNumber(selectedOrder)}`
+                    : `Table ${selectedTable.table_number}`}
                 </h2>
               </div>
               <strong>{formatMoney(getTicketTotal())}</strong>
@@ -547,6 +559,66 @@ export function WaiterPage() {
             <button type="button" className="ghost-button" onClick={addCourseSeparator}>
               Separator
             </button>
+            <div className="functions-menu-wrapper">
+              {isFunctionsMenuOpen && (
+                <div className="functions-menu">
+                  {selectedOrder && (
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        setIsFunctionsMenuOpen(false);
+                        void deleteExistingOrder();
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      Usuń cały rachunek
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void splitSelectedBill();
+                    }}
+                    disabled={!selectedOrder || isSubmitting}
+                  >
+                    Podziel rachunek
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void changeOrderGuestCount();
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Zmień liczbę gości
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFunctionsMenuOpen(false);
+                      setProductSearchQuery("");
+                      setIsProductSearchOpen(true);
+                    }}
+                  >
+                    Znajdź pozycję w menu
+                  </button>
+                  <button type="button" disabled>
+                    Ostatni napój
+                  </button>
+                  <button type="button" disabled>
+                    Dodaj rachunek
+                  </button>
+                </div>
+              )}
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => setIsFunctionsMenuOpen((isOpen) => !isOpen)}
+              >
+                Funkcje
+              </button>
+            </div>
             <button
               type="button"
               className="ghost-button danger"
@@ -560,60 +632,6 @@ export function WaiterPage() {
             <button type="button" className="ghost-button" onClick={addInfoToLastItem}>
               Info
             </button>
-            <div className="functions-menu-wrapper">
-              {isFunctionsMenuOpen && (
-                <div className="functions-menu">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void splitSelectedBill();
-                    }}
-                    disabled={!selectedOrder || selectedTicketLine?.type !== "existing" || isSubmitting}
-                  >
-                    Podziel rachunek
-                  </button>
-                  {selectedOrder && (
-                    <button
-                      type="button"
-                      className="danger"
-                      onClick={() => {
-                        setIsFunctionsMenuOpen(false);
-                        void deleteExistingOrder();
-                      }}
-                      disabled={isSubmitting}
-                    >
-                      Delete
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void changeOrderGuestCount();
-                    }}
-                    disabled={isSubmitting}
-                  >
-                    Zmień gości
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsFunctionsMenuOpen(false);
-                      setProductSearchQuery("");
-                      setIsProductSearchOpen(true);
-                    }}
-                  >
-                    Szukaj pozycji
-                  </button>
-                </div>
-              )}
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setIsFunctionsMenuOpen((isOpen) => !isOpen)}
-              >
-                Funkcje
-              </button>
-            </div>
             <button
               type="button"
               className="ghost-button close-check-button"
@@ -772,7 +790,7 @@ export function WaiterPage() {
             <div className="panel-heading">
               <div>
                 <span className="eyebrow">{getOrderTableLabel(selectedOrder)}</span>
-                <h1>Order #{selectedOrder.id}</h1>
+                <h1>Order #{formatOrderNumber(selectedOrder)}</h1>
               </div>
               <button type="button" className="ghost-button" onClick={resetToDashboard}>
                 Back
@@ -832,6 +850,25 @@ export function WaiterPage() {
             setProductSearchQuery("");
             startProductAdd(product);
           }}
+        />
+      )}
+
+      {isBillSplitOpen && selectedOrder && billSplitView && (
+        <BillSplitModal
+          view={billSplitView}
+          selectedItemIds={selectedBillSplitItemIds}
+          isSubmitting={isSubmitting}
+          onToggleItem={toggleBillSplitItemSelection}
+          onClose={() => {
+            setIsBillSplitOpen(false);
+            setSelectedBillSplitItemIds([]);
+          }}
+          onAddSegment={addBillSplitSegment}
+          onDeleteLastEmptySegment={deleteLastEmptyBillSplitSegment}
+          onDeleteSegment={deleteBillSplitSegment}
+          onMoveToSegment={moveBillSplitSelection}
+          onSplitItem={splitBillSplitItemAcrossSegments}
+          onFinalize={finalizeBillSplit}
         />
       )}
     </section>
@@ -956,6 +993,9 @@ export function WaiterPage() {
     setSelectedOrderId(null);
     setCart([]);
     setSelectedTicketLine(null);
+    setIsBillSplitOpen(false);
+    setBillSplitView(null);
+    setSelectedBillSplitItemIds([]);
     setIsFunctionsMenuOpen(false);
     setIsProductSearchOpen(false);
     setTipInput("");
@@ -1247,8 +1287,8 @@ export function WaiterPage() {
   }
 
   async function splitSelectedBill() {
-    if (!token || !selectedOrder || selectedTicketLine?.type !== "existing") {
-      setError("Select a sent order item first.");
+    if (!token || !selectedOrder) {
+      setError("Open an existing sent order first.");
       return;
     }
 
@@ -1256,15 +1296,207 @@ export function WaiterPage() {
     setError(null);
     setNotice(null);
     try {
-      const splitOrder = await splitWaiterOrder(token, selectedOrder.id, [
-        selectedTicketLine.id,
-      ]);
-      setSelectedTicketLine(null);
+      const view = await getWaiterBillSplit(token, selectedOrder.id);
+      setBillSplitView(view);
+      setSelectedBillSplitItemIds([]);
+      setIsBillSplitOpen(true);
       setIsFunctionsMenuOpen(false);
-      setNotice(`Created split order #${splitOrder.id}.`);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not open bill split.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function toggleBillSplitItemSelection(itemId: number) {
+    setSelectedBillSplitItemIds((itemIds) =>
+      itemIds.includes(itemId)
+        ? itemIds.filter((id) => id !== itemId)
+        : [...itemIds, itemId],
+    );
+  }
+
+  async function addBillSplitSegment() {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await createWaiterBillSegment(token, selectedOrder.id);
+      setBillSplitView(await getWaiterBillSplit(token, selectedOrder.id));
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not add check.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function deleteBillSplitSegment(segmentId: number) {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      await deleteWaiterBillSegment(token, selectedOrder.id, segmentId);
+      setBillSplitView(await getWaiterBillSplit(token, selectedOrder.id));
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Only empty checks can be deleted.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function deleteLastEmptyBillSplitSegment() {
+    if (!billSplitView) {
+      return;
+    }
+
+    const lastEmptySegment = [...billSplitView.segments]
+      .reverse()
+      .find((segment) => segment.items.length === 0);
+
+    if (!lastEmptySegment) {
+      setError("There is no empty check to remove.");
+      return;
+    }
+
+    void deleteBillSplitSegment(lastEmptySegment.id);
+  }
+
+  async function moveBillSplitSelection(targetSegmentId: number) {
+    if (!token || !selectedOrder || !billSplitView || selectedBillSplitItemIds.length === 0) {
+      return;
+    }
+
+    const itemsToMove: Array<{ order_item_id: number; quantity?: string }> = [];
+    for (const itemId of selectedBillSplitItemIds) {
+      const item = billSplitView.original_items.find((candidate) => candidate.id === itemId);
+      if (!item) {
+        continue;
+      }
+
+      const availableQuantity = Number(item.remaining_quantity);
+      if (availableQuantity <= 0) {
+        continue;
+      }
+
+      let quantity = availableQuantity;
+      if (availableQuantity > 1) {
+        const rawQuantity = window.prompt(
+          `Ile przenieść: ${item.product_name}? Dostępne: ${formatQuantity(item.remaining_quantity)}`,
+          "1",
+        );
+        if (rawQuantity === null) {
+          return;
+        }
+
+        quantity = Number(rawQuantity.replace(",", "."));
+        if (!Number.isFinite(quantity) || quantity < 1 || quantity > availableQuantity) {
+          setError("Quantity must be at least 1 and cannot exceed available quantity.");
+          return;
+        }
+      }
+
+      itemsToMove.push({
+        order_item_id: item.id,
+        quantity: formatApiDecimal(quantity),
+      });
+    }
+
+    if (itemsToMove.length === 0) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const view = await moveWaiterBillSplitItems(token, selectedOrder.id, {
+        target_segment_id: targetSegmentId,
+        items: itemsToMove,
+      });
+      setBillSplitView(view);
+      setSelectedBillSplitItemIds([]);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not move items.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function splitBillSplitItemAcrossSegments(itemId: number, segmentIds: number[]) {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const view = await splitWaiterBillSplitItem(token, selectedOrder.id, {
+        order_item_id: itemId,
+        target_segment_ids: segmentIds,
+      });
+      setBillSplitView(view);
+      setSelectedBillSplitItemIds((itemIds) => itemIds.filter((id) => id !== itemId));
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not split item.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function finalizeBillSplit() {
+    if (!token || !selectedOrder || !billSplitView) {
+      return;
+    }
+
+    const nonEmptySegments = billSplitView.segments.filter(
+      (segment) => segment.items.length > 0,
+    );
+    const segmentGuestCounts: Array<{ segment_id: number; guest_count: number }> = [];
+    for (const segment of nonEmptySegments) {
+      const rawGuestCount = window.prompt(
+        `Liczba gości dla ${segment.name}`,
+        String(selectedOrder.guest_count ?? guestCount),
+      );
+      if (rawGuestCount === null) {
+        return;
+      }
+
+      const parsedGuestCount = Number(rawGuestCount);
+      if (!Number.isInteger(parsedGuestCount) || parsedGuestCount <= 0) {
+        setError("Guest count must be a positive number.");
+        return;
+      }
+
+      segmentGuestCounts.push({
+        segment_id: segment.id,
+        guest_count: parsedGuestCount,
+      });
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const splitOrders = await finalizeWaiterBillSplit(token, selectedOrder.id, {
+        segment_guest_counts: segmentGuestCounts,
+      });
+      setNotice(
+        splitOrders.length > 0
+          ? `Rachunek podzielony: ${splitOrders
+              .map((order) => `#${formatOrderNumber(order)}`)
+              .join(", ")}.`
+          : "Rachunek podzielony.",
+      );
+      setIsBillSplitOpen(false);
+      setBillSplitView(null);
+      setSelectedBillSplitItemIds([]);
       await loadWaiterData();
     } catch (exc) {
-      setError(exc instanceof ApiError ? exc.message : "Could not split bill.");
+      setError(exc instanceof ApiError ? exc.message : "Could not finalize bill split.");
     } finally {
       setIsSubmitting(false);
     }
@@ -1370,6 +1602,290 @@ export function WaiterPage() {
     }, 0);
     return (Number(item.product.price) + modifierTotal) * item.quantity;
   }
+}
+
+function BillSplitModal({
+  view,
+  selectedItemIds,
+  isSubmitting,
+  onToggleItem,
+  onClose,
+  onAddSegment,
+  onDeleteLastEmptySegment,
+  onDeleteSegment,
+  onMoveToSegment,
+  onSplitItem,
+  onFinalize,
+}: {
+  view: BillSplitView;
+  selectedItemIds: number[];
+  isSubmitting: boolean;
+  onToggleItem: (itemId: number) => void;
+  onClose: () => void;
+  onAddSegment: () => void;
+  onDeleteLastEmptySegment: () => void;
+  onDeleteSegment: (segmentId: number) => void;
+  onMoveToSegment: (segmentId: number) => void;
+  onSplitItem: (itemId: number, segmentIds: number[]) => void;
+  onFinalize: () => void;
+}) {
+  const [splitItem, setSplitItem] = useState<BillSplitOriginalItem | null>(null);
+  const selectedCount = selectedItemIds.length;
+  const assignedTotal = view.segments.reduce(
+    (total, segment) => total + Number(segment.total_amount),
+    0,
+  );
+  const hasEmptySegment = view.segments.some((segment) => segment.items.length === 0);
+
+  return (
+    <div className="modal-backdrop bill-split-backdrop">
+      <div className="bill-split-modal">
+        <div className="bill-split-header">
+          <div>
+            <span className="eyebrow">Bill split</span>
+            <h2>Order #{view.order_id}</h2>
+            <p className="muted">
+              Select items from the original check, then tap a target check.
+            </p>
+          </div>
+          <div className="bill-split-summary">
+            <span>
+              Remaining <strong>{formatMoney(Number(view.unassigned_total))}</strong>
+            </span>
+            <span>
+              Assigned <strong>{formatMoney(assignedTotal)}</strong>
+            </span>
+          </div>
+        </div>
+
+        <div className="bill-split-layout">
+          <section className="bill-split-original">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Original check</span>
+                <h3>Items</h3>
+              </div>
+              <strong>{selectedCount} selected</strong>
+            </div>
+            <div className="bill-split-item-list">
+              {view.original_items.map((item) => {
+                const remainingQuantity = Number(item.remaining_quantity);
+                const isSelected = selectedItemIds.includes(item.id);
+                return (
+                  <div
+                    key={item.id}
+                    className={`bill-split-source-row ${isSelected ? "selected" : ""} ${
+                      remainingQuantity <= 0 ? "fully-assigned" : ""
+                    }`}
+                  >
+                    <button
+                      type="button"
+                      disabled={remainingQuantity <= 0 || isSubmitting}
+                      onClick={() => onToggleItem(item.id)}
+                    >
+                      <span>
+                        <strong>{item.product_name}</strong>
+                        <small>
+                          Available {formatQuantity(item.remaining_quantity)} /{" "}
+                          {formatQuantity(item.quantity)}
+                        </small>
+                        {item.notes && <small>{item.notes}</small>}
+                      </span>
+                      <b>{formatMoney(Number(item.unit_price))}</b>
+                    </button>
+                    <button
+                      type="button"
+                      className="split-item-button"
+                      disabled={isSubmitting || view.segments.length < 2}
+                      onClick={() => setSplitItem(item)}
+                    >
+                      Split item
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="bill-split-targets">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Bill segments</span>
+                <h3>Checks</h3>
+              </div>
+              <div className="bill-split-segment-actions">
+                <button
+                  type="button"
+                  className="ghost-button danger"
+                  disabled={isSubmitting || !hasEmptySegment}
+                  onClick={onDeleteLastEmptySegment}
+                >
+                  Anuluj dodanie checka
+                </button>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isSubmitting}
+                  onClick={onAddSegment}
+                >
+                  Add check
+                </button>
+              </div>
+            </div>
+
+            <div className="bill-segment-scroll">
+              {view.segments.map((segment) => (
+                <button
+                  key={segment.id}
+                  type="button"
+                  className="bill-segment-card"
+                  disabled={isSubmitting}
+                  onClick={() => onMoveToSegment(segment.id)}
+                >
+                  <span className="bill-segment-title">
+                    <strong>{segment.name}</strong>
+                    <b>{formatMoney(Number(segment.total_amount))}</b>
+                  </span>
+                  <span className="bill-segment-items">
+                    {segment.items.map((item) => (
+                      <span key={item.id} className="bill-segment-item">
+                        <span>
+                          <strong>{item.product_name}</strong>
+                          <small>
+                            {formatQuantity(item.quantity)} x{" "}
+                            {formatMoney(Number(item.unit_price))}
+                          </small>
+                          {Number(item.quantity) > 0 && Number(item.quantity) < 1 && (
+                            <small>{formatQuantity(item.quantity)} share</small>
+                          )}
+                          {item.notes && <small>{item.notes}</small>}
+                        </span>
+                        <b>{formatMoney(Number(item.total_price))}</b>
+                      </span>
+                    ))}
+                    {segment.items.length === 0 && (
+                      <span className="bill-segment-empty">Tap to move selected items here.</span>
+                    )}
+                  </span>
+                  {segment.items.length === 0 && view.segments.length > 1 && (
+                    <span
+                      className="remove-segment-button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteSegment(segment.id);
+                      }}
+                    >
+                      Remove empty check
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <div className="bill-split-actions">
+          <button type="button" className="ghost-button danger" onClick={onClose}>
+            Cofnij
+          </button>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={isSubmitting}
+            onClick={onFinalize}
+          >
+            Finalize split
+          </button>
+        </div>
+
+        {splitItem && (
+          <SplitItemModal
+            item={splitItem}
+            view={view}
+            isSubmitting={isSubmitting}
+            onClose={() => setSplitItem(null)}
+            onSplit={(segmentIds) => {
+              onSplitItem(splitItem.id, segmentIds);
+              setSplitItem(null);
+            }}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SplitItemModal({
+  item,
+  view,
+  isSubmitting,
+  onClose,
+  onSplit,
+}: {
+  item: BillSplitOriginalItem;
+  view: BillSplitView;
+  isSubmitting: boolean;
+  onClose: () => void;
+  onSplit: (segmentIds: number[]) => void;
+}) {
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<number[]>([]);
+  const shareQuantity =
+    selectedSegmentIds.length > 0
+      ? Number(item.quantity) / selectedSegmentIds.length
+      : 0;
+
+  return (
+    <div className="nested-modal-backdrop">
+      <div className="split-item-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Shared item</span>
+            <h3>{item.product_name}</h3>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <p className="muted">
+          Choose at least two checks. Each selected check will receive{" "}
+          {shareQuantity > 0 ? formatQuantity(String(shareQuantity)) : "0"} share.
+        </p>
+
+        <div className="split-item-checks">
+          {view.segments.map((segment) => {
+            const isSelected = selectedSegmentIds.includes(segment.id);
+            return (
+              <button
+                key={segment.id}
+                type="button"
+                className={isSelected ? "selected" : ""}
+                onClick={() =>
+                  setSelectedSegmentIds((segmentIds) =>
+                    isSelected
+                      ? segmentIds.filter((id) => id !== segment.id)
+                      : [...segmentIds, segment.id],
+                  )
+                }
+              >
+                <strong>{segment.name}</strong>
+                <span>{formatMoney(Number(segment.total_amount))}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          className="primary-button"
+          disabled={isSubmitting || selectedSegmentIds.length < 2}
+          onClick={() => onSplit(selectedSegmentIds)}
+        >
+          Split item
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function CartList({
@@ -1766,4 +2282,25 @@ function formatMoney(value: number): string {
     style: "currency",
     currency: "PLN",
   }).format(value);
+}
+
+function formatOrderNumber(order: Order): string {
+  if (order.split_parent_order_id && order.split_sequence) {
+    return `${order.split_parent_order_id}/${order.split_sequence}`;
+  }
+  return String(order.id);
+}
+
+function formatQuantity(value: string | number): string {
+  const quantity = Number(value);
+  if (!Number.isFinite(quantity)) {
+    return String(value);
+  }
+  return new Intl.NumberFormat("pl-PL", {
+    maximumFractionDigits: 3,
+  }).format(quantity);
+}
+
+function formatApiDecimal(value: number): string {
+  return value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
 }

@@ -9,6 +9,8 @@ class OrderBase(OrmBaseModel):
     waiter_id: int | None = None
     discount_id: int | None = None
     shift_id: int | None = None
+    split_parent_order_id: int | None = None
+    split_sequence: int | None = None
     guest_count: int | None = None
     source: str = "WAITER"
     total_amount: Decimal = Decimal("0.00")
@@ -27,6 +29,8 @@ class OrderUpdate(OrmBaseModel):
     waiter_id: int | None = None
     discount_id: int | None = None
     shift_id: int | None = None
+    split_parent_order_id: int | None = None
+    split_sequence: int | None = None
     guest_count: int | None = None
     source: str | None = None
     status: str | None = None
