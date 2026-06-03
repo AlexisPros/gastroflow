@@ -189,6 +189,32 @@ export async function addItemsToWaiterOrder(
   });
 }
 
+export async function updateWaiterOrder(
+  token: string,
+  orderId: number,
+  body: Partial<Pick<Order, "guest_count">>,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}`, {
+    method: "PATCH",
+    token,
+    body,
+  });
+}
+
+export async function splitWaiterOrder(
+  token: string,
+  orderId: number,
+  orderItemIds: number[],
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/split`, {
+    method: "POST",
+    token,
+    body: {
+      order_item_ids: orderItemIds,
+    },
+  });
+}
+
 export async function cancelWaiterOrder(
   token: string,
   orderId: number,

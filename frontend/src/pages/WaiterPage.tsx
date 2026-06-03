@@ -38,6 +38,8 @@ import {
   voidWaiterOrderItem,
   registerWaiterPayment,
   removeDiscountFromWaiterOrder,
+  splitWaiterOrder,
+  updateWaiterOrder,
   updateWaiterOrderTip,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
@@ -83,6 +85,9 @@ export function WaiterPage() {
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [selectedTicketLine, setSelectedTicketLine] = useState<TicketSelection | null>(null);
   const [tipInput, setTipInput] = useState("");
+  const [isFunctionsMenuOpen, setIsFunctionsMenuOpen] = useState(false);
+  const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
+  const [productSearchQuery, setProductSearchQuery] = useState("");
   const [pendingProduct, setPendingProduct] = useState<Product | null>(null);
   const [status, setStatus] = useState<LoadingState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -210,6 +215,21 @@ export function WaiterPage() {
       return selectedCategoryId === "ALL" || product.category_id === selectedCategoryId;
     });
   }, [departmentCategories, products, selectedCategoryId]);
+
+  const productSearchResults = useMemo(() => {
+    const query = productSearchQuery.trim().toLowerCase();
+    if (!query) {
+      return [];
+    }
+
+    return products
+      .filter((product) => {
+        const name = product.name.toLowerCase();
+        const description = product.description?.toLowerCase() ?? "";
+        return name.includes(query) || description.includes(query);
+      })
+      .slice(0, 12);
+  }, [productSearchQuery, products]);
 
   const cartTotal = useMemo(
     () =>
@@ -540,15 +560,60 @@ export function WaiterPage() {
             <button type="button" className="ghost-button" onClick={addInfoToLastItem}>
               Info
             </button>
-            {selectedOrder && (
+            <div className="functions-menu-wrapper">
+              {isFunctionsMenuOpen && (
+                <div className="functions-menu">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void splitSelectedBill();
+                    }}
+                    disabled={!selectedOrder || selectedTicketLine?.type !== "existing" || isSubmitting}
+                  >
+                    Podziel rachunek
+                  </button>
+                  {selectedOrder && (
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => {
+                        setIsFunctionsMenuOpen(false);
+                        void deleteExistingOrder();
+                      }}
+                      disabled={isSubmitting}
+                    >
+                      Delete
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void changeOrderGuestCount();
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Zmień gości
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFunctionsMenuOpen(false);
+                      setProductSearchQuery("");
+                      setIsProductSearchOpen(true);
+                    }}
+                  >
+                    Szukaj pozycji
+                  </button>
+                </div>
+              )}
               <button
                 type="button"
-                className="ghost-button danger delete-button"
-                onClick={deleteExistingOrder}
+                className="ghost-button"
+                onClick={() => setIsFunctionsMenuOpen((isOpen) => !isOpen)}
               >
-                Delete
+                Funkcje
               </button>
-            )}
+            </div>
             <button
               type="button"
               className="ghost-button close-check-button"
@@ -755,6 +820,20 @@ export function WaiterPage() {
           }}
         />
       )}
+
+      {isProductSearchOpen && (
+        <ProductSearchModal
+          query={productSearchQuery}
+          results={productSearchResults}
+          onQueryChange={setProductSearchQuery}
+          onClose={() => setIsProductSearchOpen(false)}
+          onSelect={(product) => {
+            setIsProductSearchOpen(false);
+            setProductSearchQuery("");
+            startProductAdd(product);
+          }}
+        />
+      )}
     </section>
   );
 
@@ -877,6 +956,8 @@ export function WaiterPage() {
     setSelectedOrderId(null);
     setCart([]);
     setSelectedTicketLine(null);
+    setIsFunctionsMenuOpen(false);
+    setIsProductSearchOpen(false);
     setTipInput("");
     setError(null);
   }
@@ -1160,6 +1241,69 @@ export function WaiterPage() {
       await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not void selected item.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function splitSelectedBill() {
+    if (!token || !selectedOrder || selectedTicketLine?.type !== "existing") {
+      setError("Select a sent order item first.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const splitOrder = await splitWaiterOrder(token, selectedOrder.id, [
+        selectedTicketLine.id,
+      ]);
+      setSelectedTicketLine(null);
+      setIsFunctionsMenuOpen(false);
+      setNotice(`Created split order #${splitOrder.id}.`);
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not split bill.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function changeOrderGuestCount() {
+    const nextGuestCount = window.prompt(
+      "Guest count",
+      String(selectedOrder?.guest_count ?? guestCount),
+    );
+    if (nextGuestCount === null) {
+      return;
+    }
+
+    const parsedGuestCount = Number(nextGuestCount);
+    if (!Number.isInteger(parsedGuestCount) || parsedGuestCount <= 0) {
+      setError("Guest count must be a positive number.");
+      return;
+    }
+
+    setIsFunctionsMenuOpen(false);
+    setGuestCount(parsedGuestCount);
+
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const updatedOrder = await updateWaiterOrder(token, selectedOrder.id, {
+        guest_count: parsedGuestCount,
+      });
+      replaceOrder(updatedOrder);
+      setNotice("Guest count updated.");
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not update guest count.");
     } finally {
       setIsSubmitting(false);
     }
@@ -1499,6 +1643,68 @@ function ProductOptionsModal({
         >
           Add to check
         </button>
+      </div>
+    </div>
+  );
+}
+
+function ProductSearchModal({
+  query,
+  results,
+  onQueryChange,
+  onClose,
+  onSelect,
+}: {
+  query: string;
+  results: Product[];
+  onQueryChange: (query: string) => void;
+  onClose: () => void;
+  onSelect: (product: Product) => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="product-options-modal product-search-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">System search</span>
+            <h2>Szukaj pozycji</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <label className="compact-field">
+          Product name
+          <input
+            autoFocus
+            value={query}
+            placeholder="Start typing..."
+            onChange={(event) => onQueryChange(event.target.value)}
+          />
+        </label>
+
+        <div className="product-search-results">
+          {results.map((product) => (
+            <button
+              key={product.id}
+              type="button"
+              onClick={() => onSelect(product)}
+            >
+              <span>
+                <strong>{product.name}</strong>
+                {product.description && <small>{product.description}</small>}
+              </span>
+              <b>{formatMoney(Number(product.price))}</b>
+            </button>
+          ))}
+          {query.trim() && results.length === 0 && (
+            <div className="empty-ticket">No matching products.</div>
+          )}
+          {!query.trim() && (
+            <div className="empty-ticket">Type a product name to search.</div>
+          )}
+        </div>
       </div>
     </div>
   );
