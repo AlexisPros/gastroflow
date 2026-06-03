@@ -10,6 +10,7 @@ class ProductBase(OrmBaseModel):
     name: str
     description: str | None = None
     price: Decimal
+    vat_rate: Decimal = Decimal("8.00")
     preparation_time: int | None = None
     is_active: bool = True
 
@@ -24,6 +25,7 @@ class ProductUpdate(OrmBaseModel):
     name: str | None = None
     description: str | None = None
     price: Decimal | None = None
+    vat_rate: Decimal | None = None
     preparation_time: int | None = None
     is_active: bool | None = None
 

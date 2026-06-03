@@ -9,6 +9,8 @@ from app.crud import order as crud_order
 from app.main import app
 from app.models.invoice import Invoice
 from app.models.order import Order
+from app.models.order_item import OrderItem
+from app.models.product import Product
 from app.models.user import User
 from app.services import fiscal_service, invoice_service, mock_printer_service
 
@@ -321,3 +323,139 @@ def test_generate_receipt_pdf_returns_file(monkeypatch, tmp_path):
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
     assert response.content == b"%PDF-1.4 receipt"
+
+
+def test_generate_guest_check_text_reaches_service(monkeypatch):
+    async def get_order(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def generate_guest_check_text(_db, *, order):
+        assert order.id == 1
+        return "GUEST CHECK"
+
+    monkeypatch.setattr(crud_order, "get", get_order)
+    monkeypatch.setattr(
+        fiscal_service,
+        "generate_guest_check_text",
+        generate_guest_check_text,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/orders/1/guest-check/text",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.text == "GUEST CHECK"
+
+
+def test_generate_guest_check_pdf_returns_file(monkeypatch, tmp_path):
+    pdf_path = tmp_path / "guest-check.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 guest")
+
+    async def get_order(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def generate_guest_check_text(_db, *, order):
+        assert order.id == 1
+        return "GUEST CHECK"
+
+    def print_guest_check_to_pdf(*, order_id: int, receipt_content: str):
+        assert order_id == 1
+        assert receipt_content == "GUEST CHECK"
+        return pdf_path
+
+    monkeypatch.setattr(crud_order, "get", get_order)
+    monkeypatch.setattr(
+        fiscal_service,
+        "generate_guest_check_text",
+        generate_guest_check_text,
+    )
+    monkeypatch.setattr(
+        mock_printer_service,
+        "print_guest_check_to_pdf",
+        print_guest_check_to_pdf,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/guest-check/pdf",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content == b"%PDF-1.4 guest"
+
+
+def test_vat_summary_uses_gross_prices_and_allocates_discount():
+    order = make_order()
+    order.discount_amount = Decimal("10.00")
+
+    food = Product(
+        id=1,
+        category_id=1,
+        kitchen_section_id=None,
+        name="Food",
+        description=None,
+        price=Decimal("108.00"),
+        vat_rate=Decimal("8.00"),
+        preparation_time=None,
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    drink = Product(
+        id=2,
+        category_id=1,
+        kitchen_section_id=None,
+        name="Drink",
+        description=None,
+        price=Decimal("123.00"),
+        vat_rate=Decimal("23.00"),
+        preparation_time=None,
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    food_item = OrderItem(
+        id=1,
+        order_id=1,
+        product_id=1,
+        quantity=1,
+        position=0,
+        course_number=1,
+        unit_price=Decimal("108.00"),
+        total_price=Decimal("108.00"),
+        status="NEW",
+        notes=None,
+    )
+    drink_item = OrderItem(
+        id=2,
+        order_id=1,
+        product_id=2,
+        quantity=1,
+        position=1,
+        course_number=1,
+        unit_price=Decimal("123.00"),
+        total_price=Decimal("123.00"),
+        status="NEW",
+        notes=None,
+    )
+
+    summary = fiscal_service.calculate_vat_summary(
+        rows=[(food_item, food), (drink_item, drink)],
+        order=order,
+    )
+
+    assert summary[Decimal("8.00")]["gross"] == Decimal("103.32")
+    assert summary[Decimal("8.00")]["tax"] == Decimal("7.65")
+    assert summary[Decimal("23.00")]["gross"] == Decimal("117.68")
+    assert summary[Decimal("23.00")]["tax"] == Decimal("22.01")

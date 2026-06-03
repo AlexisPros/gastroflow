@@ -36,5 +36,44 @@ class MockPrinterService:
 
         return output_path
 
+    def print_guest_check_to_pdf(
+        self,
+        *,
+        order_id: int,
+        receipt_content: str,
+    ) -> Path:
+        from fpdf import FPDF
+
+        output_dir = Path(settings.RECEIPTS_DIR)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = output_dir / f"guest_check_order_{order_id}.pdf"
+
+        pdf = FPDF(unit="mm", format=(80, 220))
+        pdf.set_margins(left=5, top=6, right=5)
+        pdf.set_auto_page_break(auto=True, margin=8)
+        pdf.add_page()
+        pdf.set_font("Helvetica", size=10)
+
+        for index, line in enumerate(receipt_content.splitlines()):
+            if index in {0, 1}:
+                pdf.set_font("Helvetica", style="B", size=13 if index == 0 else 11)
+            elif line.startswith("Total:"):
+                pdf.set_font("Helvetica", style="B", size=12)
+            else:
+                pdf.set_font("Helvetica", size=10)
+
+            pdf.multi_cell(
+                w=70,
+                h=5,
+                text=line,
+                new_x="LMARGIN",
+                new_y="NEXT",
+            )
+
+        pdf.output(str(output_path))
+
+        return output_path
+
 
 mock_printer_service = MockPrinterService()

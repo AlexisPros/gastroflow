@@ -15,6 +15,7 @@ export type Product = {
   name: string;
   description: string | null;
   price: string;
+  vat_rate: string;
   preparation_time: number | null;
   is_active: boolean;
   created_at: string;
@@ -304,6 +305,17 @@ export async function generateWaiterReceiptPdf(
   orderId: number,
 ): Promise<Blob> {
   return apiBlobRequest(`/orders/${orderId}/receipt/pdf`, {
+    method: "POST",
+    token,
+    timeoutMs: 20000,
+  });
+}
+
+export async function generateWaiterGuestCheckPdf(
+  token: string,
+  orderId: number,
+): Promise<Blob> {
+  return apiBlobRequest(`/orders/${orderId}/guest-check/pdf`, {
     method: "POST",
     token,
     timeoutMs: 20000,

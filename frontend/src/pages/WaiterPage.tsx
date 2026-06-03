@@ -14,6 +14,7 @@ import {
   createWaiterOrder,
   createInvoiceForWaiterOrder,
   applyDiscountToWaiterOrder,
+  generateWaiterGuestCheckPdf,
   generateWaiterReceiptPdf,
   getDiscounts,
   getModifiers,
@@ -1019,7 +1020,7 @@ export function WaiterPage() {
         amount: selectedOrder.total_amount,
         close_order: true,
       });
-      await openReceiptPdf(selectedOrder.id);
+      await openReceiptPdfs(selectedOrder.id);
       setNotice(`Order #${selectedOrder.id} closed.`);
       resetToDashboard();
       await loadWaiterData();
@@ -1050,13 +1051,21 @@ export function WaiterPage() {
     return normalizedNip;
   }
 
-  async function openReceiptPdf(orderId: number) {
+  async function openReceiptPdfs(orderId: number) {
     if (!token) {
       return;
     }
 
-    const receiptBlob = await generateWaiterReceiptPdf(token, orderId);
-    const receiptUrl = window.URL.createObjectURL(receiptBlob);
+    const [fiscalReceiptBlob, guestCheckBlob] = await Promise.all([
+      generateWaiterReceiptPdf(token, orderId),
+      generateWaiterGuestCheckPdf(token, orderId),
+    ]);
+    openPdfBlob(fiscalReceiptBlob);
+    openPdfBlob(guestCheckBlob);
+  }
+
+  function openPdfBlob(blob: Blob) {
+    const receiptUrl = window.URL.createObjectURL(blob);
     window.open(receiptUrl, "_blank", "noopener,noreferrer");
     window.setTimeout(() => window.URL.revokeObjectURL(receiptUrl), 60_000);
   }

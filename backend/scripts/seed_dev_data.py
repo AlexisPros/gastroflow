@@ -40,7 +40,6 @@ DEV_USERS = [
 
 OPERATIONAL_TABLES = [
     "employee_shift_reports",
-    "employee_shifts",
     "order_action_logs",
     "order_transfer_logs",
     "invoices",
@@ -49,6 +48,7 @@ OPERATIONAL_TABLES = [
     "order_item_modifiers",
     "order_items",
     "orders",
+    "employee_shifts",
     "reservation_tables",
     "reservations",
     "floor_plan_tables",
@@ -252,6 +252,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("35.00"),
             "Wolowina, ser, salata, sos",
             15,
+            Decimal("8.00"),
         ),
         (
             "Salatka cezar",
@@ -260,6 +261,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("28.00"),
             "Kurczak, salata, grzanki, parmezan",
             10,
+            Decimal("8.00"),
         ),
         (
             "Lemoniada",
@@ -268,11 +270,12 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("12.00"),
             "Domowa lemoniada",
             3,
+            Decimal("23.00"),
         ),
     ]
 
     products: dict[str, Product] = {}
-    for name, category, section, price, description, preparation_time in products_data:
+    for name, category, section, price, description, preparation_time, vat_rate in products_data:
         product, _ = await get_or_create(
             db,
             Product,
@@ -282,6 +285,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
                 "kitchen_section_id": None,
                 "description": description,
                 "price": price,
+                "vat_rate": vat_rate,
                 "preparation_time": preparation_time,
                 "is_active": True,
             },
@@ -290,6 +294,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         product.kitchen_section_id = None
         product.description = description
         product.price = price
+        product.vat_rate = vat_rate
         product.preparation_time = preparation_time
         product.is_active = True
         products[name] = product
