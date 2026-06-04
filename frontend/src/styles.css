@@ -1747,6 +1747,12 @@ small,
   box-shadow: 0 10px 22px rgba(24, 191, 114, 0.12);
 }
 
+.product-search-results button.selected {
+  border-color: var(--brand-green);
+  background: var(--brand-green-soft);
+  box-shadow: inset 0 0 0 1px var(--brand-green);
+}
+
 .product-search-results span {
   display: grid;
   gap: 4px;

@@ -139,6 +139,15 @@ export type BillSplitView = {
   unassigned_total: string;
 };
 
+export type OrderMergeCandidate = {
+  id: number;
+  table_id: number | null;
+  status: string;
+  total_amount: string;
+  created_at: string;
+  item_count: number;
+};
+
 export type CartItem = {
   id: string;
   product: Product;
@@ -472,7 +481,7 @@ export async function generateWaiterGuestCheckPdf(
 }
 
 export function isOpenOrder(order: Order): boolean {
-  return !["CLOSED", "CANCELLED", "REJECTED"].includes(order.status);
+  return !["CLOSED", "CANCELLED", "REJECTED", "MERGED"].includes(order.status);
 }
 
 export function tableStatusLabel(status: RestaurantTableStatus): string {
@@ -484,4 +493,25 @@ export function tableStatusLabel(status: RestaurantTableStatus): string {
   };
 
   return labels[status] ?? status;
+}
+
+export async function getWaiterMergeCandidates(
+  token: string,
+  targetOrderId: number,
+): Promise<OrderMergeCandidate[]> {
+  return apiRequest<OrderMergeCandidate[]>(`/orders/${targetOrderId}/merge-candidates`, { token });
+}
+
+export async function mergeWaiterOrder(
+  token: string,
+  targetOrderId: number,
+  sourceOrderId: number,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${targetOrderId}/merge`, {
+    method: "POST",
+    token,
+    body: {
+      source_order_id: sourceOrderId,
+    },
+  });
 }

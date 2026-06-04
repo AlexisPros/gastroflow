@@ -51,7 +51,13 @@ from app.schemas.kitchen_section import (
 )
 from app.schemas.kitchen_task import KitchenTaskCreate, KitchenTaskRead, KitchenTaskUpdate
 from app.schemas.modifier import ModifierCreate, ModifierRead, ModifierUpdate
-from app.schemas.order import OrderCreate, OrderRead, OrderUpdate
+from app.schemas.order import (
+    OrderCreate,
+    OrderRead,
+    OrderUpdate,
+    OrderMergeCandidateRead,
+    OrderMergeRequest,
+)
 from app.schemas.order_action_log import (
     OrderActionLogCreate,
     OrderActionLogRead,

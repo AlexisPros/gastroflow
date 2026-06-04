@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.crud.base import CRUDBase
 from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.models.restaurant_table import RestaurantTable
 from app.schemas.order import OrderCreate, OrderUpdate
 
@@ -29,6 +30,51 @@ class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
             .limit(limit),
         )
         return list(result.scalars().all())
+
+    async def get_merge_candidates(
+        self,
+        db: AsyncSession,
+        *,
+        target_order_id: int,
+        waiter_id: int | None = None,
+        is_manager: bool = False,
+    ) -> list[dict]:
+        from sqlalchemy import func
+
+        query = (
+            select(
+                Order.id,
+                Order.table_id,
+                Order.status,
+                Order.total_amount,
+                Order.created_at,
+                func.count(OrderItem.id).label("item_count"),
+            )
+            .outerjoin(OrderItem, OrderItem.order_id == Order.id)
+            .where(
+                Order.id != target_order_id,
+                Order.status.in_(["OPEN", "IN_PROGRESS"]),
+            )
+            .group_by(Order.id)
+            .order_by(Order.created_at.desc())
+        )
+
+        if not is_manager and waiter_id is not None:
+            query = query.where(Order.waiter_id == waiter_id)
+
+        result = await db.execute(query)
+        rows = result.all()
+        return [
+            {
+                "id": row.id,
+                "table_id": row.table_id,
+                "status": row.status,
+                "total_amount": row.total_amount,
+                "created_at": row.created_at,
+                "item_count": row.item_count,
+            }
+            for row in rows
+        ]
 
     async def change_table(
         self,

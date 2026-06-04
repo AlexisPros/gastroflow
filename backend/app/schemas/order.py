@@ -46,3 +46,16 @@ class OrderRead(OrderBase):
     status: str
     closed_at: datetime | None = None
     created_at: datetime
+
+
+class OrderMergeCandidateRead(OrmBaseModel):
+    id: int
+    table_id: int | None = None
+    status: str
+    total_amount: Decimal
+    created_at: datetime
+    item_count: int
+
+
+class OrderMergeRequest(OrmBaseModel):
+    source_order_id: int

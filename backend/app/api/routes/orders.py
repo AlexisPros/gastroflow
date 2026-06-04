@@ -18,6 +18,8 @@ from app.schemas import (
     OrderItemRead,
     OrderRead,
     OrderTransferLogRead,
+    OrderMergeCandidateRead,
+    OrderMergeRequest,
 )
 
 router = APIRouter(
@@ -431,6 +433,52 @@ async def split_order_item_quantity(
             source_item=source_item,
             target_order=target_order,
             quantity=body.quantity,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.get("/orders/{target_order_id}/merge-candidates", response_model=list[OrderMergeCandidateRead])
+async def get_order_merge_candidates(
+    target_order_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    is_manager = current_user.role in {"ADMIN", "MANAGER"}
+    return await crud_order.get_merge_candidates(
+        db,
+        target_order_id=target_order_id,
+        waiter_id=current_user.id,
+        is_manager=is_manager,
+    )
+
+
+@router.post("/orders/{target_order_id}/merge", response_model=OrderRead)
+async def merge_orders(
+    target_order_id: int,
+    body: OrderMergeRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    target_order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=target_order_id,
+        entity_name="target order",
+    )
+    source_order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=body.source_order_id,
+        entity_name="source order",
+    )
+
+    try:
+        return await billing_service.merge_orders(
+            db,
+            target_order=target_order,
+            source_order=source_order,
+            user_id=current_user.id,
         )
     except ValueError as exc:
         raise_bad_request(exc)

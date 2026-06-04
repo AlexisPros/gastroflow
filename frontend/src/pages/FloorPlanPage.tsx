@@ -71,7 +71,7 @@ export function FloorPlanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [mapScale, setMapScale] = useState(1);
+  const [mapScale, setMapScale] = useState(0.7);
   const [wsStatus, setWsStatus] = useState("disconnected");
   const [lastEvent, setLastEvent] = useState<string | null>(null);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
@@ -247,9 +247,9 @@ export function FloorPlanPage() {
               <button
                 type="button"
                 className="tool-button"
-                onClick={() => setMapScale(1)}
+                onClick={() => setMapScale(0.7)}
               >
-                {Math.round(mapScale * 100)}%
+                {Math.round((mapScale / 0.7) * 100)}%
               </button>
               <button
                 type="button"

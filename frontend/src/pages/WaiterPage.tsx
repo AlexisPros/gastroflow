@@ -48,6 +48,9 @@ import {
   removeDiscountFromWaiterOrder,
   updateWaiterOrder,
   updateWaiterOrderTip,
+  getWaiterMergeCandidates,
+  mergeWaiterOrder,
+  type OrderMergeCandidate,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { connectLiveUpdates } from "../ws/liveUpdates";
@@ -56,6 +59,10 @@ type LoadingState = "idle" | "loading" | "ready" | "error";
 type WaiterMode = "DASHBOARD" | "TABLE_PICKER" | "ORDER_BUILDER" | "CHECKOUT" | "ORDER_DETAILS";
 type MenuDepartment = "KITCHEN" | "BAR";
 type TicketSelection = { type: "existing"; id: number } | { type: "cart"; id: string };
+
+function clampScale(s: number) {
+  return Math.min(Math.max(s, 0.3), 3);
+}
 
 const barCategoryWords = [
   "bar",
@@ -95,6 +102,10 @@ export function WaiterPage() {
   const [isFunctionsMenuOpen, setIsFunctionsMenuOpen] = useState(false);
   const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
   const [isBillSplitOpen, setIsBillSplitOpen] = useState(false);
+  const [isMergeModalOpen, setIsMergeModalOpen] = useState(false);
+  const [mergeCandidates, setMergeCandidates] = useState<OrderMergeCandidate[]>([]);
+  const [selectedMergeCandidateId, setSelectedMergeCandidateId] = useState<number | null>(null);
+  const [isMerging, setIsMerging] = useState(false);
   const [billSplitView, setBillSplitView] = useState<BillSplitView | null>(null);
   const [selectedBillSplitItemIds, setSelectedBillSplitItemIds] = useState<number[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -103,6 +114,7 @@ export function WaiterPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [mapScale, setMapScale] = useState(0.9);
 
   const loadWaiterData = useCallback(async () => {
     if (!token) {
@@ -267,7 +279,6 @@ export function WaiterPage() {
   if (status === "idle" || status === "loading") {
     return (
       <section className="page-stack">
-        <WaiterHeader />
         <div className="module-placeholder">Loading waiter workspace...</div>
       </section>
     );
@@ -276,7 +287,6 @@ export function WaiterPage() {
   if (status === "error") {
     return (
       <section className="page-stack">
-        <WaiterHeader />
         <div className="error-box">{error}</div>
         <button type="button" className="primary-button" onClick={loadWaiterData}>
           Reload
@@ -287,8 +297,6 @@ export function WaiterPage() {
 
   return (
     <section className={`waiter-workspace ${isFullscreenMode(mode) ? "pos-builder-mode" : ""}`}>
-      {!isFullscreenMode(mode) && <WaiterHeader />}
-
       {!isFullscreenMode(mode) && notice && <div className="success-box">{notice}</div>}
       {!isFullscreenMode(mode) && error && <div className="error-box">{error}</div>}
 
@@ -297,8 +305,8 @@ export function WaiterPage() {
           <main className="waiter-panel waiter-orders-board">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Open orders</span>
-                <h1>Active tables</h1>
+                <span className="eyebrow">Otwarte rachunki</span>
+                <h1>Aktywne stoliki</h1>
               </div>
               <strong>{openOrders.length}</strong>
             </div>
@@ -313,25 +321,25 @@ export function WaiterPage() {
                     openExistingOrder(order);
                   }}
                 >
-                  <span>Order #{formatOrderNumber(order)}</span>
+                  <span>Rachunek #{formatOrderNumber(order)}</span>
                   <strong>{getOrderTableLabel(order)}</strong>
                   <small>
-                    {order.guest_count ?? 0} guests · {order.status}
+                    {order.guest_count ?? 0} os. · {order.status === 'OPEN' ? 'OTWARTY' : (order.status === 'IN_PROGRESS' ? 'W TRAKCIE' : order.status)}
                   </small>
                   <b>{formatMoney(Number(order.total_amount))}</b>
                 </button>
               ))}
               {openOrders.length === 0 && (
                 <div className="empty-orders-state">
-                  <strong>No open orders</strong>
-                  <p>New orders will appear here after a table is selected.</p>
+                  <strong>Brak otwartych rachunków</strong>
+                  <p>Nowe rachunki pojawią się tutaj po wybraniu stolika.</p>
                 </div>
               )}
             </div>
           </main>
 
           <aside className="waiter-panel waiter-action-panel">
-            <span className="eyebrow">Actions</span>
+            <span className="eyebrow">Akcje</span>
             <button
               type="button"
               className="pos-action-button primary"
@@ -342,10 +350,10 @@ export function WaiterPage() {
                 setError(null);
               }}
             >
-              Create order
+              Utwórz rachunek
             </button>
             <button type="button" className="pos-action-button" onClick={loadWaiterData}>
-              Refresh
+              Odśwież
             </button>
           </aside>
         </div>
@@ -354,23 +362,36 @@ export function WaiterPage() {
       {mode === "TABLE_PICKER" && (
         <div className="waiter-flow-grid">
           <main className="waiter-panel waiter-map-panel">
-            <div className="panel-heading">
+            <div className="panel-heading" style={{ alignItems: "center" }}>
               <div>
-                <span className="eyebrow">Step 1</span>
-                <h1>Select free table</h1>
+                <span className="eyebrow">Krok 1</span>
+                <h1>Wybierz wolny stolik</h1>
               </div>
               <button type="button" className="ghost-button" onClick={resetToDashboard}>
-                Back
+                Wstecz
               </button>
             </div>
 
-            <div className="waiter-floor-map">
+            <div
+              className="waiter-floor-map"
+              onWheel={(event) => {
+                if (!event.ctrlKey && !event.metaKey) {
+                  return;
+                }
+                event.preventDefault();
+                setMapScale((value) =>
+                  clampScale(value + (event.deltaY > 0 ? -0.1 : 0.1)),
+                );
+              }}
+            >
               {floorPlan ? (
                 <div
                   className="waiter-floor-canvas"
                   style={{
                     width: floorPlan.width,
                     height: floorPlan.height,
+                    transform: `scale(${mapScale})`,
+                    transformOrigin: "top left",
                     backgroundImage: floorPlan.background_image_url
                       ? `url(${floorPlan.background_image_url})`
                       : undefined,
@@ -606,8 +627,15 @@ export function WaiterPage() {
                   <button type="button" disabled>
                     Ostatni napój
                   </button>
-                  <button type="button" disabled>
-                    Dodaj rachunek
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsFunctionsMenuOpen(false);
+                      void handleOpenMergeModal();
+                    }}
+                    disabled={!selectedOrder || isSubmitting}
+                  >
+                    Połącz rachunek
                   </button>
                 </div>
               )}
@@ -837,6 +865,59 @@ export function WaiterPage() {
             setPendingProduct(null);
           }}
         />
+      )}
+
+      {isMergeModalOpen && selectedOrder && (
+        <div className="modal-backdrop">
+          <div className="product-options-modal product-search-modal">
+            <div className="panel-heading">
+              <div>
+                <span className="eyebrow">Łączenie</span>
+                <h2>Wybierz rachunek do dołączenia</h2>
+              </div>
+              <button type="button" className="ghost-button" onClick={() => setIsMergeModalOpen(false)}>
+                Zamknij
+              </button>
+            </div>
+
+            <div className="product-search-results">
+              {mergeCandidates.map((candidate) => (
+                <button
+                  key={candidate.id}
+                  type="button"
+                  className={selectedMergeCandidateId === candidate.id ? "selected" : ""}
+                  onClick={() => setSelectedMergeCandidateId(candidate.id)}
+                >
+                  <span>
+                    <strong>Rachunek #{candidate.id}</strong>
+                    {candidate.table_id ? <small>Stolik {floorTables.find((t) => t.table_id === candidate.table_id)?.table?.table_number ?? "?"}</small> : null}
+                  </span>
+                  <b>
+                    {formatMoney(Number(candidate.total_amount))} ({candidate.item_count} poz.)
+                  </b>
+                </button>
+              ))}
+              {mergeCandidates.length === 0 && (
+                <div className="empty-ticket">Brak innych rachunków do połączenia.</div>
+              )}
+            </div>
+
+            <div className="bill-split-actions" style={{ justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={!selectedMergeCandidateId || isMerging}
+                onClick={() => {
+                  if (confirm(`Czy na pewno chcesz dołączyć ten rachunek do rachunku #${selectedOrder.id}?`)) {
+                    void handleMergeConfirm();
+                  }
+                }}
+              >
+                {isMerging ? "Łączenie..." : "Połącz rachunki"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {isProductSearchOpen && (
@@ -1232,6 +1313,46 @@ export function WaiterPage() {
       setError(exc instanceof ApiError ? exc.message : "Could not create order.");
     } finally {
       setIsSubmitting(false);
+    }
+  }
+
+  async function handleOpenMergeModal() {
+    if (!token || !selectedOrder) return;
+    try {
+      setIsSubmitting(true);
+      const candidates = await getWaiterMergeCandidates(token, selectedOrder.id);
+      setMergeCandidates(candidates);
+      setSelectedMergeCandidateId(null);
+      setIsMergeModalOpen(true);
+    } catch (err) {
+      console.error("handleOpenMergeModal error", err);
+      if (err instanceof ApiError) {
+        alert(`Błąd API: ${err.message}`);
+      } else {
+        alert(`Wystąpił błąd: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleMergeConfirm() {
+    if (!token || !selectedOrder || !selectedMergeCandidateId) return;
+    try {
+      setIsMerging(true);
+      await mergeWaiterOrder(token, selectedOrder.id, selectedMergeCandidateId);
+      setIsMergeModalOpen(false);
+      const updatedOrders = await getWaiterOrders(token);
+      setOrders(updatedOrders);
+      const items = await getWaiterOrderItems(token);
+      setOrderItems(items);
+      alert("Rachunki zostały połączone!");
+    } catch (err) {
+      if (err instanceof ApiError) {
+        alert(`Błąd: ${err.message}`);
+      }
+    } finally {
+      setIsMerging(false);
     }
   }
 
@@ -2047,18 +2168,7 @@ function CheckoutOrderDetails({
   );
 }
 
-function WaiterHeader() {
-  return (
-    <div className="waiter-header">
-      <div>
-        <span className="eyebrow">Waiter POS</span>
-        <h1>Service panel</h1>
-        <p className="muted">Open orders first, then create a new table order from the room map.</p>
-      </div>
-      <img src="/logo.png" alt="GastroFlow" />
-    </div>
-  );
-}
+
 
 function ProductOptionsModal({
   product,
@@ -2228,7 +2338,7 @@ function isCartItem(entry: CartEntry): entry is CartItem {
 }
 
 function isFullscreenMode(mode: WaiterMode): boolean {
-  return mode === "ORDER_BUILDER" || mode === "CHECKOUT";
+  return mode === "ORDER_BUILDER" || mode === "CHECKOUT" || mode === "TABLE_PICKER";
 }
 
 function hasCartItems(entries: CartEntry[]): boolean {

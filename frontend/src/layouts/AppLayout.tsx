@@ -80,8 +80,8 @@ export function AppLayout() {
 
       <div className="workspace">
         <header className="topbar">
-          <div>
-            <span className="eyebrow">Signed in</span>
+          <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+            <span className="eyebrow">Zalogowano</span>
             <strong>
               {user?.first_name} {user?.last_name}
             </strong>
@@ -97,12 +97,12 @@ export function AppLayout() {
                 }}
                 disabled={isShiftChanging}
               >
-                {currentShift ? "End shift" : "Start shift"}
+                {currentShift ? "Zakończ zmianę" : "Rozpocznij zmianę"}
               </button>
             )}
             <span className="role-pill">{user?.role}</span>
             <button type="button" className="ghost-button" onClick={logout}>
-              Logout
+              Wyloguj
             </button>
           </div>
         </header>
