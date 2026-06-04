@@ -451,7 +451,7 @@ export function WaiterPage() {
                 setSelectedCategoryId("ALL");
               }}
             >
-              Continue to menu
+              Przejdź do menu
             </button>
           </aside>
         </div>
@@ -472,7 +472,7 @@ export function WaiterPage() {
                 className={department === "KITCHEN" ? "active" : ""}
                 onClick={() => switchDepartment("KITCHEN")}
               >
-                Dishes
+                Dania
               </button>
               <button
                 type="button"
@@ -489,7 +489,7 @@ export function WaiterPage() {
                 className={selectedCategoryId === "ALL" ? "active" : ""}
                 onClick={() => setSelectedCategoryId("ALL")}
               >
-                All
+                Wszystko
               </button>
               {departmentCategories.map((category) => (
                 <button
@@ -517,7 +517,7 @@ export function WaiterPage() {
                 </button>
               ))}
               {visibleProducts.length === 0 && (
-                <div className="module-placeholder">No active products in this section.</div>
+                <div className="module-placeholder">Brak aktywnych produktów w tej sekcji.</div>
               )}
             </div>
 
@@ -526,17 +526,17 @@ export function WaiterPage() {
           <aside className="waiter-panel order-panel">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">TICKET</span>
+                <span className="eyebrow">RACHUNEK</span>
                 <h2>
                   {selectedOrder
-                    ? `Order #${formatOrderNumber(selectedOrder)}`
-                    : `Table ${selectedTable.table_number}`}
+                    ? `Zamówienie #${formatOrderNumber(selectedOrder)}`
+                    : `Stolik ${selectedTable.table_number}`}
                 </h2>
               </div>
               <strong>{formatMoney(getTicketTotal())}</strong>
             </div>
             <p className="muted">
-              Table {selectedTable.table_number} · {guestCount} guests
+              Stolik {selectedTable.table_number} · {guestCount} osób
             </p>
 
             {error && <div className="error-box">{error}</div>}
@@ -1431,9 +1431,6 @@ export function WaiterPage() {
     if (!token || !selectedOrder) {
       return;
     }
-
-    setIsSubmitting(true);
-    setError(null);
     try {
       const view = await splitWaiterBillSplitItem(token, selectedOrder.id, {
         order_item_id: itemId,
@@ -1642,18 +1639,18 @@ function BillSplitModal({
       <div className="bill-split-modal">
         <div className="bill-split-header">
           <div>
-            <span className="eyebrow">Bill split</span>
-            <h2>Order #{view.order_id}</h2>
+            <span className="eyebrow">Podział rachunku</span>
+            <h2>Zamówienie #{view.order_id}</h2>
             <p className="muted">
-              Select items from the original check, then tap a target check.
+              Wybierz pozycje z oryginalnego rachunku, a następnie dotknij rachunku docelowego.
             </p>
           </div>
           <div className="bill-split-summary">
             <span>
-              Remaining <strong>{formatMoney(Number(view.unassigned_total))}</strong>
+              Pozostało <strong>{formatMoney(Number(view.unassigned_total))}</strong>
             </span>
             <span>
-              Assigned <strong>{formatMoney(assignedTotal)}</strong>
+              Przypisano <strong>{formatMoney(assignedTotal)}</strong>
             </span>
           </div>
         </div>
@@ -1662,10 +1659,10 @@ function BillSplitModal({
           <section className="bill-split-original">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Original check</span>
-                <h3>Items</h3>
+                <span className="eyebrow">Oryginalny rachunek</span>
+                <h3>Pozycje</h3>
               </div>
-              <strong>{selectedCount} selected</strong>
+              <strong>wybrano: {selectedCount}</strong>
             </div>
             <div className="bill-split-item-list">
               {view.original_items.map((item) => {
@@ -1686,7 +1683,7 @@ function BillSplitModal({
                       <span>
                         <strong>{item.product_name}</strong>
                         <small>
-                          Available {formatQuantity(item.remaining_quantity)} /{" "}
+                          Dostępne: {formatQuantity(item.remaining_quantity)} /{" "}
                           {formatQuantity(item.quantity)}
                         </small>
                         {item.notes && <small>{item.notes}</small>}
@@ -1710,8 +1707,8 @@ function BillSplitModal({
           <section className="bill-split-targets">
             <div className="panel-heading">
               <div>
-                <span className="eyebrow">Bill segments</span>
-                <h3>Checks</h3>
+                <span className="eyebrow">Części rachunku</span>
+                <h3>Rachunki</h3>
               </div>
               <div className="bill-split-segment-actions">
                 <button
@@ -1728,7 +1725,7 @@ function BillSplitModal({
                   disabled={isSubmitting}
                   onClick={onAddSegment}
                 >
-                  Add check
+                  Dodaj rachunek
                 </button>
               </div>
             </div>
@@ -1756,7 +1753,7 @@ function BillSplitModal({
                             {formatMoney(Number(item.unit_price))}
                           </small>
                           {Number(item.quantity) > 0 && Number(item.quantity) < 1 && (
-                            <small>{formatQuantity(item.quantity)} share</small>
+                            <small>{formatQuantity(item.quantity)} część</small>
                           )}
                           {item.notes && <small>{item.notes}</small>}
                         </span>
@@ -1764,7 +1761,7 @@ function BillSplitModal({
                       </span>
                     ))}
                     {segment.items.length === 0 && (
-                      <span className="bill-segment-empty">Tap to move selected items here.</span>
+                      <span className="bill-segment-empty">Dotknij, aby przenieść tutaj wybrane pozycje.</span>
                     )}
                   </span>
                   {segment.items.length === 0 && view.segments.length > 1 && (
@@ -1775,7 +1772,7 @@ function BillSplitModal({
                         onDeleteSegment(segment.id);
                       }}
                     >
-                      Remove empty check
+                      Usuń pusty rachunek
                     </span>
                   )}
                 </button>
@@ -1794,7 +1791,7 @@ function BillSplitModal({
             disabled={isSubmitting}
             onClick={onFinalize}
           >
-            Finalize split
+            Zakończ podział
           </button>
         </div>
 
@@ -1839,17 +1836,17 @@ function SplitItemModal({
       <div className="split-item-modal">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">Shared item</span>
+            <span className="eyebrow">Wspólna pozycja</span>
             <h3>{item.product_name}</h3>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
-            Close
+            Zamknij
           </button>
         </div>
 
         <p className="muted">
-          Choose at least two checks. Each selected check will receive{" "}
-          {shareQuantity > 0 ? formatQuantity(String(shareQuantity)) : "0"} share.
+          Wybierz co najmniej dwa rachunki. Każdy wybrany rachunek otrzyma{" "}
+          {shareQuantity > 0 ? formatQuantity(String(shareQuantity)) : "0"} część.
         </p>
 
         <div className="split-item-checks">
@@ -1929,7 +1926,7 @@ function CartList({
             <div>
               <strong>* {product?.name ?? `Product #${item.product_id}`}</strong>
               <span>
-                Course {item.course_number} · {item.quantity} x {formatMoney(Number(item.unit_price))}
+                Kurs {item.course_number} · {item.quantity} x {formatMoney(Number(item.unit_price))}
               </span>
               {item.notes && <small>{item.notes}</small>}
             </div>
@@ -1951,7 +1948,7 @@ function CartList({
             <div>
               <strong>{entry.product.name}</strong>
               <span>
-                Course {entry.courseNumber} · {formatMoney(getItemTotal(entry))}
+                Kurs {entry.courseNumber} · {formatMoney(getItemTotal(entry))}
               </span>
               {entry.notes && <small>{entry.notes}</small>}
               {entry.productModifierIds.map((productModifierId) => (
@@ -1991,12 +1988,12 @@ function CartList({
             }`}
             onClick={() => onSelectCart(entry.id)}
           >
-            Course {entry.nextCourseNumber}
+            Kurs {entry.nextCourseNumber}
           </button>
         ),
       )}
       {existingItems.length === 0 && !hasCartItems(cart) && (
-        <div className="empty-ticket">Select products to build this order.</div>
+        <div className="empty-ticket">Wybierz produkty, aby utworzyć zamówienie.</div>
       )}
     </div>
   );
@@ -2021,7 +2018,7 @@ function CheckoutOrderDetails({
               <div>
                 <strong>{product?.name ?? `Product #${item.product_id}`}</strong>
                 <span>
-                  Course {item.course_number} · {item.quantity} x{" "}
+                  Kurs {item.course_number} · {item.quantity} x{" "}
                   {formatMoney(Number(item.unit_price))}
                 </span>
                 {item.notes && <small>{item.notes}</small>}
@@ -2034,16 +2031,16 @@ function CheckoutOrderDetails({
 
       <div className="checkout-totals">
         <span>
-          Subtotal <strong>{formatMoney(Number(order.subtotal_amount))}</strong>
+          Podsuma <strong>{formatMoney(Number(order.subtotal_amount))}</strong>
         </span>
         <span>
-          Discount <strong>-{formatMoney(Number(order.discount_amount))}</strong>
+          Rabat <strong>-{formatMoney(Number(order.discount_amount))}</strong>
         </span>
         <span>
-          Tip <strong>{formatMoney(Number(order.tip_amount))}</strong>
+          Napiwek <strong>{formatMoney(Number(order.tip_amount))}</strong>
         </span>
         <b>
-          Total <strong>{formatMoney(Number(order.total_amount))}</strong>
+          Suma <strong>{formatMoney(Number(order.total_amount))}</strong>
         </b>
       </div>
     </div>
@@ -2086,22 +2083,22 @@ function ProductOptionsModal({
       <div className="product-options-modal">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">Item options</span>
+            <span className="eyebrow">Opcje pozycji</span>
             <h2>{product.name}</h2>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
-            Close
+            Zamknij
           </button>
         </div>
 
         {requiresSteakInfo(product) && (
           <label className="compact-field">
-            Cooking level
+            Stopień wysmażenia
             <select
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
             >
-              <option value="">Select level</option>
+              <option value="">Wybierz stopień</option>
               {roastLevels.map((level) => (
                 <option key={level} value={level}>
                   {level}
@@ -2112,11 +2109,11 @@ function ProductOptionsModal({
         )}
 
         <label className="compact-field">
-          Info / notes
+          Uwagi
           <input
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            placeholder="e.g. no onion"
+            placeholder="np. bez cebuli"
           />
         </label>
 
@@ -2140,7 +2137,7 @@ function ProductOptionsModal({
                     }}
                   />
                   <span>{modifier?.name ?? `Modifier #${productModifier.modifier_id}`}</span>
-                  <strong>{price > 0 ? `+${formatMoney(price)}` : "Free"}</strong>
+                  <strong>{price > 0 ? `+${formatMoney(price)}` : "Za darmo"}</strong>
                 </label>
               );
             })}
@@ -2157,7 +2154,7 @@ function ProductOptionsModal({
             })
           }
         >
-          Add to check
+          Dodaj do rachunku
         </button>
       </div>
     </div>
@@ -2182,20 +2179,20 @@ function ProductSearchModal({
       <div className="product-options-modal product-search-modal">
         <div className="panel-heading">
           <div>
-            <span className="eyebrow">System search</span>
+            <span className="eyebrow">Wyszukiwanie</span>
             <h2>Szukaj pozycji</h2>
           </div>
           <button type="button" className="ghost-button" onClick={onClose}>
-            Close
+            Zamknij
           </button>
         </div>
 
         <label className="compact-field">
-          Product name
+          Nazwa produktu
           <input
             autoFocus
             value={query}
-            placeholder="Start typing..."
+            placeholder="Zacznij pisać..."
             onChange={(event) => onQueryChange(event.target.value)}
           />
         </label>
@@ -2215,10 +2212,10 @@ function ProductSearchModal({
             </button>
           ))}
           {query.trim() && results.length === 0 && (
-            <div className="empty-ticket">No matching products.</div>
+            <div className="empty-ticket">Brak pasujących produktów.</div>
           )}
           {!query.trim() && (
-            <div className="empty-ticket">Type a product name to search.</div>
+            <div className="empty-ticket">Wpisz nazwę produktu, aby wyszukać.</div>
           )}
         </div>
       </div>

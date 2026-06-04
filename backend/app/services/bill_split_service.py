@@ -27,8 +27,9 @@ class BillSplitService:
     async def get_view(self, db: AsyncSession, *, order: Order) -> BillSplitViewRead:
         self._ensure_order_can_split(order)
         segments = await self._get_segments(db, order_id=order.id)
-        if not segments:
-            await self.create_segment(db, order=order)
+        if len(segments) < 2:
+            for _ in range(2 - len(segments)):
+                await self.create_segment(db, order=order)
             segments = await self._get_segments(db, order_id=order.id)
 
         original_items = await self._build_original_items(db, order=order)
@@ -216,6 +217,14 @@ class BillSplitService:
         if not non_empty_segments:
             raise ValueError("At least one non-empty bill segment is required.")
 
+        original_items = await self._build_original_items(db, order=order)
+        unassigned_quantity = sum(
+            (item.remaining_quantity for item in original_items),
+            Decimal("0.000"),
+        )
+        if unassigned_quantity > Decimal("0.000"):
+            raise ValueError("All items must be assigned to checks before finalizing.")
+
         for segment in non_empty_segments:
             guest_count = segment_guest_counts.get(segment.id)
             if guest_count is None or guest_count <= 0:
@@ -266,6 +275,9 @@ class BillSplitService:
                 source_item=source_item,
                 allocations=allocations,
             )
+
+        order.status = "CANCELLED"
+        order.table_id = None
 
         orders_to_recalculate = [order, *created_orders]
         for order_to_recalculate in orders_to_recalculate:
