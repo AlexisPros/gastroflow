@@ -80,8 +80,6 @@ export function FloorPlanPage() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [mapScale, setMapScale] = useState(0.7);
-  const [wsStatus, setWsStatus] = useState("disconnected");
-  const [lastEvent, setLastEvent] = useState<string | null>(null);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const loadFloorPlansList = useCallback(async () => {
@@ -140,9 +138,7 @@ export function FloorPlanPage() {
     return connectLiveUpdates({
       channel: "floor",
       token,
-      onStatusChange: setWsStatus,
       onMessage: (message) => {
-        setLastEvent(message.event);
         if (message.event !== "connected") {
           void loadFloorPlan();
         }
@@ -265,7 +261,7 @@ export function FloorPlanPage() {
       const newPlan = await createFloorPlan(token, { name, is_active: true });
       setFloorPlans((prev) => [...prev, newPlan]);
       setSelectedFloorPlanId(newPlan.id);
-    } catch (exc) {
+    } catch {
       setError("Nie udało się utworzyć nowej sali");
     }
   };
@@ -294,7 +290,7 @@ export function FloorPlanPage() {
                     if (floorPlan?.id === plan.id) {
                       setFloorPlan((prev) => (prev ? { ...prev, name: newName } : prev));
                     }
-                  } catch (err) {
+                  } catch {
                     setError("Nie udało się zmienić nazwy");
                   }
                 }
@@ -326,7 +322,7 @@ export function FloorPlanPage() {
                         setSelectedFloorPlanId(null);
                         setFloorPlan(null);
                       }
-                    } catch (err) {
+                    } catch {
                       setError("Nie udało się usunąć sali");
                     }
                   }

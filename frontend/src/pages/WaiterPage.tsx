@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
 import {
@@ -63,7 +63,7 @@ type MenuDepartment = "KITCHEN" | "BAR";
 type TicketSelection = { type: "existing"; id: number } | { type: "cart"; id: string };
 
 function clampScale(s: number) {
-  return Math.min(Math.max(s, 0.3), 3);
+  return Math.min(Math.max(s, 0.7), 2.5);
 }
 
 const barCategoryWords = [
@@ -119,7 +119,36 @@ export function WaiterPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [mapScale, setMapScale] = useState(0.9);
+  const [mapScale, setMapScale] = useState(0.7);
+  const waiterMapRef = useRef<HTMLDivElement | null>(null);
+  const floorContentSize = useMemo(() => {
+    if (!floorPlan) {
+      return { width: 0, height: 0 };
+    }
+
+    const hasMapObjects = floorTables.length > 0 || floorDecorations.length > 0;
+    const tableWidth = floorTables.reduce(
+      (width, item) => Math.max(width, Number(item.x) + Number(item.width)),
+      0,
+    );
+    const tableHeight = floorTables.reduce(
+      (height, item) => Math.max(height, Number(item.y) + Number(item.height)),
+      0,
+    );
+    const decorationWidth = floorDecorations.reduce(
+      (width, item) => Math.max(width, Number(item.x) + Number(item.width)),
+      0,
+    );
+    const decorationHeight = floorDecorations.reduce(
+      (height, item) => Math.max(height, Number(item.y) + Number(item.height)),
+      0,
+    );
+
+    return {
+      width: (hasMapObjects ? Math.max(tableWidth, decorationWidth) : floorPlan.width) + 40,
+      height: (hasMapObjects ? Math.max(tableHeight, decorationHeight) : floorPlan.height) + 40,
+    };
+  }, [floorDecorations, floorPlan, floorTables]);
 
   const loadWaiterData = useCallback(async () => {
     if (!token) {
@@ -391,7 +420,7 @@ export function WaiterPage() {
       )}
 
       {mode === "TABLE_PICKER" && (
-        <div className="waiter-flow-grid">
+        <div className="waiter-flow-grid table-picker-flow">
           <main className="waiter-panel waiter-map-panel">
             <div className="panel-heading" style={{ alignItems: "center" }}>
               <div>
@@ -419,6 +448,7 @@ export function WaiterPage() {
             )}
 
             <div
+              ref={waiterMapRef}
               className="waiter-floor-map"
               onWheel={(event) => {
                 if (!event.ctrlKey && !event.metaKey) {
@@ -432,17 +462,24 @@ export function WaiterPage() {
             >
               {floorPlan ? (
                 <div
-                  className="waiter-floor-canvas"
+                  className="waiter-floor-stage"
                   style={{
-                    width: floorPlan.width,
-                    height: floorPlan.height,
-                    transform: `scale(${mapScale})`,
-                    transformOrigin: "top left",
-                    backgroundImage: floorPlan.background_image_url
-                      ? `url(${floorPlan.background_image_url})`
-                      : undefined,
+                    width: floorContentSize.width * mapScale,
+                    height: floorContentSize.height * mapScale,
                   }}
                 >
+                  <div
+                    className="waiter-floor-canvas"
+                    style={{
+                      width: floorContentSize.width,
+                      height: floorContentSize.height,
+                      transform: `scale(${mapScale})`,
+                      transformOrigin: "top left",
+                      backgroundImage: floorPlan.background_image_url
+                        ? `url(${floorPlan.background_image_url})`
+                        : undefined,
+                    }}
+                  >
                   {floorDecorations.map((item) => (
                     <div
                       key={item.id}
@@ -481,46 +518,23 @@ export function WaiterPage() {
                       disabled={item.table?.status !== "FREE"}
                       onClick={() => {
                         if (item.table?.status === "FREE") {
-                          setSelectedTable(item.table);
+                          void selectTableForNewOrder(item.table);
                         }
                       }}
                     >
                       <strong>{item.table?.table_number ?? item.table_id}</strong>
-                      <span>{tableStatusLabel(item.table?.status ?? "UNKNOWN")}</span>
+                      <span className="table-status-label">
+                        {tableStatusLabel(item.table?.status ?? "UNKNOWN")}
+                      </span>
                     </button>
                   ))}
                 </div>
+              </div>
               ) : (
-                <div className="empty-ticket">No active floor plan.</div>
+                <div className="empty-ticket">Brak aktywnego planu sali.</div>
               )}
             </div>
           </main>
-
-          <aside className="waiter-panel waiter-action-panel">
-            <span className="eyebrow">Step 2</span>
-            <h2>{selectedTable ? `Table ${selectedTable.table_number}` : "No table selected"}</h2>
-            <label className="compact-field">
-              Guests
-              <input
-                type="number"
-                min={1}
-                value={guestCount}
-                onChange={(event) => setGuestCount(Math.max(1, Number(event.target.value)))}
-              />
-            </label>
-            <button
-              type="button"
-              className="pos-action-button primary"
-              disabled={!selectedTable}
-              onClick={() => {
-                setCart([]);
-                setMode("ORDER_BUILDER");
-                setSelectedCategoryId("ALL");
-              }}
-            >
-              Przejdź do menu
-            </button>
-          </aside>
         </div>
       )}
 
@@ -1024,6 +1038,37 @@ export function WaiterPage() {
     setCart([]);
     setNotice(null);
     setError(null);
+    setMode("ORDER_BUILDER");
+  }
+
+  async function selectTableForNewOrder(table: RestaurantTable | null | undefined) {
+    if (!table || table.status !== "FREE") {
+      return;
+    }
+
+    const rawGuestCount = await prompt({
+      title: `Stolik ${table.table_number}`,
+      label: "Liczba gości",
+      defaultValue: String(guestCount),
+      type: "number",
+      confirmText: "Przejdź do menu",
+      cancelText: "Anuluj",
+    });
+
+    if (rawGuestCount === null) {
+      return;
+    }
+
+    const parsedGuestCount = Number(rawGuestCount);
+    if (!Number.isInteger(parsedGuestCount) || parsedGuestCount <= 0) {
+      setError("Guest count must be a positive number.");
+      return;
+    }
+
+    setSelectedTable(table);
+    setGuestCount(parsedGuestCount);
+    setCart([]);
+    setSelectedCategoryId("ALL");
     setMode("ORDER_BUILDER");
   }
 
@@ -1598,6 +1643,9 @@ export function WaiterPage() {
     if (!token || !selectedOrder) {
       return;
     }
+
+    setIsSubmitting(true);
+    setError(null);
     try {
       const view = await splitWaiterBillSplitItem(token, selectedOrder.id, {
         order_item_id: itemId,

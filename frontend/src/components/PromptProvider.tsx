@@ -114,7 +114,6 @@ export function PromptProvider({ children }: { children: ReactNode }) {
                 </p>
               )}
               <input
-                // eslint-disable-next-line jsx-a11y/no-autofocus
                 autoFocus
                 type={promptState.options.type ?? "text"}
                 value={promptState.value}

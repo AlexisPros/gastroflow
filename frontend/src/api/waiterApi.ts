@@ -486,10 +486,10 @@ export function isOpenOrder(order: Order): boolean {
 
 export function tableStatusLabel(status: RestaurantTableStatus): string {
   const labels: Record<string, string> = {
-    FREE: "Free",
-    PENDING_ORDER: "Pending QR",
-    OCCUPIED: "Occupied",
-    RESERVED: "Reserved",
+    FREE: "Wolny",
+    PENDING_ORDER: "Oczekujący QR",
+    OCCUPIED: "Zajęty",
+    RESERVED: "Zarezerwowany",
   };
 
   return labels[status] ?? status;
