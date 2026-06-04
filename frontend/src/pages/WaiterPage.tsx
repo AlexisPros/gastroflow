@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
 import {
+  getFloorPlans,
   getFloorPlanView,
   type FloorPlan,
   type FloorPlanDecoration,
@@ -53,6 +54,7 @@ import {
   type OrderMergeCandidate,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
+import { usePrompt } from "../components/PromptProvider";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 
 type LoadingState = "idle" | "loading" | "ready" | "error";
@@ -80,7 +82,10 @@ const barCategoryWords = [
 
 export function WaiterPage() {
   const { token, user } = useAuth();
+  const { prompt, confirm } = usePrompt();
   const [floorPlan, setFloorPlan] = useState<FloorPlan | null>(null);
+  const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
+  const [selectedFloorPlanId, setSelectedFloorPlanId] = useState<number | null>(null);
   const [floorTables, setFloorTables] = useState<FloorTableView[]>([]);
   const [floorDecorations, setFloorDecorations] = useState<FloorPlanDecoration[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -136,7 +141,7 @@ export function WaiterPage() {
         nextDiscounts,
       ] =
         await Promise.all([
-          getFloorPlanView(token),
+          getFloorPlanView(token, selectedFloorPlanId ?? undefined),
           getWaiterOrders(token),
           getWaiterOrderItems(token),
           getWaiterProducts(token),
@@ -156,16 +161,42 @@ export function WaiterPage() {
       setModifiers(nextModifiers.filter((modifier) => modifier.is_active));
       setProductModifiers(nextProductModifiers.filter((item) => item.is_active));
       setDiscounts(nextDiscounts.filter((discount) => discount.is_active));
+      
+      if (selectedFloorPlanId === null && floorView.floorPlan) {
+        setSelectedFloorPlanId(floorView.floorPlan.id);
+      }
+      
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load waiter workspace.");
       setStatus("error");
     }
-  }, [token]);
+  }, [token, selectedFloorPlanId]);
+
+  const loadFloorPlansList = useCallback(async () => {
+    if (!token) return;
+    try {
+      const plans = await getFloorPlans(token);
+      setFloorPlans(plans);
+      if (plans.length > 0 && selectedFloorPlanId === null) {
+        setSelectedFloorPlanId(plans[0].id);
+      }
+    } catch (e) {
+      console.error("Could not load floor plans", e);
+    }
+  }, [token, selectedFloorPlanId]);
 
   useEffect(() => {
-    void loadWaiterData();
-  }, [loadWaiterData]);
+    void loadFloorPlansList();
+  }, [loadFloorPlansList]);
+
+  useEffect(() => {
+    if (selectedFloorPlanId !== null) {
+      void loadWaiterData();
+    } else if (floorPlans.length === 0) {
+      void loadWaiterData();
+    }
+  }, [loadWaiterData, selectedFloorPlanId, floorPlans.length]);
 
   useEffect(() => {
     document.body.classList.toggle("pos-fullscreen", isFullscreenMode(mode));
@@ -371,6 +402,21 @@ export function WaiterPage() {
                 Wstecz
               </button>
             </div>
+
+            {floorPlans.length > 1 && (
+              <div className="category-tabs" style={{ marginBottom: "1rem" }}>
+                {floorPlans.map((plan) => (
+                  <button
+                    key={plan.id}
+                    type="button"
+                    className={selectedFloorPlanId === plan.id ? "active" : ""}
+                    onClick={() => setSelectedFloorPlanId(plan.id)}
+                  >
+                    {plan.name}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div
               className="waiter-floor-map"
@@ -907,8 +953,8 @@ export function WaiterPage() {
                 type="button"
                 className="primary-button"
                 disabled={!selectedMergeCandidateId || isMerging}
-                onClick={() => {
-                  if (confirm(`Czy na pewno chcesz dołączyć ten rachunek do rachunku #${selectedOrder.id}?`)) {
+                onClick={async () => {
+                  if (await confirm(`Czy na pewno chcesz dołączyć ten rachunek do rachunku #${selectedOrder.id}?`)) {
                     void handleMergeConfirm();
                   }
                 }}
@@ -1048,13 +1094,16 @@ export function WaiterPage() {
     });
   }
 
-  function addInfoToLastItem() {
+  async function addInfoToLastItem() {
     const lastItem = [...cart].reverse().find(isCartItem);
     if (!lastItem) {
       return;
     }
 
-    const nextNotes = window.prompt("Info / notes", lastItem.notes ?? "");
+    const nextNotes = await prompt({
+      title: "Info / notes",
+      defaultValue: lastItem.notes ?? "",
+    });
     if (nextNotes === null) {
       return;
     }
@@ -1205,7 +1254,7 @@ export function WaiterPage() {
     setError(null);
     setNotice(null);
     try {
-      const invoiceNip = askForInvoiceNip();
+      const invoiceNip = await askForInvoiceNip();
       if (invoiceNip === null) {
         return;
       }
@@ -1233,13 +1282,13 @@ export function WaiterPage() {
     }
   }
 
-  function askForInvoiceNip(): string | null {
-    const wantsNip = window.confirm("Czy dodać NIP do rachunku?");
+  async function askForInvoiceNip(): Promise<string | null> {
+    const wantsNip = await confirm({ title: "Czy dodać NIP do rachunku?" });
     if (!wantsNip) {
       return "";
     }
 
-    const nip = window.prompt("Wpisz NIP");
+    const nip = await prompt({ title: "Wpisz NIP" });
     if (nip === null) {
       return null;
     }
@@ -1327,9 +1376,9 @@ export function WaiterPage() {
     } catch (err) {
       console.error("handleOpenMergeModal error", err);
       if (err instanceof ApiError) {
-        alert(`Błąd API: ${err.message}`);
+        setError(`Błąd API: ${err.message}`);
       } else {
-        alert(`Wystąpił błąd: ${err instanceof Error ? err.message : String(err)}`);
+        setError(`Wystąpił błąd: ${err instanceof Error ? err.message : String(err)}`);
       }
     } finally {
       setIsSubmitting(false);
@@ -1342,14 +1391,11 @@ export function WaiterPage() {
       setIsMerging(true);
       await mergeWaiterOrder(token, selectedOrder.id, selectedMergeCandidateId);
       setIsMergeModalOpen(false);
-      const updatedOrders = await getWaiterOrders(token);
-      setOrders(updatedOrders);
-      const items = await getWaiterOrderItems(token);
-      setOrderItems(items);
-      alert("Rachunki zostały połączone!");
-    } catch (err) {
+      setNotice("Rachunki zostały połączone!");
+      await loadWaiterData();
+    } catch (err: unknown) {
       if (err instanceof ApiError) {
-        alert(`Błąd: ${err.message}`);
+        setError(`Błąd: ${err.message}`);
       }
     } finally {
       setIsMerging(false);
@@ -1507,10 +1553,10 @@ export function WaiterPage() {
 
       let quantity = availableQuantity;
       if (availableQuantity > 1) {
-        const rawQuantity = window.prompt(
-          `Ile przenieść: ${item.product_name}? Dostępne: ${formatQuantity(item.remaining_quantity)}`,
-          "1",
-        );
+        const rawQuantity = await prompt({
+          title: `Ile przenieść: ${item.product_name}? Dostępne: ${formatQuantity(item.remaining_quantity)}`,
+          defaultValue: "1",
+        });
         if (rawQuantity === null) {
           return;
         }
@@ -1576,10 +1622,10 @@ export function WaiterPage() {
     );
     const segmentGuestCounts: Array<{ segment_id: number; guest_count: number }> = [];
     for (const segment of nonEmptySegments) {
-      const rawGuestCount = window.prompt(
-        `Liczba gości dla ${segment.name}`,
-        String(selectedOrder.guest_count ?? guestCount),
-      );
+      const rawGuestCount = await prompt({
+        title: `Liczba gości dla ${segment.name}`,
+        defaultValue: String(selectedOrder.guest_count ?? guestCount),
+      });
       if (rawGuestCount === null) {
         return;
       }
@@ -1621,10 +1667,10 @@ export function WaiterPage() {
   }
 
   async function changeOrderGuestCount() {
-    const nextGuestCount = window.prompt(
-      "Guest count",
-      String(selectedOrder?.guest_count ?? guestCount),
-    );
+    const nextGuestCount = await prompt({
+      title: "Liczba gości",
+      defaultValue: String(selectedOrder?.guest_count ?? guestCount),
+    });
     if (nextGuestCount === null) {
       return;
     }
@@ -1664,7 +1710,7 @@ export function WaiterPage() {
       return "";
     }
 
-    const managerPin = window.prompt("Manager PIN");
+    const managerPin = await prompt({ title: "Manager PIN", type: "password" });
     if (!managerPin) {
       return null;
     }
@@ -1676,7 +1722,7 @@ export function WaiterPage() {
       return;
     }
 
-    const managerPin = window.prompt("Manager PIN");
+    const managerPin = await prompt({ title: "Manager PIN", type: "password" });
     if (!managerPin) {
       return;
     }

@@ -9,6 +9,10 @@ import {
 
 import { ApiError } from "../api/apiClient";
 import {
+  createFloorPlan,
+  updateFloorPlan,
+  deleteFloorPlan,
+  getFloorPlans,
   createFloorPlanDecoration,
   createRestaurantTableOnFloorPlan,
   deleteFloorPlanDecoration,
@@ -25,6 +29,7 @@ import {
   type RestaurantTableStatus,
 } from "../api/floorPlanApi";
 import { useAuth } from "../auth/useAuth";
+import { usePrompt } from "../components/PromptProvider";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 
 type LoadingState = "idle" | "loading" | "ready" | "error";
@@ -57,7 +62,10 @@ const statusLabels: Record<string, string> = {
 
 export function FloorPlanPage() {
   const { token, user } = useAuth();
+  const { prompt, confirm } = usePrompt();
   const [floorPlan, setFloorPlan] = useState<FloorPlan | null>(null);
+  const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
+  const [selectedFloorPlanId, setSelectedFloorPlanId] = useState<number | null>(null);
   const [tables, setTables] = useState<FloorTableView[]>([]);
   const [decorations, setDecorations] = useState<FloorPlanDecoration[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -76,6 +84,23 @@ export function FloorPlanPage() {
   const [lastEvent, setLastEvent] = useState<string | null>(null);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
+  const loadFloorPlansList = useCallback(async () => {
+    if (!token) return;
+    try {
+      const plans = await getFloorPlans(token);
+      setFloorPlans(plans);
+      if (plans.length > 0 && selectedFloorPlanId === null) {
+        setSelectedFloorPlanId(plans[0].id);
+      }
+    } catch (e) {
+      console.error("Could not load floor plans", e);
+    }
+  }, [token, selectedFloorPlanId]);
+
+  useEffect(() => {
+    void loadFloorPlansList();
+  }, [loadFloorPlansList]);
+
   const loadFloorPlan = useCallback(async () => {
     if (!token) {
       return;
@@ -85,20 +110,27 @@ export function FloorPlanPage() {
     setError(null);
 
     try {
-      const data = await getFloorPlanView(token);
+      const data = await getFloorPlanView(token, selectedFloorPlanId ?? undefined);
       setFloorPlan(data.floorPlan);
       setTables(data.tables);
       setDecorations(data.decorations);
+      if (selectedFloorPlanId === null && data.floorPlan) {
+        setSelectedFloorPlanId(data.floorPlan.id);
+      }
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load floor plan.");
       setStatus("error");
     }
-  }, [token]);
+  }, [token, selectedFloorPlanId]);
 
   useEffect(() => {
-    void loadFloorPlan();
-  }, [loadFloorPlan]);
+    if (selectedFloorPlanId !== null) {
+      void loadFloorPlan();
+    } else if (floorPlans.length === 0) {
+      void loadFloorPlan(); // initial fallback if no ID is set yet
+    }
+  }, [loadFloorPlan, selectedFloorPlanId, floorPlans.length]);
 
   useEffect(() => {
     if (!token) {
@@ -202,7 +234,10 @@ export function FloorPlanPage() {
   if (status === "loading" || status === "idle") {
     return (
       <section className="page-stack">
-        <FloorHeader wsStatus={wsStatus} lastEvent={lastEvent} />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+          <div className="floor-header-actions">
+          </div>
+        </div>
         <div className="module-placeholder">Loading floor plan...</div>
       </section>
     );
@@ -211,23 +246,110 @@ export function FloorPlanPage() {
   if (status === "error") {
     return (
       <section className="page-stack">
-        <FloorHeader wsStatus={wsStatus} lastEvent={lastEvent} />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+          <div className="floor-header-actions">
+            <button type="button" className="ghost-button" onClick={loadFloorPlan}>
+              Reload
+            </button>
+          </div>
+        </div>
         <div className="error-box">{error}</div>
-        <button type="button" className="primary-button" onClick={loadFloorPlan}>
-          Reload
-        </button>
       </section>
     );
   }
 
+  const handleCreateFloorPlan = async () => {
+    const name = await prompt({ title: "Wpisz nazwę nowej sali (np. Taras):" });
+    if (!name || !token) return;
+    try {
+      const newPlan = await createFloorPlan(token, { name, is_active: true });
+      setFloorPlans((prev) => [...prev, newPlan]);
+      setSelectedFloorPlanId(newPlan.id);
+    } catch (exc) {
+      setError("Nie udało się utworzyć nowej sali");
+    }
+  };
+
   return (
     <section className="page-stack">
-      <FloorHeader
-        floorPlan={floorPlan}
-        wsStatus={wsStatus}
-        lastEvent={lastEvent}
-        onReload={loadFloorPlan}
-      />
+      <div className="category-tabs" style={{ marginBottom: "1rem" }}>
+        {floorPlans.map((plan) => (
+          <div key={plan.id} style={{ display: "flex", gap: "4px", flex: "0 0 auto", alignItems: "center" }}>
+            <button
+              type="button"
+              className={selectedFloorPlanId === plan.id ? "active" : ""}
+              onClick={() => {
+                setSelection(null);
+                setSelectedFloorPlanId(plan.id);
+              }}
+              onDoubleClick={async () => {
+                if (!canEdit) return;
+                const newName = await prompt({ title: "Zmień nazwę sali", defaultValue: plan.name });
+                if (newName && newName !== plan.name && token) {
+                  try {
+                    await updateFloorPlan(token, plan.id, { name: newName });
+                    setFloorPlans((prev) =>
+                      prev.map((p) => (p.id === plan.id ? { ...p, name: newName } : p))
+                    );
+                    if (floorPlan?.id === plan.id) {
+                      setFloorPlan((prev) => (prev ? { ...prev, name: newName } : prev));
+                    }
+                  } catch (err) {
+                    setError("Nie udało się zmienić nazwy");
+                  }
+                }
+              }}
+            >
+              {plan.name}
+            </button>
+            {canEdit && selectedFloorPlanId === plan.id && (
+              <button
+                type="button"
+                style={{
+                  padding: "0 8px",
+                  color: "#e63946",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "1.1rem",
+                }}
+                onClick={async () => {
+                  const yes = await confirm({ title: `Czy na pewno usunąć salę "${plan.name}"?` });
+                  if (yes && token) {
+                    try {
+                      await deleteFloorPlan(token, plan.id);
+                      const remaining = floorPlans.filter((p) => p.id !== plan.id);
+                      setFloorPlans(remaining);
+                      if (remaining.length > 0) {
+                        setSelectedFloorPlanId(remaining[0].id);
+                      } else {
+                        setSelectedFloorPlanId(null);
+                        setFloorPlan(null);
+                      }
+                    } catch (err) {
+                      setError("Nie udało się usunąć sali");
+                    }
+                  }
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "1rem", alignItems: "center" }}>
+          {canEdit && (
+            <button type="button" className="ghost-button" onClick={handleCreateFloorPlan}>
+              + Dodaj salę
+            </button>
+          )}
+          <div className="floor-header-actions">
+            <button type="button" className="ghost-button" onClick={loadFloorPlan}>
+              Reload
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="floor-layout">
         <div className="floor-map-panel">
@@ -652,38 +774,7 @@ export function FloorPlanPage() {
   }
 }
 
-function FloorHeader({
-  floorPlan,
-  wsStatus,
-  lastEvent,
-  onReload,
-}: {
-  floorPlan?: FloorPlan | null;
-  wsStatus: string;
-  lastEvent: string | null;
-  onReload?: () => void;
-}) {
-  return (
-    <div className="floor-header">
-      <div>
-        <span className="eyebrow">Floor plan</span>
-        <h1>{floorPlan?.name ?? "Room map"}</h1>
-        <p className="muted">
-          Live table status preview for waiter and manager workstations.
-        </p>
-      </div>
-      <div className="floor-header-actions">
-        <span className={`ws-pill ${wsStatus}`}>{wsStatus}</span>
-        {lastEvent && <span className="event-pill">{lastEvent}</span>}
-        {onReload && (
-          <button type="button" className="ghost-button" onClick={onReload}>
-            Reload
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+
 
 function StatusBadge({
   label,

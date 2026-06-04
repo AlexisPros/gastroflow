@@ -141,12 +141,11 @@ function ReportsHeader({ onRefresh }: { onRefresh: () => void }) {
   return (
     <div className="floor-header">
       <div>
-        <span className="eyebrow">Reports</span>
-        <h1>Current shift</h1>
-        <p className="muted">Live report before closing the shift.</p>
+        <span className="eyebrow">RAPORTY</span>
+        <h1>Obecna zmiana</h1>
       </div>
       <button type="button" className="ghost-button" onClick={onRefresh}>
-        Refresh
+        Odśwież
       </button>
     </div>
   );

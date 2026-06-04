@@ -69,6 +69,44 @@ export async function getActiveFloorPlan(token: string): Promise<FloorPlan> {
   return apiRequest<FloorPlan>("/floor-plans/active", { token });
 }
 
+export async function getFloorPlans(token: string): Promise<FloorPlan[]> {
+  return apiRequest<FloorPlan[]>("/floor-plans", { token });
+}
+
+export async function getFloorPlan(token: string, floorPlanId: number): Promise<FloorPlan> {
+  return apiRequest<FloorPlan>(`/floor-plans/${floorPlanId}`, { token });
+}
+
+export async function createFloorPlan(
+  token: string,
+  body: { name: string; width?: number; height?: number; is_active?: boolean }
+): Promise<FloorPlan> {
+  return apiRequest<FloorPlan>("/floor-plans", {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function updateFloorPlan(
+  token: string,
+  floorPlanId: number,
+  body: { name?: string; width?: number; height?: number; is_active?: boolean }
+): Promise<FloorPlan> {
+  return apiRequest<FloorPlan>(`/floor-plans/${floorPlanId}`, {
+    method: "PATCH",
+    token,
+    body,
+  });
+}
+
+export async function deleteFloorPlan(token: string, floorPlanId: number): Promise<void> {
+  await apiRequest(`/floor-plans/${floorPlanId}`, {
+    method: "DELETE",
+    token,
+  });
+}
+
 export async function getFloorPlanTables(
   token: string,
   floorPlanId: number,
@@ -235,12 +273,15 @@ export async function deleteFloorPlanDecoration(
   );
 }
 
-export async function getFloorPlanView(token: string): Promise<{
+export async function getFloorPlanView(token: string, floorPlanId?: number): Promise<{
   floorPlan: FloorPlan;
   tables: FloorTableView[];
   decorations: FloorPlanDecoration[];
 }> {
-  const floorPlan = await getActiveFloorPlan(token);
+  const floorPlan = floorPlanId 
+    ? await getFloorPlan(token, floorPlanId)
+    : await getActiveFloorPlan(token);
+    
   const [positions, restaurantTables, decorations] = await Promise.all([
     getFloorPlanTables(token, floorPlan.id),
     getRestaurantTables(token),
