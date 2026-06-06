@@ -84,6 +84,12 @@ class ActiveTransferWaiterRead(BaseModel):
     open_orders_count: int
 
 
+class ActiveOrderWaiterRead(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+
+
 class RecordOrderActionRequest(BaseModel):
     user_id: int
     action_type: str
@@ -300,6 +306,13 @@ async def list_active_transfer_waiters(
         db,
         exclude_waiter_id=current_user.id,
     )
+
+
+@router.get("/orders/view/active-waiters", response_model=list[ActiveOrderWaiterRead])
+async def list_active_waiters_for_order_view(
+    db: DbSession,
+):
+    return await order_service.list_active_waiters_for_order_view(db)
 
 
 @router.get("/orders/transfer/waiters/{waiter_id}", response_model=list[OrderRead])

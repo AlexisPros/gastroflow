@@ -50,12 +50,14 @@ import {
   updateWaiterOrder,
   updateWaiterOrderTip,
   getWaiterMergeCandidates,
+  getActiveOrderWaiters,
   getActiveTransferWaiters,
   getTransferableWaiterOrders,
   mergeWaiterOrder,
   transferAllWaiterOrders,
   transferWaiterOrderToCurrent,
   type ActiveTransferWaiter,
+  type ActiveOrderWaiter,
   type OrderMergeCandidate,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
@@ -94,6 +96,8 @@ export function WaiterPage() {
   const [floorTables, setFloorTables] = useState<FloorTableView[]>([]);
   const [floorDecorations, setFloorDecorations] = useState<FloorPlanDecoration[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [activeOrderWaiters, setActiveOrderWaiters] = useState<ActiveOrderWaiter[]>([]);
+  const [selectedOrderOwnerId, setSelectedOrderOwnerId] = useState<number | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -178,6 +182,7 @@ export function WaiterPage() {
         nextModifiers,
         nextProductModifiers,
         nextDiscounts,
+        nextActiveOrderWaiters,
       ] =
         await Promise.all([
           getFloorPlanView(token, selectedFloorPlanId ?? undefined),
@@ -188,6 +193,7 @@ export function WaiterPage() {
           getModifiers(token),
           getProductModifiers(token),
           getDiscounts(token),
+          user?.role === "MANAGER" ? getActiveOrderWaiters(token) : Promise.resolve([]),
         ]);
 
       setFloorPlan(floorView.floorPlan);
@@ -200,6 +206,14 @@ export function WaiterPage() {
       setModifiers(nextModifiers.filter((modifier) => modifier.is_active));
       setProductModifiers(nextProductModifiers.filter((item) => item.is_active));
       setDiscounts(nextDiscounts.filter((discount) => discount.is_active));
+      setActiveOrderWaiters(nextActiveOrderWaiters);
+      if (
+        user?.role === "MANAGER"
+        && selectedOrderOwnerId !== user.id
+        && !nextActiveOrderWaiters.some((waiter) => waiter.id === selectedOrderOwnerId)
+      ) {
+        setSelectedOrderOwnerId(user.id);
+      }
       
       if (selectedFloorPlanId === null && floorView.floorPlan) {
         setSelectedFloorPlanId(floorView.floorPlan.id);
@@ -210,7 +224,7 @@ export function WaiterPage() {
       setError(exc instanceof ApiError ? exc.message : "Could not load waiter workspace.");
       setStatus("error");
     }
-  }, [token, selectedFloorPlanId]);
+  }, [token, selectedFloorPlanId, selectedOrderOwnerId, user]);
 
   const loadFloorPlansList = useCallback(async () => {
     if (!token) return;
@@ -260,11 +274,16 @@ export function WaiterPage() {
 
   const openOrders = useMemo(() => {
     const activeOrders = orders.filter(isOpenOrder);
-    if (!user || user.role === "ADMIN" || user.role === "MANAGER") {
+    if (!user || user.role === "ADMIN") {
       return activeOrders;
     }
+    if (user.role === "MANAGER") {
+      return activeOrders.filter(
+        (order) => order.waiter_id === (selectedOrderOwnerId ?? user.id),
+      );
+    }
     return activeOrders.filter((order) => order.waiter_id === user.id);
-  }, [orders, user]);
+  }, [orders, selectedOrderOwnerId, user]);
 
   const selectedOrder = useMemo(
     () => openOrders.find((order) => order.id === selectedOrderId) ?? null,
@@ -397,6 +416,34 @@ export function WaiterPage() {
               </div>
               <strong>{openOrders.length}</strong>
             </div>
+
+            {user?.role === "MANAGER" && (
+              <div className="category-tabs manager-order-owner-tabs">
+                <button
+                  type="button"
+                  className={(selectedOrderOwnerId ?? user.id) === user.id ? "active" : ""}
+                  onClick={() => {
+                    setSelectedOrderOwnerId(user.id);
+                    setSelectedOrderId(null);
+                  }}
+                >
+                  {user.first_name}
+                </button>
+                {activeOrderWaiters.map((waiter) => (
+                  <button
+                    key={waiter.id}
+                    type="button"
+                    className={selectedOrderOwnerId === waiter.id ? "active" : ""}
+                    onClick={() => {
+                      setSelectedOrderOwnerId(waiter.id);
+                      setSelectedOrderId(null);
+                    }}
+                  >
+                    {waiter.first_name}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="order-card-grid">
               {openOrders.map((order) => (

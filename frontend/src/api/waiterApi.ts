@@ -148,6 +148,12 @@ export type OrderMergeCandidate = {
   item_count: number;
 };
 
+export type ActiveOrderWaiter = {
+  id: number;
+  first_name: string;
+  last_name: string;
+};
+
 export type ActiveTransferWaiter = {
   id: number;
   first_name: string;
@@ -207,6 +213,10 @@ export async function getWaiterTables(token: string): Promise<RestaurantTable[]>
 
 export async function getWaiterOrders(token: string): Promise<Order[]> {
   return apiRequest<Order[]>("/orders?limit=500", { token });
+}
+
+export async function getActiveOrderWaiters(token: string): Promise<ActiveOrderWaiter[]> {
+  return apiRequest<ActiveOrderWaiter[]>("/orders/view/active-waiters", { token });
 }
 
 export async function getWaiterOrderItems(token: string): Promise<OrderItem[]> {

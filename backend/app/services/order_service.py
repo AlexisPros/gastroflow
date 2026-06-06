@@ -670,6 +670,34 @@ class OrderService:
             for row in result.all()
         ]
 
+    async def list_active_waiters_for_order_view(
+        self,
+        db: AsyncSession,
+    ) -> list[dict]:
+        result = await db.execute(
+            select(
+                User.id,
+                User.first_name,
+                User.last_name,
+            )
+            .join(EmployeeShift, EmployeeShift.user_id == User.id)
+            .where(
+                User.role == "WAITER",
+                User.is_active.is_(True),
+                EmployeeShift.status == "OPEN",
+            )
+            .distinct()
+            .order_by(User.first_name, User.last_name),
+        )
+        return [
+            {
+                "id": row.id,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+            }
+            for row in result.all()
+        ]
+
     async def list_transferable_orders(
         self,
         db: AsyncSession,

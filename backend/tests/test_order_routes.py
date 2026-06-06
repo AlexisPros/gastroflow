@@ -1081,6 +1081,41 @@ def test_list_active_transfer_waiters_reaches_service(monkeypatch):
     assert response.json()[0]["open_orders_count"] == 3
 
 
+def test_list_active_waiters_for_order_view_reaches_service(monkeypatch):
+    async def list_active_waiters_for_order_view(_db):
+        return [
+            {
+                "id": 2,
+                "first_name": "Anna",
+                "last_name": "Waiter",
+            },
+        ]
+
+    monkeypatch.setattr(
+        order_service,
+        "list_active_waiters_for_order_view",
+        list_active_waiters_for_order_view,
+    )
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/orders/view/active-waiters",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": 2,
+            "first_name": "Anna",
+            "last_name": "Waiter",
+        },
+    ]
+
+
 def test_transfer_all_waiter_orders_reaches_service(monkeypatch):
     async def transfer_all_orders(
         _db,
