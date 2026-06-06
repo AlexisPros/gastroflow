@@ -77,6 +77,13 @@ class TransferOrderRequest(BaseModel):
     to_waiter_id: int
 
 
+class ActiveTransferWaiterRead(BaseModel):
+    id: int
+    first_name: str
+    last_name: str
+    open_orders_count: int
+
+
 class RecordOrderActionRequest(BaseModel):
     user_id: int
     action_type: str
@@ -282,6 +289,44 @@ async def close_order(order_id: int, db: DbSession):
         },
     )
     return order
+
+
+@router.get("/orders/transfer/waiters", response_model=list[ActiveTransferWaiterRead])
+async def list_active_transfer_waiters(
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    return await order_service.list_active_waiters_for_transfer(
+        db,
+        exclude_waiter_id=current_user.id,
+    )
+
+
+@router.get("/orders/transfer/waiters/{waiter_id}", response_model=list[OrderRead])
+async def list_waiter_transferable_orders(
+    waiter_id: int,
+    db: DbSession,
+):
+    return await order_service.list_transferable_orders(db, waiter_id=waiter_id)
+
+
+@router.post(
+    "/orders/transfer/waiters/{from_waiter_id}/all",
+    response_model=list[OrderTransferLogRead],
+)
+async def transfer_all_waiter_orders(
+    from_waiter_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    try:
+        return await order_service.transfer_all_orders(
+            db,
+            from_waiter_id=from_waiter_id,
+            to_waiter_id=current_user.id,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
 
 
 @router.post("/orders/{order_id}/transfer", response_model=OrderTransferLogRead)

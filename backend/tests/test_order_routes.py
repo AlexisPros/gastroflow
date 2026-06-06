@@ -1049,6 +1049,73 @@ def test_transfer_order_reaches_service(monkeypatch):
     assert response.json()["to_waiter_id"] == 2
 
 
+def test_list_active_transfer_waiters_reaches_service(monkeypatch):
+    async def list_active_waiters_for_transfer(_db, *, exclude_waiter_id: int):
+        assert exclude_waiter_id == 1
+        return [
+            {
+                "id": 2,
+                "first_name": "Anna",
+                "last_name": "Waiter",
+                "open_orders_count": 3,
+            },
+        ]
+
+    monkeypatch.setattr(
+        order_service,
+        "list_active_waiters_for_transfer",
+        list_active_waiters_for_transfer,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/orders/transfer/waiters",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == 2
+    assert response.json()[0]["open_orders_count"] == 3
+
+
+def test_transfer_all_waiter_orders_reaches_service(monkeypatch):
+    async def transfer_all_orders(
+        _db,
+        *,
+        from_waiter_id: int,
+        to_waiter_id: int,
+    ):
+        assert from_waiter_id == 2
+        assert to_waiter_id == 1
+        return [
+            OrderTransferLog(
+                id=1,
+                order_id=10,
+                from_waiter_id=2,
+                to_waiter_id=1,
+                transferred_at=datetime.now(timezone.utc),
+            ),
+        ]
+
+    monkeypatch.setattr(order_service, "transfer_all_orders", transfer_all_orders)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/transfer/waiters/2/all",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["order_id"] == 10
+    assert response.json()[0]["to_waiter_id"] == 1
+
+
 def test_record_order_action_reaches_service(monkeypatch):
     async def record_action(
         _db,

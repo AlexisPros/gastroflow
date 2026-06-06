@@ -13,38 +13,38 @@ type DashboardAction = {
 
 const actions: DashboardAction[] = [
   {
-    title: "Floor Plan",
-    description: "Open the room map and select active tables.",
+    title: "Plan sali",
+    description: "Otwórz mapę sali i wybierz aktywne stoliki.",
     path: routes.floor,
     roles: ["ADMIN", "MANAGER", "WAITER"],
   },
   {
-    title: "Waiter POS",
-    description: "Create orders, confirm QR orders, payments and receipts.",
+    title: "Panel kelnera",
+    description: "Twórz zamówienia, potwierdzaj zamówienia QR, płatności i paragony.",
     path: routes.waiter,
     roles: ["ADMIN", "MANAGER", "WAITER"],
   },
   {
-    title: "Kitchen Display",
-    description: "Track production tasks from accepted orders.",
+    title: "Ekran kuchni",
+    description: "Śledź zadania kuchenne z przyjętych zamówień.",
     path: routes.kitchen,
     roles: ["ADMIN", "MANAGER", "KITCHEN"],
   },
   {
-    title: "Bar Display",
-    description: "Handle drink tasks and live bar updates.",
+    title: "Ekran baru",
+    description: "Obsługuj zadania baru i aktualizacje w czasie rzeczywistym.",
     path: routes.bar,
     roles: ["ADMIN", "MANAGER", "BARTENDER"],
   },
   {
-    title: "Reports",
-    description: "Review shift reports and daily operations.",
+    title: "Raporty",
+    description: "Przeglądaj raporty zmianowe i dzienne operacje.",
     path: routes.reports,
     roles: ["ADMIN", "MANAGER"],
   },
   {
     title: "Admin",
-    description: "Manage users, menu resources and system settings.",
+    description: "Zarządzaj użytkownikami, menu i ustawieniami systemu.",
     path: routes.admin,
     roles: ["ADMIN"],
   },
@@ -59,8 +59,8 @@ export function DashboardPage() {
   return (
     <section className="page-stack">
       <div>
-        <span className="eyebrow">Workspace</span>
-        <h1>Dashboard</h1>
+        <span className="eyebrow">Obszar roboczy</span>
+        <h1>Panel główny</h1>
       </div>
 
       <div className="action-grid">

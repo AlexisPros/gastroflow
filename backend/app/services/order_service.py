@@ -1,18 +1,20 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.websocket_manager import websocket_manager
 from app.crud import order_action_log, order_transfer_log, product_kitchen_step
 from app.crud import employee_shift as crud_employee_shift
 from app.models.kitchen_task import KitchenTask
+from app.models.employee_shift import EmployeeShift
 from app.models.modifier import Modifier
 from app.models.order import Order
 from app.models.order_action_log import OrderActionLog
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
+from app.models.order_transfer_log import OrderTransferLog
 from app.models.product import Product
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
@@ -602,12 +604,109 @@ class OrderService:
         *,
         order: Order,
         to_waiter_id: int,
-    ):
-        return await order_transfer_log.transfer_order(
+    ) -> OrderTransferLog:
+        if order.waiter_id == to_waiter_id:
+            raise ValueError("Order already belongs to this waiter.")
+
+        if order.status in {"CLOSED", "PAID", "CANCELLED", "REJECTED", "MERGED"}:
+            raise ValueError("Only active orders can be transferred.")
+
+        shift = await crud_employee_shift.get_open_by_user(db, user_id=to_waiter_id)
+        if shift is None:
+            raise ValueError("Receiving waiter must have an active shift.")
+
+        transfer_log = await order_transfer_log.transfer_order(
             db,
             order=order,
             to_waiter_id=to_waiter_id,
+            shift_id=shift.id,
         )
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "managers"],
+            event="order_transferred",
+            data={
+                "order_id": order.id,
+                "from_waiter_id": transfer_log.from_waiter_id,
+                "to_waiter_id": transfer_log.to_waiter_id,
+            },
+        )
+        return transfer_log
+
+    async def list_active_waiters_for_transfer(
+        self,
+        db: AsyncSession,
+        *,
+        exclude_waiter_id: int,
+    ) -> list[dict]:
+        active_statuses = ["OPEN", "IN_PROGRESS", "PENDING_CONFIRMATION"]
+        result = await db.execute(
+            select(
+                User.id,
+                User.first_name,
+                User.last_name,
+                func.count(func.distinct(Order.id)).label("open_orders_count"),
+            )
+            .join(EmployeeShift, EmployeeShift.user_id == User.id)
+            .outerjoin(
+                Order,
+                (Order.waiter_id == User.id) & (Order.status.in_(active_statuses)),
+            )
+            .where(
+                User.role.in_(["WAITER", "MANAGER"]),
+                User.is_active.is_(True),
+                EmployeeShift.status == "OPEN",
+                User.id != exclude_waiter_id,
+            )
+            .group_by(User.id)
+            .order_by(User.first_name, User.last_name),
+        )
+        return [
+            {
+                "id": row.id,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+                "open_orders_count": row.open_orders_count,
+            }
+            for row in result.all()
+        ]
+
+    async def list_transferable_orders(
+        self,
+        db: AsyncSession,
+        *,
+        waiter_id: int,
+    ) -> list[Order]:
+        result = await db.execute(
+            select(Order)
+            .where(
+                Order.waiter_id == waiter_id,
+                Order.status.in_(["OPEN", "IN_PROGRESS"]),
+            )
+            .order_by(Order.created_at.asc()),
+        )
+        return list(result.scalars().all())
+
+    async def transfer_all_orders(
+        self,
+        db: AsyncSession,
+        *,
+        from_waiter_id: int,
+        to_waiter_id: int,
+    ) -> list[OrderTransferLog]:
+        orders = await self.list_transferable_orders(db, waiter_id=from_waiter_id)
+        if not orders:
+            raise ValueError("Selected waiter has no transferable orders.")
+
+        logs: list[OrderTransferLog] = []
+        for order in orders:
+            logs.append(
+                await self.transfer_order(
+                    db,
+                    order=order,
+                    to_waiter_id=to_waiter_id,
+                ),
+            )
+        return logs
 
     async def record_action(
         self,

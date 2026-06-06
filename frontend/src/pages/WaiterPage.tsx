@@ -50,7 +50,12 @@ import {
   updateWaiterOrder,
   updateWaiterOrderTip,
   getWaiterMergeCandidates,
+  getActiveTransferWaiters,
+  getTransferableWaiterOrders,
   mergeWaiterOrder,
+  transferAllWaiterOrders,
+  transferWaiterOrderToCurrent,
+  type ActiveTransferWaiter,
   type OrderMergeCandidate,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
@@ -111,6 +116,11 @@ export function WaiterPage() {
   const [mergeCandidates, setMergeCandidates] = useState<OrderMergeCandidate[]>([]);
   const [selectedMergeCandidateId, setSelectedMergeCandidateId] = useState<number | null>(null);
   const [isMerging, setIsMerging] = useState(false);
+  const [transferMode, setTransferMode] = useState<"ALL" | "SINGLE" | null>(null);
+  const [transferWaiters, setTransferWaiters] = useState<ActiveTransferWaiter[]>([]);
+  const [transferSourceWaiter, setTransferSourceWaiter] = useState<ActiveTransferWaiter | null>(null);
+  const [transferOrders, setTransferOrders] = useState<Order[]>([]);
+  const [isTransferring, setIsTransferring] = useState(false);
   const [billSplitView, setBillSplitView] = useState<BillSplitView | null>(null);
   const [selectedBillSplitItemIds, setSelectedBillSplitItemIds] = useState<number[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -429,6 +439,28 @@ export function WaiterPage() {
             >
               Utwórz rachunek
             </button>
+            <div className="waiter-transfer-actions">
+              <button
+                type="button"
+                className="pos-action-button transfer"
+                onClick={() => {
+                  void openTransferFlow("ALL");
+                }}
+                disabled={isSubmitting}
+              >
+                Transfer wszystkich
+              </button>
+              <button
+                type="button"
+                className="pos-action-button transfer"
+                onClick={() => {
+                  void openTransferFlow("SINGLE");
+                }}
+                disabled={isSubmitting}
+              >
+                Transfer jednego
+              </button>
+            </div>
             <button type="button" className="pos-action-button" onClick={loadWaiterData}>
               Odśwież
             </button>
@@ -944,6 +976,27 @@ export function WaiterPage() {
               productModifierIds,
             });
             setPendingProduct(null);
+          }}
+        />
+      )}
+
+      {transferMode && (
+        <TransferOrdersModal
+          mode={transferMode}
+          waiters={transferWaiters}
+          sourceWaiter={transferSourceWaiter}
+          orders={transferOrders}
+          floorTables={floorTables}
+          isSubmitting={isTransferring}
+          onClose={closeTransferFlow}
+          onSelectWaiter={(waiter) => {
+            void selectTransferWaiter(waiter);
+          }}
+          onTransferAll={(waiter) => {
+            void confirmTransferAll(waiter);
+          }}
+          onTransferOrder={(order) => {
+            void confirmTransferOrder(order);
           }}
         />
       )}
@@ -1490,6 +1543,106 @@ export function WaiterPage() {
     }
   }
 
+  async function openTransferFlow(mode: "ALL" | "SINGLE") {
+    if (!token) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      setTransferWaiters(await getActiveTransferWaiters(token));
+      setTransferMode(mode);
+      setTransferSourceWaiter(null);
+      setTransferOrders([]);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not load active waiters.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function closeTransferFlow() {
+    setTransferMode(null);
+    setTransferSourceWaiter(null);
+    setTransferOrders([]);
+  }
+
+  async function selectTransferWaiter(waiter: ActiveTransferWaiter) {
+    if (!token || transferMode !== "SINGLE") {
+      return;
+    }
+
+    setIsTransferring(true);
+    setError(null);
+    try {
+      setTransferOrders(await getTransferableWaiterOrders(token, waiter.id));
+      setTransferSourceWaiter(waiter);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not load waiter orders.");
+    } finally {
+      setIsTransferring(false);
+    }
+  }
+
+  async function confirmTransferAll(waiter: ActiveTransferWaiter) {
+    if (!token) {
+      return;
+    }
+
+    const accepted = await confirm({
+      title: "Transfer wszystkich rachunków",
+      message: `Przejąć wszystkie rachunki: ${waiter.first_name} ${waiter.last_name}?`,
+      confirmText: "Potwierdź transfer",
+      cancelText: "Anuluj",
+    });
+    if (!accepted) {
+      return;
+    }
+
+    setIsTransferring(true);
+    setError(null);
+    try {
+      const logs = await transferAllWaiterOrders(token, waiter.id);
+      closeTransferFlow();
+      setNotice(`Przejęto ${logs.length} rachunków.`);
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not transfer orders.");
+    } finally {
+      setIsTransferring(false);
+    }
+  }
+
+  async function confirmTransferOrder(order: Order) {
+    if (!token || !user) {
+      return;
+    }
+
+    const accepted = await confirm({
+      title: "Transfer rachunku",
+      message: `Przejąć rachunek #${formatOrderNumber(order)}?`,
+      confirmText: "Potwierdź transfer",
+      cancelText: "Anuluj",
+    });
+    if (!accepted) {
+      return;
+    }
+
+    setIsTransferring(true);
+    setError(null);
+    try {
+      await transferWaiterOrderToCurrent(token, order.id, user.id);
+      closeTransferFlow();
+      setNotice(`Przejęto rachunek #${formatOrderNumber(order)}.`);
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not transfer order.");
+    } finally {
+      setIsTransferring(false);
+    }
+  }
+
   async function handleMergeConfirm() {
     if (!token || !selectedOrder || !selectedMergeCandidateId) return;
     try {
@@ -1874,6 +2027,104 @@ export function WaiterPage() {
     }, 0);
     return (Number(item.product.price) + modifierTotal) * item.quantity;
   }
+}
+
+function TransferOrdersModal({
+  mode,
+  waiters,
+  sourceWaiter,
+  orders,
+  floorTables,
+  isSubmitting,
+  onClose,
+  onSelectWaiter,
+  onTransferAll,
+  onTransferOrder,
+}: {
+  mode: "ALL" | "SINGLE";
+  waiters: ActiveTransferWaiter[];
+  sourceWaiter: ActiveTransferWaiter | null;
+  orders: Order[];
+  floorTables: FloorTableView[];
+  isSubmitting: boolean;
+  onClose: () => void;
+  onSelectWaiter: (waiter: ActiveTransferWaiter) => void;
+  onTransferAll: (waiter: ActiveTransferWaiter) => void;
+  onTransferOrder: (order: Order) => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="product-options-modal transfer-orders-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Transfer rachunków</span>
+            <h2>
+              {sourceWaiter
+                ? `${sourceWaiter.first_name} ${sourceWaiter.last_name}`
+                : "Wybierz pracownika z aktywną zmianą"}
+            </h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Zamknij
+          </button>
+        </div>
+
+        {!sourceWaiter && (
+          <div className="transfer-list">
+            {waiters.map((waiter) => (
+              <button
+                key={waiter.id}
+                type="button"
+                disabled={isSubmitting || waiter.open_orders_count === 0}
+                onClick={() =>
+                  mode === "ALL" ? onTransferAll(waiter) : onSelectWaiter(waiter)
+                }
+              >
+                <span>
+                  <strong>{waiter.first_name} {waiter.last_name}</strong>
+                  <small>Aktywna zmiana</small>
+                </span>
+                <b>{waiter.open_orders_count} rach.</b>
+              </button>
+            ))}
+            {waiters.length === 0 && (
+              <div className="empty-ticket">Brak innych pracowników z aktywną zmianą.</div>
+            )}
+          </div>
+        )}
+
+        {sourceWaiter && (
+          <>
+            <button type="button" className="ghost-button" onClick={() => onClose()}>
+              Cofnij
+            </button>
+            <div className="transfer-list">
+              {orders.map((order) => {
+                const table = floorTables.find((item) => item.table_id === order.table_id)?.table;
+                return (
+                  <button
+                    key={order.id}
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => onTransferOrder(order)}
+                  >
+                    <span>
+                      <strong>Rachunek #{formatOrderNumber(order)}</strong>
+                      <small>{table ? `Stolik ${table.table_number}` : "Bez stolika"}</small>
+                    </span>
+                    <b>{formatMoney(Number(order.total_amount))}</b>
+                  </button>
+                );
+              })}
+              {orders.length === 0 && (
+                <div className="empty-ticket">Ten pracownik nie ma rachunków do transferu.</div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function BillSplitModal({

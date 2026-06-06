@@ -32,6 +32,7 @@ export function AppLayout() {
   const [currentShift, setCurrentShift] = useState<EmployeeShift | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
   const [isShiftChanging, setIsShiftChanging] = useState(false);
+  const [isNavigationOpen, setIsNavigationOpen] = useState(false);
   const availableItems = user
     ? navItems.filter((item) => item.roles.includes(user.role))
     : [];
@@ -59,23 +60,41 @@ export function AppLayout() {
   }, [canUseShift, loadCurrentShift, token]);
 
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
-        <NavLink to={routes.dashboard} className="brand">
-          <img src="/logo.png" alt="GastroFlow" className="brand-logo" />
-        </NavLink>
+    <div className={`app-shell ${isNavigationOpen ? "navigation-open" : ""}`}>
+      <aside className={`sidebar ${isNavigationOpen ? "open" : ""}`}>
+        <button
+          type="button"
+          className="navigation-toggle"
+          aria-label={isNavigationOpen ? "Zwiń menu" : "Rozwiń menu"}
+          title={isNavigationOpen ? "Zwiń menu" : "Rozwiń menu"}
+          onClick={() => setIsNavigationOpen((isOpen) => !isOpen)}
+        >
+          <span className="navigation-toggle-icon" aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+        </button>
 
-        <nav className="nav-list">
-          {availableItems.map((item) => (
-            <NavLink
-              key={item.path}
-              to={item.path}
-              className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
-            >
-              {item.label}
+        {isNavigationOpen && (
+          <>
+            <NavLink to={routes.dashboard} className="brand">
+              <img src="/logo.png" alt="GastroFlow" className="brand-logo" />
             </NavLink>
-          ))}
-        </nav>
+
+            <nav className="nav-list">
+              {availableItems.map((item) => (
+                <NavLink
+                  key={item.path}
+                  to={item.path}
+                  className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          </>
+        )}
       </aside>
 
       <div className="workspace">

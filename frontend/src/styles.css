@@ -158,6 +158,10 @@ small,
 .app-shell {
   display: grid;
   min-height: 100vh;
+  grid-template-columns: 64px minmax(0, 1fr);
+}
+
+.app-shell.navigation-open {
   grid-template-columns: 248px minmax(0, 1fr);
 }
 
@@ -182,10 +186,48 @@ small,
 .sidebar {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 28px;
-  padding: 24px;
+  padding: 16px 10px;
   border-right: 1px solid #d7dfda;
   background: #ffffff;
+}
+
+.sidebar.open {
+  align-items: stretch;
+  padding: 24px;
+}
+
+.navigation-toggle {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #d7dfda;
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--brand-navy);
+  cursor: pointer;
+  padding: 0;
+}
+
+.navigation-toggle:hover {
+  border-color: var(--brand-green);
+  background: #e7f0ed;
+}
+
+.navigation-toggle-icon {
+  display: flex;
+  width: 18px;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navigation-toggle-icon span {
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: currentColor;
 }
 
 .brand {
@@ -957,9 +999,80 @@ small,
   color: #ffffff;
 }
 
+.waiter-transfer-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.pos-action-button.transfer {
+  min-height: 64px;
+  padding: 8px 10px;
+  border-color: var(--brand-navy);
+  background: var(--brand-navy);
+  color: #ffffff;
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.pos-action-button.transfer:hover:not(:disabled) {
+  background: #21436d;
+}
+
 .pos-action-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+.transfer-orders-modal {
+  width: min(680px, 100%);
+}
+
+.transfer-list {
+  display: grid;
+  max-height: 520px;
+  gap: 8px;
+  overflow: auto;
+}
+
+.transfer-list > button {
+  display: flex;
+  min-height: 72px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172026;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.transfer-list > button:hover:not(:disabled) {
+  border-color: #ff8a16;
+  background: #fff6ec;
+}
+
+.transfer-list > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
+.transfer-list > button span {
+  display: grid;
+  gap: 3px;
+}
+
+.transfer-list > button small {
+  color: #60716c;
+}
+
+.transfer-list > button b {
+  color: var(--brand-green);
+  white-space: nowrap;
 }
 
 .waiter-floor-map {

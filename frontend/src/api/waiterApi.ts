@@ -148,6 +148,21 @@ export type OrderMergeCandidate = {
   item_count: number;
 };
 
+export type ActiveTransferWaiter = {
+  id: number;
+  first_name: string;
+  last_name: string;
+  open_orders_count: number;
+};
+
+export type OrderTransferLog = {
+  id: number;
+  order_id: number;
+  from_waiter_id: number;
+  to_waiter_id: number;
+  transferred_at: string;
+};
+
 export type CartItem = {
   id: string;
   product: Product;
@@ -486,10 +501,10 @@ export function isOpenOrder(order: Order): boolean {
 
 export function tableStatusLabel(status: RestaurantTableStatus): string {
   const labels: Record<string, string> = {
-    FREE: "Wolny",
-    PENDING_ORDER: "Oczekujący QR",
-    OCCUPIED: "Zajęty",
-    RESERVED: "Zarezerwowany",
+    FREE: "Free",
+    PENDING_ORDER: "Pending QR",
+    OCCUPIED: "Occupied",
+    RESERVED: "Reserved",
   };
 
   return labels[status] ?? status;
@@ -513,5 +528,40 @@ export async function mergeWaiterOrder(
     body: {
       source_order_id: sourceOrderId,
     },
+  });
+}
+
+export async function getActiveTransferWaiters(
+  token: string,
+): Promise<ActiveTransferWaiter[]> {
+  return apiRequest<ActiveTransferWaiter[]>("/orders/transfer/waiters", { token });
+}
+
+export async function getTransferableWaiterOrders(
+  token: string,
+  waiterId: number,
+): Promise<Order[]> {
+  return apiRequest<Order[]>(`/orders/transfer/waiters/${waiterId}`, { token });
+}
+
+export async function transferAllWaiterOrders(
+  token: string,
+  fromWaiterId: number,
+): Promise<OrderTransferLog[]> {
+  return apiRequest<OrderTransferLog[]>(`/orders/transfer/waiters/${fromWaiterId}/all`, {
+    method: "POST",
+    token,
+  });
+}
+
+export async function transferWaiterOrderToCurrent(
+  token: string,
+  orderId: number,
+  currentWaiterId: number,
+): Promise<OrderTransferLog> {
+  return apiRequest<OrderTransferLog>(`/orders/${orderId}/transfer`, {
+    method: "POST",
+    token,
+    body: { to_waiter_id: currentWaiterId },
   });
 }
