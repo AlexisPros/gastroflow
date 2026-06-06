@@ -273,9 +273,26 @@ export function WaiterPage() {
     () => new Map(products.map((product) => [product.id, product])),
     [products],
   );
+  const categoriesById = useMemo(
+    () => new Map(categories.map((category) => [category.id, category])),
+    [categories],
+  );
   const modifiersById = useMemo(
     () => new Map(modifiers.map((modifier) => [modifier.id, modifier])),
     [modifiers],
+  );
+  const hasRepeatableDrink = useMemo(
+    () =>
+      [...cart]
+        .reverse()
+        .some((entry) => isCartItem(entry) && isBarProduct(entry.product, categoriesById)) ||
+      [...selectedOrderItems]
+        .reverse()
+        .some((item) => {
+          const product = productsById.get(item.product_id);
+          return product ? isBarProduct(product, categoriesById) : false;
+        }),
+    [cart, categoriesById, productsById, selectedOrderItems],
   );
 
   const departmentCategories = useMemo(
@@ -684,7 +701,11 @@ export function WaiterPage() {
                   >
                     Znajdź pozycję w menu
                   </button>
-                  <button type="button" disabled>
+                  <button
+                    type="button"
+                    onClick={repeatLastDrink}
+                    disabled={!hasRepeatableDrink || isSubmitting}
+                  >
                     Ostatni napój
                   </button>
                   <button
@@ -1099,6 +1120,45 @@ export function WaiterPage() {
         productModifierIds: options.productModifierIds,
       },
     ]);
+  }
+
+  function repeatLastDrink() {
+    const lastCartDrink = [...cart]
+      .reverse()
+      .find(
+        (entry): entry is CartItem =>
+          isCartItem(entry) && isBarProduct(entry.product, categoriesById),
+      );
+
+    if (lastCartDrink) {
+      appendCartItem(lastCartDrink.product, {
+        notes: lastCartDrink.notes ?? null,
+        productModifierIds: [...lastCartDrink.productModifierIds],
+      });
+      setIsFunctionsMenuOpen(false);
+      setNotice(`Dodano ponownie: ${lastCartDrink.product.name}.`);
+      return;
+    }
+
+    const lastSavedDrink = [...selectedOrderItems].reverse().find((item) => {
+      const product = productsById.get(item.product_id);
+      return product ? isBarProduct(product, categoriesById) : false;
+    });
+    const product = lastSavedDrink
+      ? productsById.get(lastSavedDrink.product_id)
+      : undefined;
+
+    if (!lastSavedDrink || !product) {
+      setError("Brak ostatniego napoju do powtórzenia.");
+      return;
+    }
+
+    appendCartItem(product, {
+      notes: lastSavedDrink.notes,
+      productModifierIds: [],
+    });
+    setIsFunctionsMenuOpen(false);
+    setNotice(`Dodano ponownie: ${product.name}.`);
   }
 
   function incrementCartItem(entryId: string) {
@@ -2465,6 +2525,14 @@ function getProductModifierPrice(
 function isBarCategory(categoryName: string): boolean {
   const normalizedName = categoryName.toLowerCase();
   return barCategoryWords.some((word) => normalizedName.includes(word));
+}
+
+function isBarProduct(
+  product: Product,
+  categoriesById: Map<number, ProductCategory>,
+): boolean {
+  const category = categoriesById.get(product.category_id);
+  return category ? isBarCategory(category.name) : false;
 }
 
 function formatDiscountValue(discount: Discount): string {
