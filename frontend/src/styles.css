@@ -1019,6 +1019,17 @@ small,
   background: #21436d;
 }
 
+.pos-action-button.payment-method-change {
+  border-color: #76567e;
+  background: #76567e;
+  color: #ffffff;
+}
+
+.pos-action-button.payment-method-change:hover:not(:disabled) {
+  border-color: #67486f;
+  background: #67486f;
+}
+
 .pos-action-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -1054,6 +1065,11 @@ small,
 .transfer-list > button:hover:not(:disabled) {
   border-color: #ff8a16;
   background: #fff6ec;
+}
+
+.payment-method-list > button:hover:not(:disabled) {
+  border-color: #76567e;
+  background: #f5f0f6;
 }
 
 .transfer-list > button:disabled {

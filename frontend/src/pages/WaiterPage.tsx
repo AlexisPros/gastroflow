@@ -52,12 +52,15 @@ import {
   getWaiterMergeCandidates,
   getActiveOrderWaiters,
   getActiveTransferWaiters,
+  getCurrentUserClosedPayments,
   getTransferableWaiterOrders,
   mergeWaiterOrder,
   transferAllWaiterOrders,
   transferWaiterOrderToCurrent,
+  toggleWaiterPaymentMethod,
   type ActiveTransferWaiter,
   type ActiveOrderWaiter,
+  type ClosedPayment,
   type OrderMergeCandidate,
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
@@ -125,6 +128,9 @@ export function WaiterPage() {
   const [transferSourceWaiter, setTransferSourceWaiter] = useState<ActiveTransferWaiter | null>(null);
   const [transferOrders, setTransferOrders] = useState<Order[]>([]);
   const [isTransferring, setIsTransferring] = useState(false);
+  const [isPaymentMethodModalOpen, setIsPaymentMethodModalOpen] = useState(false);
+  const [closedPayments, setClosedPayments] = useState<ClosedPayment[]>([]);
+  const [isChangingPaymentMethod, setIsChangingPaymentMethod] = useState(false);
   const [billSplitView, setBillSplitView] = useState<BillSplitView | null>(null);
   const [selectedBillSplitItemIds, setSelectedBillSplitItemIds] = useState<number[]>([]);
   const [productSearchQuery, setProductSearchQuery] = useState("");
@@ -508,6 +514,16 @@ export function WaiterPage() {
                 Transfer jednego
               </button>
             </div>
+            <button
+              type="button"
+              className="pos-action-button payment-method-change"
+              onClick={() => {
+                void openPaymentMethodChange();
+              }}
+              disabled={isSubmitting}
+            >
+              Zmień typ płatności
+            </button>
             <button type="button" className="pos-action-button" onClick={loadWaiterData}>
               Odśwież
             </button>
@@ -1044,6 +1060,18 @@ export function WaiterPage() {
           }}
           onTransferOrder={(order) => {
             void confirmTransferOrder(order);
+          }}
+        />
+      )}
+
+      {isPaymentMethodModalOpen && (
+        <PaymentMethodChangeModal
+          payments={closedPayments}
+          floorTables={floorTables}
+          isSubmitting={isChangingPaymentMethod}
+          onClose={() => setIsPaymentMethodModalOpen(false)}
+          onSelect={(payment) => {
+            void confirmPaymentMethodChange(payment);
           }}
         />
       )}
@@ -1590,6 +1618,52 @@ export function WaiterPage() {
     }
   }
 
+  async function openPaymentMethodChange() {
+    if (!token) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      setClosedPayments(await getCurrentUserClosedPayments(token));
+      setIsPaymentMethodModalOpen(true);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not load closed orders.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function confirmPaymentMethodChange(payment: ClosedPayment) {
+    if (!token) {
+      return;
+    }
+
+    const nextMethod = payment.method === "CARD" ? "CASH" : "CARD";
+    const confirmed = await confirm({
+      title: "Zmiana typu płatności",
+      message: `Czy na pewno chcesz zmienić płatność rachunku #${payment.order_id} z ${payment.method} na ${nextMethod}?`,
+      confirmText: "Zmień płatność",
+      cancelText: "Anuluj",
+    });
+    if (!confirmed) {
+      return;
+    }
+
+    setIsChangingPaymentMethod(true);
+    setError(null);
+    try {
+      await toggleWaiterPaymentMethod(token, payment.payment_id);
+      setClosedPayments(await getCurrentUserClosedPayments(token));
+      setNotice(`Typ płatności rachunku #${payment.order_id} zmieniono na ${nextMethod}.`);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not change payment method.");
+    } finally {
+      setIsChangingPaymentMethod(false);
+    }
+  }
+
   async function openTransferFlow(mode: "ALL" | "SINGLE") {
     if (!token) {
       return;
@@ -2074,6 +2148,63 @@ export function WaiterPage() {
     }, 0);
     return (Number(item.product.price) + modifierTotal) * item.quantity;
   }
+}
+
+function PaymentMethodChangeModal({
+  payments,
+  floorTables,
+  isSubmitting,
+  onClose,
+  onSelect,
+}: {
+  payments: ClosedPayment[];
+  floorTables: FloorTableView[];
+  isSubmitting: boolean;
+  onClose: () => void;
+  onSelect: (payment: ClosedPayment) => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <div className="product-options-modal transfer-orders-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Zamknięte rachunki</span>
+            <h2>Zmień typ płatności</h2>
+          </div>
+          <button type="button" className="ghost-button" onClick={onClose}>
+            Zamknij
+          </button>
+        </div>
+
+        <div className="transfer-list payment-method-list">
+          {payments.map((payment) => {
+            const table = floorTables.find((item) => item.table_id === payment.table_id)?.table;
+            const nextMethod = payment.method === "CARD" ? "CASH" : "CARD";
+            return (
+              <button
+                key={payment.payment_id}
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => onSelect(payment)}
+              >
+                <span>
+                  <strong>Rachunek #{payment.order_id}</strong>
+                  <small>
+                    {table ? `Stolik ${table.table_number}` : "Bez stolika"} · {payment.method} →{" "}
+                    {nextMethod}
+                  </small>
+                </span>
+                <b>{formatMoney(Number(payment.amount))}</b>
+              </button>
+            );
+          })}
+          {payments.length === 0 && (
+            <div className="empty-ticket">Brak zamkniętych rachunków z płatnością CARD lub CASH.</div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function TransferOrdersModal({

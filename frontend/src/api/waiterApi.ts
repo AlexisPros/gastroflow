@@ -73,6 +73,15 @@ export type Payment = {
   created_at: string;
 };
 
+export type ClosedPayment = {
+  payment_id: number;
+  order_id: number;
+  table_id: number | null;
+  method: "CARD" | "CASH";
+  amount: string;
+  closed_at: string | null;
+};
+
 export type Invoice = {
   id: number;
   order_id: number;
@@ -465,6 +474,20 @@ export async function registerWaiterPayment(
     method: "POST",
     token,
     body,
+  });
+}
+
+export async function getCurrentUserClosedPayments(token: string): Promise<ClosedPayment[]> {
+  return apiRequest<ClosedPayment[]>("/payments/current-user/closed", { token });
+}
+
+export async function toggleWaiterPaymentMethod(
+  token: string,
+  paymentId: number,
+): Promise<Payment> {
+  return apiRequest<Payment>(`/payments/${paymentId}/toggle-method`, {
+    method: "POST",
+    token,
   });
 }
 
