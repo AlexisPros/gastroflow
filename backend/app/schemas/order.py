@@ -5,6 +5,7 @@ from app.schemas.base import OrmBaseModel
 
 
 class OrderBase(OrmBaseModel):
+    idempotency_key: str | None = None
     table_id: int | None = None
     waiter_id: int | None = None
     discount_id: int | None = None
@@ -43,6 +44,7 @@ class OrderUpdate(OrmBaseModel):
 
 class OrderRead(OrderBase):
     id: int
+    version: int
     status: str
     closed_at: datetime | None = None
     created_at: datetime

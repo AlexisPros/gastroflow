@@ -1,3 +1,4 @@
+from app.models.order import Order
 from app.models.user import User
 
 
@@ -8,6 +9,12 @@ class AuthorizationService:
 
     def can_manage_order(self, *, user: User) -> bool:
         return user.role in {"ADMIN", "MANAGER", "WAITER"}
+
+    def require_order_access(self, *, user: User, order: Order) -> None:
+        if user.role in {"ADMIN", "MANAGER"}:
+            return
+        if user.role != "WAITER" or order.waiter_id != user.id:
+            raise PermissionError("You cannot modify another employee's order.")
 
     def can_manage_kitchen(self, *, user: User) -> bool:
         return user.role in {"ADMIN", "MANAGER", "KITCHEN"}

@@ -42,8 +42,19 @@ class OrderService:
         waiter_id: int | None = None,
         guest_count: int | None = None,
         source: str = "WAITER",
+        idempotency_key: str | None = None,
         items: list[OrderItemRequest],
     ) -> Order:
+        if idempotency_key:
+            existing_result = await db.execute(
+                select(Order).where(Order.idempotency_key == idempotency_key),
+            )
+            existing_order = existing_result.scalar_one_or_none()
+            if existing_order is not None:
+                if existing_order.waiter_id != waiter_id:
+                    raise ValueError("This order request belongs to another user.")
+                return existing_order
+
         if not items:
             raise ValueError("Order must contain at least one item.")
 
@@ -60,12 +71,16 @@ class OrderService:
                 raise ValueError("Start shift first.")
             shift_id = shift.id
 
+        if table_id is not None:
+            await self._ensure_table_accepts_waiter_order(db, table_id=table_id)
+
         order = Order(
             table_id=table_id,
             waiter_id=waiter_id,
             guest_count=guest_count,
             shift_id=shift_id,
             source=source,
+            idempotency_key=idempotency_key,
             total_amount=Decimal("0.00"),
         )
         db.add(order)
@@ -111,6 +126,72 @@ class OrderService:
                 "source": order.source,
                 "status": order.status,
                 "table_status": "OCCUPIED",
+            },
+        )
+        return order
+
+    async def change_guest_count(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        guest_count: int,
+    ) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Guest count can only be changed for an active order.")
+        if guest_count <= 0:
+            raise ValueError("Guest count must be greater than zero.")
+        order.guest_count = guest_count
+        if order.table_id is not None:
+            result = await db.execute(
+                select(RestaurantTable).where(RestaurantTable.id == order.table_id),
+            )
+            table = result.scalar_one_or_none()
+            if table is not None:
+                table.current_guests = guest_count
+                db.add(table)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        return order
+
+    async def change_order_table(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        table_id: int | None,
+    ) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Only an active order can be moved.")
+        if table_id == order.table_id:
+            return order
+
+        old_table_id = order.table_id
+        if table_id is not None:
+            table = await self._ensure_table_accepts_waiter_order(db, table_id=table_id)
+            table.status = "OCCUPIED"
+            table.current_guests = order.guest_count
+            db.add(table)
+
+        order.table_id = table_id
+        db.add(order)
+        if old_table_id is not None:
+            await self._release_table_if_no_active_orders(
+                db,
+                order=order,
+                table_id=old_table_id,
+            )
+
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor", "managers"],
+            event="order_table_changed",
+            data={
+                "order_id": order.id,
+                "old_table_id": old_table_id,
+                "table_id": table_id,
             },
         )
         return order
@@ -461,16 +542,18 @@ class OrderService:
         db: AsyncSession,
         *,
         order: Order,
+        table_id: int | None = None,
     ) -> None:
-        if order.table_id is None:
+        target_table_id = order.table_id if table_id is None else table_id
+        if target_table_id is None:
             return
 
         active_order_result = await db.execute(
             select(Order)
             .where(
-                Order.table_id == order.table_id,
+                Order.table_id == target_table_id,
                 Order.id != order.id,
-                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
             )
             .limit(1),
         )
@@ -478,7 +561,9 @@ class OrderService:
             return
 
         result = await db.execute(
-            select(RestaurantTable).where(RestaurantTable.id == order.table_id),
+            select(RestaurantTable)
+            .where(RestaurantTable.id == target_table_id)
+            .with_for_update(),
         )
         table = result.scalar_one_or_none()
         if table is None:
@@ -495,7 +580,9 @@ class OrderService:
         table_id: int,
     ) -> RestaurantTable:
         result = await db.execute(
-            select(RestaurantTable).where(RestaurantTable.id == table_id),
+            select(RestaurantTable)
+            .where(RestaurantTable.id == table_id)
+            .with_for_update(),
         )
         table = result.scalar_one_or_none()
 
@@ -521,6 +608,37 @@ class OrderService:
 
         return table
 
+    async def _ensure_table_accepts_waiter_order(
+        self,
+        db: AsyncSession,
+        *,
+        table_id: int,
+    ) -> RestaurantTable:
+        result = await db.execute(
+            select(RestaurantTable)
+            .where(RestaurantTable.id == table_id)
+            .with_for_update(),
+        )
+        table = result.scalar_one_or_none()
+        if table is None:
+            raise ValueError("Restaurant table does not exist.")
+        if not table.is_active:
+            raise ValueError("Restaurant table is not active.")
+        if table.status != "FREE":
+            raise ValueError("Restaurant table is not free.")
+
+        active_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == table_id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
+            )
+            .limit(1),
+        )
+        if active_order_result.scalar_one_or_none() is not None:
+            raise ValueError("Restaurant table already has an active order.")
+        return table
+
     async def _set_order_table_status(
         self,
         db: AsyncSession,
@@ -539,6 +657,8 @@ class OrderService:
             raise ValueError("Restaurant table does not exist.")
 
         table.status = status
+        if status == "OCCUPIED":
+            table.current_guests = order.guest_count
         db.add(table)
 
     async def confirm_pending_qr_order(

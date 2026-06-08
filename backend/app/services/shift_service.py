@@ -115,7 +115,7 @@ class ShiftService:
         result = await db.execute(
             select(Order).where(
                 Order.shift_id == shift.id,
-                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
             ),
         )
         active_order = result.scalar_one_or_none()

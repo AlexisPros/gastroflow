@@ -16,6 +16,9 @@ import {
   createWaiterOrder,
   deleteWaiterBillSegment,
   createInvoiceForWaiterOrder,
+  changeWaiterOrderTable,
+  closeWaiterOrderWithPayments,
+  confirmPendingQrOrder,
   applyDiscountToWaiterOrder,
   finalizeWaiterBillSplit,
   generateWaiterGuestCheckPdf,
@@ -23,6 +26,7 @@ import {
   getWaiterBillSplit,
   getDiscounts,
   getModifiers,
+  getPendingQrOrders,
   getProductCategories,
   getProductModifiers,
   getWaiterOrderItems,
@@ -45,7 +49,7 @@ import {
   type ProductModifier,
   verifyManagerPin,
   voidWaiterOrderItem,
-  registerWaiterPayment,
+  rejectPendingQrOrder,
   removeDiscountFromWaiterOrder,
   updateWaiterOrder,
   updateWaiterOrderTip,
@@ -99,6 +103,7 @@ export function WaiterPage() {
   const [floorTables, setFloorTables] = useState<FloorTableView[]>([]);
   const [floorDecorations, setFloorDecorations] = useState<FloorPlanDecoration[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [pendingQrOrders, setPendingQrOrders] = useState<Order[]>([]);
   const [activeOrderWaiters, setActiveOrderWaiters] = useState<ActiveOrderWaiter[]>([]);
   const [selectedOrderOwnerId, setSelectedOrderOwnerId] = useState<number | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -141,6 +146,8 @@ export function WaiterPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [mapScale, setMapScale] = useState(0.7);
   const waiterMapRef = useRef<HTMLDivElement | null>(null);
+  const createOrderIdempotencyKey = useRef<string | null>(null);
+  const liveReloadTimerRef = useRef<number | null>(null);
   const floorContentSize = useMemo(() => {
     if (!floorPlan) {
       return { width: 0, height: 0 };
@@ -189,6 +196,7 @@ export function WaiterPage() {
         nextProductModifiers,
         nextDiscounts,
         nextActiveOrderWaiters,
+        nextPendingQrOrders,
       ] =
         await Promise.all([
           getFloorPlanView(token, selectedFloorPlanId ?? undefined),
@@ -200,6 +208,7 @@ export function WaiterPage() {
           getProductModifiers(token),
           getDiscounts(token),
           user?.role === "MANAGER" ? getActiveOrderWaiters(token) : Promise.resolve([]),
+          getPendingQrOrders(token),
         ]);
 
       setFloorPlan(floorView.floorPlan);
@@ -213,6 +222,7 @@ export function WaiterPage() {
       setProductModifiers(nextProductModifiers.filter((item) => item.is_active));
       setDiscounts(nextDiscounts.filter((discount) => discount.is_active));
       setActiveOrderWaiters(nextActiveOrderWaiters);
+      setPendingQrOrders(nextPendingQrOrders);
       if (
         user?.role === "MANAGER"
         && selectedOrderOwnerId !== user.id
@@ -267,15 +277,33 @@ export function WaiterPage() {
       return;
     }
 
-    return connectLiveUpdates({
+    const scheduleReload = () => {
+      if (liveReloadTimerRef.current !== null) {
+        window.clearTimeout(liveReloadTimerRef.current);
+      }
+      liveReloadTimerRef.current = window.setTimeout(() => {
+        liveReloadTimerRef.current = null;
+        void loadWaiterData();
+      }, 120);
+    };
+
+    const disconnect = connectLiveUpdates({
       channel: "waiters",
       token,
       onMessage: (message) => {
         if (message.event !== "connected") {
-          void loadWaiterData();
+          scheduleReload();
         }
       },
     });
+
+    return () => {
+      disconnect();
+      if (liveReloadTimerRef.current !== null) {
+        window.clearTimeout(liveReloadTimerRef.current);
+        liveReloadTimerRef.current = null;
+      }
+    };
   }, [loadWaiterData, token]);
 
   const openOrders = useMemo(() => {
@@ -527,6 +555,48 @@ export function WaiterPage() {
             <button type="button" className="pos-action-button" onClick={loadWaiterData}>
               Odśwież
             </button>
+            <section className="qr-order-inbox">
+              <div className="panel-heading compact">
+                <div>
+                  <span className="eyebrow">QR</span>
+                  <h2>Nowe zamówienia</h2>
+                </div>
+                <strong>{pendingQrOrders.length}</strong>
+              </div>
+              <div className="qr-order-list">
+                {pendingQrOrders.map((order) => (
+                  <article key={order.id}>
+                    <span>
+                      <strong>Rachunek QR #{order.id}</strong>
+                      <small>
+                        {getOrderTableLabel(order)} · {order.guest_count ?? 0} os.
+                      </small>
+                    </span>
+                    <div>
+                      <button
+                        type="button"
+                        className="primary-button"
+                        disabled={isSubmitting}
+                        onClick={() => void handleQrOrder(order, "CONFIRM")}
+                      >
+                        Przyjmij
+                      </button>
+                      <button
+                        type="button"
+                        className="ghost-button danger"
+                        disabled={isSubmitting}
+                        onClick={() => void handleQrOrder(order, "REJECT")}
+                      >
+                        Odrzuć
+                      </button>
+                    </div>
+                  </article>
+                ))}
+                {pendingQrOrders.length === 0 && (
+                  <div className="empty-ticket">Brak zamówień oczekujących na potwierdzenie.</div>
+                )}
+              </div>
+            </section>
           </aside>
         </div>
       )}
@@ -789,6 +859,15 @@ export function WaiterPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      void moveOrderToAnotherTable();
+                    }}
+                    disabled={!selectedOrder || isSubmitting}
+                  >
+                    Przenieś na inny stolik
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
                       setIsFunctionsMenuOpen(false);
                       setProductSearchQuery("");
                       setIsProductSearchOpen(true);
@@ -903,6 +982,16 @@ export function WaiterPage() {
                 }}
               >
                 Zamknij CASH
+              </button>
+              <button
+                type="button"
+                className="primary-button mixed-payment-button"
+                disabled={isSubmitting}
+                onClick={() => {
+                  void closeOrderWithPayment("MIXED");
+                }}
+              >
+                Płatność mieszana
               </button>
             </div>
 
@@ -1351,6 +1440,7 @@ export function WaiterPage() {
   }
 
   function resetToDashboard() {
+    createOrderIdempotencyKey.current = null;
     setMode("DASHBOARD");
     setSelectedTable(null);
     setSelectedOrderId(null);
@@ -1478,9 +1568,88 @@ export function WaiterPage() {
     }
   }
 
-  async function closeOrderWithPayment(method: "CARD" | "CASH") {
+  async function closeOrderWithPayment(method: "CARD" | "CASH" | "MIXED") {
     if (!token || !selectedOrder) {
       return;
+    }
+
+    const total = Number(selectedOrder.total_amount);
+    const payments: Array<{
+      method: "CARD" | "CASH";
+      amount: string;
+      cash_received?: string;
+      idempotency_key: string;
+    }> = [];
+
+    if (method === "CARD") {
+      payments.push({
+        method: "CARD",
+        amount: total.toFixed(2),
+        idempotency_key: crypto.randomUUID(),
+      });
+    } else if (method === "CASH") {
+      const cashReceived = await prompt({
+        title: "Kwota otrzymana od gościa",
+        label: `Do zapłaty: ${formatMoney(total)}`,
+        defaultValue: total.toFixed(2),
+        type: "number",
+      });
+      if (cashReceived === null) {
+        return;
+      }
+      const parsedCash = Number(cashReceived);
+      if (!Number.isFinite(parsedCash) || parsedCash < total) {
+        setError("Otrzymana gotówka nie może być mniejsza niż kwota rachunku.");
+        return;
+      }
+      payments.push({
+        method: "CASH",
+        amount: total.toFixed(2),
+        cash_received: parsedCash.toFixed(2),
+        idempotency_key: crypto.randomUUID(),
+      });
+    } else {
+      const cardAmountInput = await prompt({
+        title: "Płatność mieszana",
+        label: `Podaj kwotę płaconą kartą. Razem: ${formatMoney(total)}`,
+        type: "number",
+      });
+      if (cardAmountInput === null) {
+        return;
+      }
+      const cardAmount = Number(cardAmountInput);
+      if (!Number.isFinite(cardAmount) || cardAmount <= 0 || cardAmount >= total) {
+        setError("Kwota karty musi być większa od zera i mniejsza od sumy rachunku.");
+        return;
+      }
+      const cashAmount = total - cardAmount;
+      const cashReceivedInput = await prompt({
+        title: "Gotówka dla płatności mieszanej",
+        label: `Pozostało gotówką: ${formatMoney(cashAmount)}`,
+        defaultValue: cashAmount.toFixed(2),
+        type: "number",
+      });
+      if (cashReceivedInput === null) {
+        return;
+      }
+      const cashReceived = Number(cashReceivedInput);
+      if (!Number.isFinite(cashReceived) || cashReceived < cashAmount) {
+        setError("Otrzymana gotówka nie może być mniejsza niż część gotówkowa.");
+        return;
+      }
+      payments.push(
+        {
+          method: "CARD",
+          amount: cardAmount.toFixed(2),
+          idempotency_key: crypto.randomUUID(),
+        },
+        {
+          method: "CASH",
+          amount: cashAmount.toFixed(2),
+          cash_received: cashReceived.toFixed(2),
+          idempotency_key: crypto.randomUUID(),
+        },
+      );
     }
 
     setIsSubmitting(true);
@@ -1499,13 +1668,13 @@ export function WaiterPage() {
         });
       }
 
-      await registerWaiterPayment(token, selectedOrder.id, {
-        method,
-        amount: selectedOrder.total_amount,
-        close_order: true,
-      });
+      const result = await closeWaiterOrderWithPayments(token, selectedOrder.id, payments);
       await openReceiptPdfs(selectedOrder.id);
-      setNotice(`Order #${selectedOrder.id} closed.`);
+      setNotice(
+        Number(result.change_due) > 0
+          ? `Rachunek #${selectedOrder.id} zamknięty. Reszta: ${formatMoney(Number(result.change_due))}.`
+          : `Rachunek #${selectedOrder.id} zamknięty.`,
+      );
       resetToDashboard();
       await loadWaiterData();
     } catch (exc) {
@@ -1580,8 +1749,14 @@ export function WaiterPage() {
             waiter_id: user.id,
             guest_count: guestCount,
             source: "WAITER",
+            idempotency_key:
+              createOrderIdempotencyKey.current
+              ?? (createOrderIdempotencyKey.current = crypto.randomUUID()),
             items: payloadItems,
           });
+      if (!selectedOrder) {
+        createOrderIdempotencyKey.current = null;
+      }
       setNotice(`Order #${order.id} sent to production.`);
       setCart([]);
       setSelectedTicketLine(null);
@@ -1651,16 +1826,115 @@ export function WaiterPage() {
       return;
     }
 
+    const reason = await prompt({
+      title: "Powód zmiany płatności",
+      label: "Powód zostanie zapisany w historii rachunku.",
+    });
+    if (!reason?.trim()) {
+      return;
+    }
+
+    let managerPin: string | null = null;
+    if (user?.role !== "ADMIN" && user?.role !== "MANAGER") {
+      managerPin = await prompt({ title: "PIN managera", type: "password" });
+      if (!managerPin) {
+        return;
+      }
+    }
+
     setIsChangingPaymentMethod(true);
     setError(null);
     try {
-      await toggleWaiterPaymentMethod(token, payment.payment_id);
+      await toggleWaiterPaymentMethod(token, payment.payment_id, {
+        reason: reason.trim(),
+        manager_pin: managerPin,
+      });
       setClosedPayments(await getCurrentUserClosedPayments(token));
       setNotice(`Typ płatności rachunku #${payment.order_id} zmieniono na ${nextMethod}.`);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not change payment method.");
     } finally {
       setIsChangingPaymentMethod(false);
+    }
+  }
+
+  async function handleQrOrder(order: Order, action: "CONFIRM" | "REJECT") {
+    if (!token) {
+      return;
+    }
+
+    const pin = await prompt({
+      title: action === "CONFIRM" ? "Przyjmij zamówienie QR" : "Odrzuć zamówienie QR",
+      label: "Wpisz swój PIN, aby potwierdzić działanie.",
+      type: "password",
+    });
+    if (!pin) {
+      return;
+    }
+
+    let reason: string | null = null;
+    if (action === "REJECT") {
+      reason = await prompt({
+        title: "Powód odrzucenia",
+        label: "Opcjonalna informacja do historii rachunku.",
+      });
+      if (reason === null) {
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      if (action === "CONFIRM") {
+        await confirmPendingQrOrder(token, order.id, pin);
+        setNotice(`Zamówienie QR #${order.id} zostało przyjęte.`);
+      } else {
+        await rejectPendingQrOrder(token, order.id, pin, reason);
+        setNotice(`Zamówienie QR #${order.id} zostało odrzucone.`);
+      }
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Nie udało się obsłużyć zamówienia QR.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function moveOrderToAnotherTable() {
+    if (!token || !selectedOrder) {
+      return;
+    }
+
+    const freeTables = floorTables
+      .map((item) => item.table)
+      .filter((table): table is RestaurantTable => Boolean(table && table.status === "FREE"));
+    const targetNumber = await prompt({
+      title: "Przenieś rachunek",
+      label: `Wolne stoliki: ${freeTables.map((table) => table.table_number).join(", ") || "brak"}`,
+    });
+    if (targetNumber === null) {
+      return;
+    }
+    const target = freeTables.find((table) => table.table_number === targetNumber.trim());
+    if (!target) {
+      setError("Wybierz numer wolnego stolika z listy.");
+      return;
+    }
+
+    setIsFunctionsMenuOpen(false);
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const updatedOrder = await changeWaiterOrderTable(token, selectedOrder.id, target.id);
+      replaceOrder(updatedOrder);
+      setSelectedTable(target);
+      setNotice(`Rachunek przeniesiono na stolik ${target.table_number}.`);
+      await loadWaiterData();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Nie udało się przenieść rachunku.");
+    } finally {
+      setIsSubmitting(false);
     }
   }
 

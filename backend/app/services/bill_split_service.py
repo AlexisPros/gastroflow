@@ -737,7 +737,7 @@ class BillSplitService:
         return 1 if max_sequence is None else max_sequence + 1
 
     def _ensure_order_can_split(self, order: Order) -> None:
-        if order.status in {"CLOSED", "CANCELLED", "REJECTED"}:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
             raise ValueError("Bill splitting is only allowed for active orders.")
 
     def _validate_move_quantity(

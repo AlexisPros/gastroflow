@@ -16,6 +16,8 @@ class DiscountService:
         order: Order,
         discount_id: int,
     ) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Discount can only be changed for an active order.")
         discount = await self._get_active_discount(db, discount_id=discount_id)
         base_total = await self._get_order_items_total(db, order_id=order.id)
         discount_amount = self.calculate_discount_amount(
@@ -37,6 +39,8 @@ class DiscountService:
         return order
 
     async def remove_discount(self, db: AsyncSession, *, order: Order) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Discount can only be changed for an active order.")
         base_total = await self._get_order_items_total(db, order_id=order.id)
 
         order.discount_id = None

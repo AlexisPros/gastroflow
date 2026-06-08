@@ -41,6 +41,7 @@ def override_current_user(role: str) -> None:
 def make_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=1,
         discount_id=None,
@@ -118,11 +119,16 @@ def test_create_invoice_reaches_service(monkeypatch):
 
 
 def test_get_invoice_for_order_reaches_service(monkeypatch):
+    async def get_order(_db, id: int):
+        assert id == 1
+        return make_order()
+
     async def get_by_order(_db, *, order_id: int):
         assert order_id == 1
         return make_invoice()
 
     monkeypatch.setattr(invoice_service, "get_by_order", get_by_order)
+    monkeypatch.setattr(crud_order, "get", get_order)
     override_current_user("MANAGER")
 
     try:
@@ -182,7 +188,12 @@ def test_send_invoice_to_ksef_mock_reaches_service(monkeypatch):
         invoice.status = "SENT_TO_KSEF_MOCK"
         return "KSEF-MOCK-1"
 
+    async def get_order(_db, id: int):
+        assert id == 1
+        return make_order()
+
     monkeypatch.setattr(crud_invoice, "get", get_invoice)
+    monkeypatch.setattr(crud_order, "get", get_order)
     monkeypatch.setattr(invoice_service, "send_to_ksef_mock", send_to_ksef_mock)
     override_current_user("MANAGER")
 
@@ -209,7 +220,12 @@ def test_mark_invoice_sent_reaches_service(monkeypatch):
         invoice.status = "SENT"
         return invoice
 
+    async def get_order(_db, id: int):
+        assert id == 1
+        return make_order()
+
     monkeypatch.setattr(crud_invoice, "get", get_invoice)
+    monkeypatch.setattr(crud_order, "get", get_order)
     monkeypatch.setattr(invoice_service, "mark_sent", mark_sent)
     override_current_user("MANAGER")
 

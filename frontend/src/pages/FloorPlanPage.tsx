@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
@@ -80,6 +81,11 @@ export function FloorPlanPage() {
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [mapScale, setMapScale] = useState(0.7);
+  const tablesRef = useRef<FloorTableView[]>([]);
+  const decorationsRef = useRef<FloorPlanDecoration[]>([]);
+  const pendingPositionRef = useRef<FloorPlanTablePositionInput | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const liveReloadTimerRef = useRef<number | null>(null);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const loadFloorPlansList = useCallback(async () => {
@@ -135,16 +141,42 @@ export function FloorPlanPage() {
       return;
     }
 
-    return connectLiveUpdates({
+    const scheduleReload = () => {
+      if (liveReloadTimerRef.current !== null) {
+        window.clearTimeout(liveReloadTimerRef.current);
+      }
+      liveReloadTimerRef.current = window.setTimeout(() => {
+        liveReloadTimerRef.current = null;
+        void loadFloorPlan();
+      }, 100);
+    };
+
+    const disconnect = connectLiveUpdates({
       channel: "floor",
       token,
       onMessage: (message) => {
         if (message.event !== "connected") {
-          void loadFloorPlan();
+          scheduleReload();
         }
       },
     });
+
+    return () => {
+      disconnect();
+      if (liveReloadTimerRef.current !== null) {
+        window.clearTimeout(liveReloadTimerRef.current);
+        liveReloadTimerRef.current = null;
+      }
+    };
   }, [loadFloorPlan, token]);
+
+  useEffect(() => {
+    tablesRef.current = tables;
+  }, [tables]);
+
+  useEffect(() => {
+    decorationsRef.current = decorations;
+  }, [decorations]);
 
   const selectedTable = useMemo(() => {
     if (selection?.type !== "TABLE") {
@@ -166,15 +198,20 @@ export function FloorPlanPage() {
     }
 
     if (selectedTable) {
-      setDraftPosition(toPosition(selectedTable));
+      const position = toPosition(selectedTable);
+      pendingPositionRef.current = position;
+      setDraftPosition(position);
       return;
     }
 
     if (selectedDecoration) {
-      setDraftPosition(toPosition(selectedDecoration));
+      const position = toPosition(selectedDecoration);
+      pendingPositionRef.current = position;
+      setDraftPosition(position);
       return;
     }
 
+    pendingPositionRef.current = null;
     setDraftPosition(null);
   }, [interaction, selectedDecoration, selectedTable]);
 
@@ -183,7 +220,18 @@ export function FloorPlanPage() {
       return;
     }
 
+    const flushPendingPosition = () => {
+      dragFrameRef.current = null;
+      const nextPosition = pendingPositionRef.current;
+      if (!nextPosition) {
+        return;
+      }
+      applyPositionLocally(interaction.selection, nextPosition);
+      setDraftPosition(nextPosition);
+    };
+
     const handleMove = (event: globalThis.PointerEvent) => {
+      event.preventDefault();
       const dx = (event.clientX - interaction.startClientX) / mapScale;
       const dy = (event.clientY - interaction.startClientY) / mapScale;
       const nextPosition =
@@ -191,29 +239,43 @@ export function FloorPlanPage() {
           ? movePosition(interaction.startPosition, dx, dy)
           : resizePosition(interaction.startPosition, dx, dy, interaction.handle ?? "se");
 
-      applyPositionLocally(interaction.selection, nextPosition);
-      setDraftPosition(nextPosition);
+      pendingPositionRef.current = nextPosition;
+      if (dragFrameRef.current === null) {
+        dragFrameRef.current = window.requestAnimationFrame(flushPendingPosition);
+      }
     };
 
     const handleUp = () => {
       const finalSelection = interaction.selection;
-      const finalPosition = getSelectedPosition(finalSelection);
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
+      const finalPosition = pendingPositionRef.current ?? getSelectedPosition(finalSelection);
+      if (finalPosition) {
+        applyPositionLocally(finalSelection, finalPosition);
+        setDraftPosition(finalPosition);
+      }
       setInteraction(null);
       if (finalPosition) {
         void persistPosition(finalSelection, finalPosition);
       }
     };
 
-    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleUp, { once: true });
 
     return () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
     };
-  // The pointer effect must track the current in-flight interaction and latest objects.
+  // The functions use refs/functional state updates, so pointer subscriptions stay stable while dragging.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interaction, decorations, mapScale, tables]);
+  }, [interaction, mapScale]);
 
   const counts = useMemo(() => {
     return tables.reduce(
@@ -656,6 +718,7 @@ export function FloorPlanPage() {
     mode: "MOVE" | "RESIZE",
     handle?: ResizeHandle,
   ) {
+    event.preventDefault();
     event.stopPropagation();
     setSelection(nextSelection);
 
@@ -668,6 +731,7 @@ export function FloorPlanPage() {
       return;
     }
 
+    pendingPositionRef.current = startPosition;
     setInteraction({
       mode,
       selection: nextSelection,
@@ -741,11 +805,13 @@ export function FloorPlanPage() {
 
   function getSelectedPosition(targetSelection: NonNullable<Selection>) {
     if (targetSelection.type === "TABLE") {
-      const item = tables.find((table) => table.id === targetSelection.id);
+      const item = tablesRef.current.find((table) => table.id === targetSelection.id);
       return item ? toPosition(item) : null;
     }
 
-    const item = decorations.find((decoration) => decoration.id === targetSelection.id);
+    const item = decorationsRef.current.find(
+      (decoration) => decoration.id === targetSelection.id,
+    );
     return item ? toPosition(item) : null;
   }
 

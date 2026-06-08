@@ -36,6 +36,7 @@ def make_user(role: str = "WAITER") -> User:
 def make_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=1,
         discount_id=None,

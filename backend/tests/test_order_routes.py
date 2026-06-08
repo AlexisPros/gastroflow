@@ -41,6 +41,7 @@ def make_user(role: str) -> User:
 def make_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=1,
         discount_id=None,
@@ -99,12 +100,14 @@ def test_create_order_with_items_reaches_service(monkeypatch):
         waiter_id,
         guest_count,
         source,
+        idempotency_key,
         items,
     ):
         assert table_id == 1
         assert waiter_id == 1
         assert guest_count == 3
         assert source == "WAITER"
+        assert idempotency_key is None
         assert len(items) == 1
         assert items[0].product_id == 1
         assert items[0].quantity == 2
@@ -903,19 +906,7 @@ def test_close_order_keeps_table_occupied_when_other_order_is_active():
     assert db.committed is True
 
 
-def test_close_order_reaches_crud(monkeypatch):
-    async def get(_db, id: int):
-        assert id == 1
-        return make_order()
-
-    async def close(_db, *, db_obj):
-        assert db_obj.id == 1
-        db_obj.status = "CLOSED"
-        db_obj.closed_at = datetime.now(timezone.utc)
-        return db_obj
-
-    monkeypatch.setattr(crud_order, "get", get)
-    monkeypatch.setattr(crud_order, "close", close)
+def test_close_order_requires_payment_endpoint():
     override_current_user("WAITER")
 
     try:
@@ -926,9 +917,8 @@ def test_close_order_reaches_crud(monkeypatch):
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "CLOSED"
-    assert response.json()["closed_at"] is not None
+    assert response.status_code == 400
+    assert "close-with-payments" in response.json()["detail"]
 
 
 def test_add_tip_recalculates_total_with_discount():
@@ -1021,7 +1011,7 @@ def test_transfer_order_reaches_service(monkeypatch):
 
     async def transfer_order(_db, *, order, to_waiter_id: int):
         assert order.id == 1
-        assert to_waiter_id == 2
+        assert to_waiter_id == 1
         return OrderTransferLog(
             id=1,
             order_id=order.id,
@@ -1046,7 +1036,7 @@ def test_transfer_order_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["order_id"] == 1
     assert response.json()["from_waiter_id"] == 1
-    assert response.json()["to_waiter_id"] == 2
+    assert response.json()["to_waiter_id"] == 1
 
 
 def test_list_active_transfer_waiters_reaches_service(monkeypatch):
@@ -1152,6 +1142,10 @@ def test_transfer_all_waiter_orders_reaches_service(monkeypatch):
 
 
 def test_record_order_action_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
     async def record_action(
         _db,
         *,
@@ -1174,6 +1168,7 @@ def test_record_order_action_reaches_service(monkeypatch):
         )
 
     monkeypatch.setattr(order_service, "record_action", record_action)
+    monkeypatch.setattr(crud_order, "get", get)
     override_current_user("WAITER")
 
     try:

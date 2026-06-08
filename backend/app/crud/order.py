@@ -153,7 +153,7 @@ class CRUDOrder(CRUDBase[Order, OrderCreate, OrderUpdate]):
             .where(
                 Order.table_id == order.table_id,
                 Order.id != order.id,
-                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
             )
             .limit(1),
         )

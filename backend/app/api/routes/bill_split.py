@@ -1,7 +1,15 @@
 from fastapi import APIRouter, status
 
-from app.api.deps import DbSession, RequireOrderRole, get_or_404, raise_bad_request
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    RequireOrderRole,
+    get_or_404,
+    raise_bad_request,
+    raise_forbidden,
+)
 from app.crud import order as crud_order
+from app.models.order import Order
 from app.schemas import (
     BillSegmentRead,
     BillSplitFinalizeRequest,
@@ -10,7 +18,7 @@ from app.schemas import (
     BillSplitViewRead,
     OrderRead,
 )
-from app.services import bill_split_service
+from app.services import authorization_service, bill_split_service
 
 router = APIRouter(
     tags=["Bill split"],
@@ -18,14 +26,22 @@ router = APIRouter(
 )
 
 
+def require_order_access(current_user: CurrentUser, order: Order) -> None:
+    try:
+        authorization_service.require_order_access(user=current_user, order=order)
+    except PermissionError as exc:
+        raise_forbidden(exc)
+
+
 @router.get("/orders/{order_id}/bill-split", response_model=BillSplitViewRead)
-async def get_bill_split(order_id: int, db: DbSession):
+async def get_bill_split(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await bill_split_service.get_view(db, order=order)
     except ValueError as exc:
@@ -36,13 +52,14 @@ async def get_bill_split(order_id: int, db: DbSession):
     "/orders/{order_id}/bill-split/segments",
     response_model=BillSegmentRead,
 )
-async def create_bill_segment(order_id: int, db: DbSession):
+async def create_bill_segment(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         segment = await bill_split_service.create_segment(db, order=order)
         view = await bill_split_service.get_view(db, order=order)
@@ -60,6 +77,7 @@ async def move_bill_split_items(
     order_id: int,
     body: BillSplitMoveItemsRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -67,6 +85,7 @@ async def move_bill_split_items(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await bill_split_service.move_items(
             db,
@@ -86,6 +105,7 @@ async def split_bill_item(
     order_id: int,
     body: BillSplitSplitItemRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -93,6 +113,7 @@ async def split_bill_item(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await bill_split_service.split_item(
             db,
@@ -108,13 +129,19 @@ async def split_bill_item(
     "/orders/{order_id}/bill-split/segments/{segment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
 )
-async def delete_bill_segment(order_id: int, segment_id: int, db: DbSession):
+async def delete_bill_segment(
+    order_id: int,
+    segment_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         await bill_split_service.delete_segment(
             db,
@@ -133,6 +160,7 @@ async def finalize_bill_split(
     order_id: int,
     body: BillSplitFinalizeRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -140,6 +168,7 @@ async def finalize_bill_split(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await bill_split_service.finalize(
             db,

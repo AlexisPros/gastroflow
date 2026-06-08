@@ -31,6 +31,18 @@ class Order(Base):
         index=True,
     )
 
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+    )
+
     table_id: Mapped[int | None] = mapped_column(
         ForeignKey("restaurant_tables.id"),
         nullable=True,
@@ -178,3 +190,5 @@ class Order(Base):
         back_populates="order",
         cascade="all, delete-orphan",
     )
+
+    __mapper_args__ = {"version_id_col": version}

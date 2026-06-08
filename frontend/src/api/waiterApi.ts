@@ -23,6 +23,8 @@ export type Product = {
 
 export type Order = {
   id: number;
+  version: number;
+  idempotency_key: string | null;
   table_id: number | null;
   waiter_id: number | null;
   discount_id: number | null;
@@ -67,8 +69,11 @@ export type Discount = {
 export type Payment = {
   id: number;
   order_id: number;
+  idempotency_key: string | null;
   method: string;
   amount: string;
+  cash_received: string | null;
+  change_given: string | null;
   status: string;
   created_at: string;
 };
@@ -221,7 +226,7 @@ export async function getWaiterTables(token: string): Promise<RestaurantTable[]>
 }
 
 export async function getWaiterOrders(token: string): Promise<Order[]> {
-  return apiRequest<Order[]>("/orders?limit=500", { token });
+  return apiRequest<Order[]>("/orders/workspace", { token });
 }
 
 export async function getActiveOrderWaiters(token: string): Promise<ActiveOrderWaiter[]> {
@@ -229,7 +234,7 @@ export async function getActiveOrderWaiters(token: string): Promise<ActiveOrderW
 }
 
 export async function getWaiterOrderItems(token: string): Promise<OrderItem[]> {
-  return apiRequest<OrderItem[]>("/order-items?limit=1000", { token });
+  return apiRequest<OrderItem[]>("/orders/workspace/items", { token });
 }
 
 export async function createWaiterOrder(
@@ -239,6 +244,7 @@ export async function createWaiterOrder(
     waiter_id: number;
     guest_count: number | null;
     source: "WAITER";
+    idempotency_key?: string | null;
     items: Array<{
       product_id: number;
       quantity: number;
@@ -282,10 +288,22 @@ export async function updateWaiterOrder(
   orderId: number,
   body: Partial<Pick<Order, "guest_count">>,
 ): Promise<Order> {
-  return apiRequest<Order>(`/orders/${orderId}`, {
+  return apiRequest<Order>(`/orders/${orderId}/guest-count`, {
     method: "PATCH",
     token,
     body,
+  });
+}
+
+export async function changeWaiterOrderTable(
+  token: string,
+  orderId: number,
+  tableId: number,
+): Promise<Order> {
+  return apiRequest<Order>(`/orders/${orderId}/table`, {
+    method: "PATCH",
+    token,
+    body: { table_id: tableId },
   });
 }
 
@@ -477,6 +495,34 @@ export async function registerWaiterPayment(
   });
 }
 
+export type CloseOrderPaymentPart = {
+  method: "CARD" | "CASH";
+  amount: string;
+  cash_received?: string | null;
+  idempotency_key?: string | null;
+};
+
+export type CloseOrderWithPaymentsResponse = {
+  order: Order;
+  payments: Payment[];
+  change_due: string;
+};
+
+export async function closeWaiterOrderWithPayments(
+  token: string,
+  orderId: number,
+  payments: CloseOrderPaymentPart[],
+): Promise<CloseOrderWithPaymentsResponse> {
+  return apiRequest<CloseOrderWithPaymentsResponse>(
+    `/orders/${orderId}/close-with-payments`,
+    {
+      method: "POST",
+      token,
+      body: { payments },
+    },
+  );
+}
+
 export async function getCurrentUserClosedPayments(token: string): Promise<ClosedPayment[]> {
   return apiRequest<ClosedPayment[]>("/payments/current-user/closed", { token });
 }
@@ -484,10 +530,44 @@ export async function getCurrentUserClosedPayments(token: string): Promise<Close
 export async function toggleWaiterPaymentMethod(
   token: string,
   paymentId: number,
+  body: {
+    reason: string;
+    manager_pin?: string | null;
+  },
 ): Promise<Payment> {
   return apiRequest<Payment>(`/payments/${paymentId}/toggle-method`, {
     method: "POST",
     token,
+    body,
+  });
+}
+
+export async function getPendingQrOrders(token: string): Promise<Order[]> {
+  return apiRequest<Order[]>("/qr/orders/pending", { token });
+}
+
+export async function confirmPendingQrOrder(
+  token: string,
+  orderId: number,
+  pin: string,
+): Promise<Order> {
+  return apiRequest<Order>(`/qr/orders/${orderId}/confirm`, {
+    method: "POST",
+    token,
+    body: { pin },
+  });
+}
+
+export async function rejectPendingQrOrder(
+  token: string,
+  orderId: number,
+  pin: string,
+  reason?: string | null,
+): Promise<Order> {
+  return apiRequest<Order>(`/qr/orders/${orderId}/reject`, {
+    method: "POST",
+    token,
+    body: { pin, reason: reason ?? null },
   });
 }
 

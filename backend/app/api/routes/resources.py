@@ -130,6 +130,7 @@ from app.schemas import (
 )
 
 router = APIRouter(tags=["CRUD"])
+NO_ROLES: set[str] = set()
 
 def register_crud_routes(
     *,
@@ -302,8 +303,8 @@ register_crud_routes(
     read_schema=InvoiceRead,
     entity_name="invoice",
     tag="Invoices",
-    read_roles=SERVICE_STAFF_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    read_roles=ADMIN_MANAGER_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/kitchen-sections",
@@ -346,8 +347,8 @@ register_crud_routes(
     read_schema=OrderRead,
     entity_name="order",
     tag="Orders",
-    read_roles=SERVICE_STAFF_ROLES | KITCHEN_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    read_roles=ADMIN_MANAGER_ROLES | KITCHEN_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/order-action-logs",
@@ -358,7 +359,7 @@ register_crud_routes(
     entity_name="order_action_log",
     tag="Orders",
     read_roles=ADMIN_MANAGER_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/order-items",
@@ -368,8 +369,8 @@ register_crud_routes(
     read_schema=OrderItemRead,
     entity_name="order_item",
     tag="Orders",
-    read_roles=SERVICE_STAFF_ROLES | KITCHEN_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    read_roles=ADMIN_MANAGER_ROLES | KITCHEN_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/order-item-modifiers",
@@ -379,8 +380,8 @@ register_crud_routes(
     read_schema=OrderItemModifierRead,
     entity_name="order_item_modifier",
     tag="Orders",
-    read_roles=SERVICE_STAFF_ROLES | KITCHEN_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    read_roles=ADMIN_MANAGER_ROLES | KITCHEN_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/order-transfer-logs",
@@ -391,7 +392,7 @@ register_crud_routes(
     entity_name="order_transfer_log",
     tag="Orders",
     read_roles=ADMIN_MANAGER_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/payments",
@@ -401,8 +402,8 @@ register_crud_routes(
     read_schema=PaymentRead,
     entity_name="payment",
     tag="Payments",
-    read_roles=SERVICE_STAFF_ROLES,
-    write_roles=SERVICE_STAFF_ROLES,
+    read_roles=ADMIN_MANAGER_ROLES,
+    write_roles=NO_ROLES,
 )
 register_crud_routes(
     path="/products",

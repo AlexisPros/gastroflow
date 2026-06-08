@@ -52,6 +52,7 @@ def make_restaurant_table() -> RestaurantTable:
 def make_pending_qr_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=None,
         discount_id=None,

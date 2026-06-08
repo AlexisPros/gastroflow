@@ -2,13 +2,24 @@ from decimal import Decimal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DbSession, RequireOrderRole, get_or_404, raise_bad_request
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    RequireOrderRole,
+    get_or_404,
+    raise_bad_request,
+    raise_forbidden,
+)
 from app.core.websocket_manager import websocket_manager
 from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
+from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.services import (
     billing_service,
+    authorization_service,
     discount_service,
     order_service,
 )
@@ -42,6 +53,7 @@ class CreateOrderWithItemsRequest(BaseModel):
     waiter_id: int | None = None
     guest_count: int | None = None
     source: str = "WAITER"
+    idempotency_key: str | None = Field(default=None, max_length=100)
     items: list[OrderItemInput]
 
 
@@ -67,6 +79,10 @@ class VoidOrderItemRequest(BaseModel):
 
 class ChangeOrderTableRequest(BaseModel):
     table_id: int | None = None
+
+
+class ChangeGuestCountRequest(BaseModel):
+    guest_count: int = Field(gt=0)
 
 
 class AddTipRequest(BaseModel):
@@ -114,18 +130,45 @@ class SplitItemRequest(BaseModel):
     quantity: int
 
 
+def require_order_access(current_user: CurrentUser, order: Order) -> None:
+    try:
+        authorization_service.require_order_access(user=current_user, order=order)
+    except PermissionError as exc:
+        raise_forbidden(exc)
+
+
+@router.get("/orders/workspace", response_model=list[OrderRead])
+async def list_workspace_orders(db: DbSession, current_user: CurrentUser):
+    query = select(Order).order_by(Order.created_at.desc())
+    if current_user.role == "WAITER":
+        query = query.where(Order.waiter_id == current_user.id)
+    result = await db.execute(query)
+    return list(result.scalars().all())
+
+
+@router.get("/orders/workspace/items", response_model=list[OrderItemRead])
+async def list_workspace_order_items(db: DbSession, current_user: CurrentUser):
+    query = select(OrderItem).join(Order, Order.id == OrderItem.order_id)
+    if current_user.role == "WAITER":
+        query = query.where(Order.waiter_id == current_user.id)
+    result = await db.execute(query.order_by(OrderItem.order_id, OrderItem.position))
+    return list(result.scalars().all())
+
+
 @router.post("/orders/with-items", response_model=OrderRead)
 async def create_order_with_items(
     body: CreateOrderWithItemsRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     try:
         return await order_service.create_order_with_items(
             db,
             table_id=body.table_id,
-            waiter_id=body.waiter_id,
+            waiter_id=current_user.id,
             guest_count=body.guest_count,
-            source=body.source,
+            source="WAITER",
+            idempotency_key=body.idempotency_key,
             items=[
                 OrderItemRequest(
                     product_id=item.product_id,
@@ -147,6 +190,7 @@ async def add_items_to_order(
     order_id: int,
     body: AddItemsToOrderRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -154,6 +198,7 @@ async def add_items_to_order(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await order_service.add_items_to_order(
             db,
@@ -179,6 +224,7 @@ async def cancel_order(
     order_id: int,
     body: CancelOrderRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -186,6 +232,7 @@ async def cancel_order(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await order_service.cancel_order_with_manager_pin(
             db,
@@ -223,6 +270,7 @@ async def void_order_item(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await order_service.void_order_item(
             db,
@@ -236,13 +284,14 @@ async def void_order_item(
 
 
 @router.post("/orders/{order_id}/recalculate", response_model=OrderRead)
-async def recalculate_order_total(order_id: int, db: DbSession):
+async def recalculate_order_total(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     return await order_service.recalculate_total(db, order=order)
 
 
@@ -251,6 +300,7 @@ async def change_order_table(
     order_id: int,
     body: ChangeOrderTableRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -258,17 +308,57 @@ async def change_order_table(
         id=order_id,
         entity_name="order",
     )
-    return await crud_order.change_table(db, db_obj=order, table_id=body.table_id)
+    require_order_access(current_user, order)
+    try:
+        return await order_service.change_order_table(
+            db,
+            order=order,
+            table_id=body.table_id,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
 
 
-@router.patch("/orders/{order_id}/tip", response_model=OrderRead)
-async def add_order_tip(order_id: int, body: AddTipRequest, db: DbSession):
+@router.patch("/orders/{order_id}/guest-count", response_model=OrderRead)
+async def change_order_guest_count(
+    order_id: int,
+    body: ChangeGuestCountRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
+    try:
+        return await order_service.change_guest_count(
+            db,
+            order=order,
+            guest_count=body.guest_count,
+        )
+    except ValueError as exc:
+        raise_bad_request(exc)
+
+
+@router.patch("/orders/{order_id}/tip", response_model=OrderRead)
+async def add_order_tip(
+    order_id: int,
+    body: AddTipRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=order_id,
+        entity_name="order",
+    )
+    require_order_access(current_user, order)
+    if order.status not in {"OPEN", "IN_PROGRESS"}:
+        raise_bad_request(ValueError("Tip can only be changed for an active order."))
     try:
         return await crud_order.add_tip(db, db_obj=order, tip_amount=body.tip_amount)
     except ValueError as exc:
@@ -276,25 +366,10 @@ async def add_order_tip(order_id: int, body: AddTipRequest, db: DbSession):
 
 
 @router.post("/orders/{order_id}/close", response_model=OrderRead)
-async def close_order(order_id: int, db: DbSession):
-    order = await get_or_404(
-        crud_obj=crud_order,
-        db=db,
-        id=order_id,
-        entity_name="order",
+async def close_order(order_id: int, db: DbSession, current_user: CurrentUser):
+    raise_bad_request(
+        ValueError("Use /orders/{order_id}/close-with-payments to close an order."),
     )
-    order = await crud_order.close(db, db_obj=order)
-    await websocket_manager.broadcast_many(
-        channels=["waiters", "floor", "managers"],
-        event="order_closed",
-        data={
-            "order_id": order.id,
-            "table_id": order.table_id,
-            "status": order.status,
-            "table_status": "FREE",
-        },
-    )
-    return order
 
 
 @router.get("/orders/transfer/waiters", response_model=list[ActiveTransferWaiterRead])
@@ -347,6 +422,7 @@ async def transfer_order(
     order_id: int,
     body: TransferOrderRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -358,7 +434,7 @@ async def transfer_order(
         return await order_service.transfer_order(
             db,
             order=order,
-            to_waiter_id=body.to_waiter_id,
+            to_waiter_id=current_user.id,
         )
     except ValueError as exc:
         raise_bad_request(exc)
@@ -369,7 +445,17 @@ async def record_order_action(
     order_id: int,
     body: RecordOrderActionRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
+    if body.user_id != current_user.id:
+        raise_forbidden(PermissionError("Action log user must be the current user."))
+    order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=order_id,
+        entity_name="order",
+    )
+    require_order_access(current_user, order)
     return await order_service.record_action(
         db,
         order_id=order_id,
@@ -384,6 +470,7 @@ async def apply_order_discount(
     order_id: int,
     body: ApplyDiscountRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     order = await get_or_404(
         crud_obj=crud_order,
@@ -391,6 +478,7 @@ async def apply_order_discount(
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     try:
         return await discount_service.apply_discount(
             db,
@@ -402,13 +490,14 @@ async def apply_order_discount(
 
 
 @router.delete("/orders/{order_id}/discount", response_model=OrderRead)
-async def remove_order_discount(order_id: int, db: DbSession):
+async def remove_order_discount(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     return await discount_service.remove_discount(db, order=order)
 
 
@@ -417,6 +506,7 @@ async def split_order(
     source_order_id: int,
     body: SplitOrderRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     source_order = await get_or_404(
         crud_obj=crud_order,
@@ -424,6 +514,7 @@ async def split_order(
         id=source_order_id,
         entity_name="source order",
     )
+    require_order_access(current_user, source_order)
     try:
         return await billing_service.split_order(
             db,
@@ -439,6 +530,7 @@ async def move_items_between_orders(
     source_order_id: int,
     body: MoveItemsRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     if source_order_id == body.target_order_id:
         raise_bad_request(ValueError("Source and target order must be different."))
@@ -455,6 +547,8 @@ async def move_items_between_orders(
         id=body.target_order_id,
         entity_name="target order",
     )
+    require_order_access(current_user, source_order)
+    require_order_access(current_user, target_order)
     try:
         source_order, target_order = await billing_service.move_items_to_order(
             db,
@@ -472,6 +566,7 @@ async def split_order_item_quantity(
     order_item_id: int,
     body: SplitItemRequest,
     db: DbSession,
+    current_user: CurrentUser,
 ):
     source_item = await get_or_404(
         crud_obj=crud_order_item,
@@ -485,6 +580,14 @@ async def split_order_item_quantity(
         id=body.target_order_id,
         entity_name="target order",
     )
+    source_order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=source_item.order_id,
+        entity_name="source order",
+    )
+    require_order_access(current_user, source_order)
+    require_order_access(current_user, target_order)
     try:
         return await billing_service.split_item_quantity(
             db,
@@ -502,6 +605,13 @@ async def get_order_merge_candidates(
     db: DbSession,
     current_user: CurrentUser,
 ):
+    target_order = await get_or_404(
+        crud_obj=crud_order,
+        db=db,
+        id=target_order_id,
+        entity_name="target order",
+    )
+    require_order_access(current_user, target_order)
     is_manager = current_user.role in {"ADMIN", "MANAGER"}
     return await crud_order.get_merge_candidates(
         db,
@@ -530,6 +640,8 @@ async def merge_orders(
         id=body.source_order_id,
         entity_name="source order",
     )
+    require_order_access(current_user, target_order)
+    require_order_access(current_user, source_order)
 
     try:
         return await billing_service.merge_orders(

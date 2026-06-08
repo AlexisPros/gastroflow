@@ -1,9 +1,16 @@
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
-from app.api.deps import DbSession, RequireFiscalRole, get_or_404
+from app.api.deps import (
+    CurrentUser,
+    DbSession,
+    RequireFiscalRole,
+    get_or_404,
+    raise_forbidden,
+)
 from app.crud import order as crud_order
-from app.services import fiscal_service, mock_printer_service
+from app.models.order import Order
+from app.services import authorization_service, fiscal_service, mock_printer_service
 
 router = APIRouter(
     tags=["Fiscal mock"],
@@ -11,17 +18,25 @@ router = APIRouter(
 )
 
 
+def require_order_access(current_user: CurrentUser, order: Order) -> None:
+    try:
+        authorization_service.require_order_access(user=current_user, order=order)
+    except PermissionError as exc:
+        raise_forbidden(exc)
+
+
 @router.get(
     "/orders/{order_id}/receipt/text",
     response_class=PlainTextResponse,
 )
-async def generate_text_receipt(order_id: int, db: DbSession):
+async def generate_text_receipt(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     return await fiscal_service.generate_text_receipt(db, order=order)
 
 
@@ -29,24 +44,26 @@ async def generate_text_receipt(order_id: int, db: DbSession):
     "/orders/{order_id}/receipt/html",
     response_class=HTMLResponse,
 )
-async def generate_html_receipt(order_id: int, db: DbSession):
+async def generate_html_receipt(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     return await fiscal_service.generate_html_receipt(db, order=order)
 
 
 @router.post("/orders/{order_id}/receipt/pdf")
-async def generate_receipt_pdf(order_id: int, db: DbSession):
+async def generate_receipt_pdf(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     receipt_content = await fiscal_service.generate_text_receipt(db, order=order)
     pdf_path = mock_printer_service.print_receipt_to_pdf(
         order_id=order.id,
@@ -63,24 +80,26 @@ async def generate_receipt_pdf(order_id: int, db: DbSession):
     "/orders/{order_id}/guest-check/text",
     response_class=PlainTextResponse,
 )
-async def generate_guest_check_text(order_id: int, db: DbSession):
+async def generate_guest_check_text(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     return await fiscal_service.generate_guest_check_text(db, order=order)
 
 
 @router.post("/orders/{order_id}/guest-check/pdf")
-async def generate_guest_check_pdf(order_id: int, db: DbSession):
+async def generate_guest_check_pdf(order_id: int, db: DbSession, current_user: CurrentUser):
     order = await get_or_404(
         crud_obj=crud_order,
         db=db,
         id=order_id,
         entity_name="order",
     )
+    require_order_access(current_user, order)
     receipt_content = await fiscal_service.generate_guest_check_text(db, order=order)
     pdf_path = mock_printer_service.print_guest_check_to_pdf(
         order_id=order.id,
