@@ -69,10 +69,10 @@ import {
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
-import { connectLiveUpdates } from "../ws/liveUpdates";
-
+import { TouchInput, useTouchKeyboard } from "../components/TouchKeyboardProvider";
 type LoadingState = "idle" | "loading" | "ready" | "error";
 type WaiterMode = "DASHBOARD" | "TABLE_PICKER" | "ORDER_BUILDER" | "CHECKOUT" | "ORDER_DETAILS";
+type TablePickerPurpose = "CREATE" | "MOVE";
 type MenuDepartment = "KITCHEN" | "BAR";
 type TicketSelection = { type: "existing"; id: number } | { type: "cart"; id: string };
 
@@ -113,6 +113,7 @@ export function WaiterPage() {
   const [productModifiers, setProductModifiers] = useState<ProductModifier[]>([]);
   const [discounts, setDiscounts] = useState<Discount[]>([]);
   const [mode, setMode] = useState<WaiterMode>("DASHBOARD");
+  const [tablePickerPurpose, setTablePickerPurpose] = useState<TablePickerPurpose>("CREATE");
   const [selectedTable, setSelectedTable] = useState<RestaurantTable | null>(null);
   const [selectedOrderId, setSelectedOrderId] = useState<number | null>(null);
   const [guestCount, setGuestCount] = useState(2);
@@ -120,7 +121,6 @@ export function WaiterPage() {
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "ALL">("ALL");
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [selectedTicketLine, setSelectedTicketLine] = useState<TicketSelection | null>(null);
-  const [tipInput, setTipInput] = useState("");
   const [isFunctionsMenuOpen, setIsFunctionsMenuOpen] = useState(false);
   const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
   const [isBillSplitOpen, setIsBillSplitOpen] = useState(false);
@@ -147,7 +147,7 @@ export function WaiterPage() {
   const [mapScale, setMapScale] = useState(0.7);
   const waiterMapRef = useRef<HTMLDivElement | null>(null);
   const createOrderIdempotencyKey = useRef<string | null>(null);
-  const liveReloadTimerRef = useRef<number | null>(null);
+  const initialWorkspaceLoadRef = useRef(false);
   const floorContentSize = useMemo(() => {
     if (!floorPlan) {
       return { width: 0, height: 0 };
@@ -255,56 +255,34 @@ export function WaiterPage() {
     }
   }, [token, selectedFloorPlanId]);
 
-  useEffect(() => {
-    void loadFloorPlansList();
-  }, [loadFloorPlansList]);
+  const loadSelectedFloorPlan = useCallback(async (floorPlanId: number) => {
+    if (!token) {
+      return;
+    }
+    try {
+      const floorView = await getFloorPlanView(token, floorPlanId);
+      setFloorPlan(floorView.floorPlan);
+      setFloorTables(floorView.tables);
+      setFloorDecorations(floorView.decorations);
+      setSelectedFloorPlanId(floorView.floorPlan.id);
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Could not load floor plan.");
+    }
+  }, [token]);
 
   useEffect(() => {
-    if (selectedFloorPlanId !== null) {
-      void loadWaiterData();
-    } else if (floorPlans.length === 0) {
-      void loadWaiterData();
+    if (!token || initialWorkspaceLoadRef.current) {
+      return;
     }
-  }, [loadWaiterData, selectedFloorPlanId, floorPlans.length]);
+    initialWorkspaceLoadRef.current = true;
+    void loadFloorPlansList();
+    void loadWaiterData();
+  }, [loadFloorPlansList, loadWaiterData, token]);
 
   useEffect(() => {
     document.body.classList.toggle("pos-fullscreen", isFullscreenMode(mode));
     return () => document.body.classList.remove("pos-fullscreen");
   }, [mode]);
-
-  useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    const scheduleReload = () => {
-      if (liveReloadTimerRef.current !== null) {
-        window.clearTimeout(liveReloadTimerRef.current);
-      }
-      liveReloadTimerRef.current = window.setTimeout(() => {
-        liveReloadTimerRef.current = null;
-        void loadWaiterData();
-      }, 120);
-    };
-
-    const disconnect = connectLiveUpdates({
-      channel: "waiters",
-      token,
-      onMessage: (message) => {
-        if (message.event !== "connected") {
-          scheduleReload();
-        }
-      },
-    });
-
-    return () => {
-      disconnect();
-      if (liveReloadTimerRef.current !== null) {
-        window.clearTimeout(liveReloadTimerRef.current);
-        liveReloadTimerRef.current = null;
-      }
-    };
-  }, [loadWaiterData, token]);
 
   const openOrders = useMemo(() => {
     const activeOrders = orders.filter(isOpenOrder);
@@ -512,6 +490,7 @@ export function WaiterPage() {
               type="button"
               className="pos-action-button primary"
               onClick={() => {
+                setTablePickerPurpose("CREATE");
                 setMode("TABLE_PICKER");
                 setSelectedTable(null);
                 setNotice(null);
@@ -606,10 +585,27 @@ export function WaiterPage() {
           <main className="waiter-panel waiter-map-panel">
             <div className="panel-heading" style={{ alignItems: "center" }}>
               <div>
-                <span className="eyebrow">Krok 1</span>
-                <h1>Wybierz wolny stolik</h1>
+                <span className="eyebrow">
+                  {tablePickerPurpose === "MOVE" ? "Przeniesienie rachunku" : "Krok 1"}
+                </span>
+                <h1>
+                  {tablePickerPurpose === "MOVE"
+                    ? "Wybierz nowy stolik"
+                    : "Wybierz wolny stolik"}
+                </h1>
               </div>
-              <button type="button" className="ghost-button" onClick={resetToDashboard}>
+              <button
+                type="button"
+                className="ghost-button"
+                onClick={() => {
+                  if (tablePickerPurpose === "MOVE") {
+                    setMode("ORDER_BUILDER");
+                    setError(null);
+                  } else {
+                    resetToDashboard();
+                  }
+                }}
+              >
                 Wstecz
               </button>
             </div>
@@ -621,7 +617,9 @@ export function WaiterPage() {
                     key={plan.id}
                     type="button"
                     className={selectedFloorPlanId === plan.id ? "active" : ""}
-                    onClick={() => setSelectedFloorPlanId(plan.id)}
+                    onClick={() => {
+                      void loadSelectedFloorPlan(plan.id);
+                    }}
                   >
                     {plan.name}
                   </button>
@@ -700,7 +698,11 @@ export function WaiterPage() {
                       disabled={item.table?.status !== "FREE"}
                       onClick={() => {
                         if (item.table?.status === "FREE") {
-                          void selectTableForNewOrder(item.table);
+                          if (tablePickerPurpose === "MOVE") {
+                            void moveOrderToAnotherTable(item.table);
+                          } else {
+                            void selectTableForNewOrder(item.table);
+                          }
                         }
                       }}
                     >
@@ -859,7 +861,9 @@ export function WaiterPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      void moveOrderToAnotherTable();
+                      setIsFunctionsMenuOpen(false);
+                      setTablePickerPurpose("MOVE");
+                      setMode("TABLE_PICKER");
                     }}
                     disabled={!selectedOrder || isSubmitting}
                   >
@@ -1048,30 +1052,20 @@ export function WaiterPage() {
                   Clear
                 </button>
               </div>
-              <div className="tip-manual-row">
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={tipInput}
-                  placeholder="Kwota napiwku"
-                  onChange={(event) => setTipInput(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="ghost-button"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    void applyTipAmount(tipInput);
-                  }}
-                >
-                  Add tip
-                </button>
-              </div>
+              <button
+                type="button"
+                className="custom-tip-button"
+                disabled={isSubmitting}
+                onClick={() => {
+                  void addCustomTip();
+                }}
+              >
+                Inna kwota
+              </button>
             </section>
 
             <button type="button" className="ghost-button" onClick={() => setMode("ORDER_BUILDER")}>
-              Back
+              Wróć
             </button>
           </aside>
         </div>
@@ -1451,7 +1445,6 @@ export function WaiterPage() {
     setSelectedBillSplitItemIds([]);
     setIsFunctionsMenuOpen(false);
     setIsProductSearchOpen(false);
-    setTipInput("");
     setError(null);
   }
 
@@ -1463,7 +1456,6 @@ export function WaiterPage() {
     setError(null);
     setNotice(null);
     setSelectedTicketLine(null);
-    setTipInput(Number(selectedOrder.tip_amount) > 0 ? selectedOrder.tip_amount : "");
     setMode("CHECKOUT");
   }
 
@@ -1474,6 +1466,31 @@ export function WaiterPage() {
   function replaceOrder(updatedOrder: Order) {
     setOrders((items) =>
       items.map((order) => (order.id === updatedOrder.id ? updatedOrder : order)),
+    );
+  }
+
+  function upsertOrder(updatedOrder: Order) {
+    setOrders((items) => {
+      const exists = items.some((order) => order.id === updatedOrder.id);
+      return exists
+        ? items.map((order) => (order.id === updatedOrder.id ? updatedOrder : order))
+        : [...items, updatedOrder];
+    });
+  }
+
+  function updateLocalTable(
+    tableId: number | null,
+    patch: Partial<RestaurantTable>,
+  ) {
+    if (tableId === null) {
+      return;
+    }
+    setFloorTables((items) =>
+      items.map((item) =>
+        item.table_id === tableId && item.table
+          ? { ...item, table: { ...item.table, ...patch } }
+          : item,
+      ),
     );
   }
 
@@ -1496,7 +1513,6 @@ export function WaiterPage() {
           ? "Discount removed."
           : "Discount applied.",
       );
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not update discount.");
     } finally {
@@ -1517,6 +1533,21 @@ export function WaiterPage() {
     const tipBase = getTipBaseAmount(selectedOrder);
     const tipAmount = (tipBase * percent) / 100;
     await applyTipAmount(tipAmount.toFixed(2));
+  }
+
+  async function addCustomTip() {
+    const amount = await prompt({
+      title: "Inna kwota napiwku",
+      label: "Wpisz kwotę napiwku",
+      defaultValue: "",
+      keyboardMode: "decimal",
+      confirmText: "Potwierdź",
+      cancelText: "Anuluj",
+    });
+    if (amount === null) {
+      return;
+    }
+    await applyTipAmount(amount);
   }
 
   function isTipPercentSelected(percent: number): boolean {
@@ -1558,9 +1589,7 @@ export function WaiterPage() {
         amount.toFixed(2),
       );
       replaceOrder(updatedOrder);
-      setTipInput(amount > 0 ? amount.toFixed(2) : "");
       setNotice(amount > 0 ? "Tip added." : "Tip removed.");
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not update tip.");
     } finally {
@@ -1592,7 +1621,7 @@ export function WaiterPage() {
         title: "Kwota otrzymana od gościa",
         label: `Do zapłaty: ${formatMoney(total)}`,
         defaultValue: total.toFixed(2),
-        type: "number",
+        keyboardMode: "decimal",
       });
       if (cashReceived === null) {
         return;
@@ -1612,7 +1641,7 @@ export function WaiterPage() {
       const cardAmountInput = await prompt({
         title: "Płatność mieszana",
         label: `Podaj kwotę płaconą kartą. Razem: ${formatMoney(total)}`,
-        type: "number",
+        keyboardMode: "decimal",
       });
       if (cardAmountInput === null) {
         return;
@@ -1627,7 +1656,7 @@ export function WaiterPage() {
         title: "Gotówka dla płatności mieszanej",
         label: `Pozostało gotówką: ${formatMoney(cashAmount)}`,
         defaultValue: cashAmount.toFixed(2),
-        type: "number",
+        keyboardMode: "decimal",
       });
       if (cashReceivedInput === null) {
         return;
@@ -1675,8 +1704,10 @@ export function WaiterPage() {
           ? `Rachunek #${selectedOrder.id} zamknięty. Reszta: ${formatMoney(Number(result.change_due))}.`
           : `Rachunek #${selectedOrder.id} zamknięty.`,
       );
+      setOrders((items) => items.filter((order) => order.id !== selectedOrder.id));
+      setOrderItems((items) => items.filter((item) => item.order_id !== selectedOrder.id));
+      updateLocalTable(selectedOrder.table_id, { status: "FREE", current_guests: null });
       resetToDashboard();
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not close order.");
     } finally {
@@ -1690,7 +1721,7 @@ export function WaiterPage() {
       return "";
     }
 
-    const nip = await prompt({ title: "Wpisz NIP" });
+    const nip = await prompt({ title: "Wpisz NIP", keyboardMode: "numeric" });
     if (nip === null) {
       return null;
     }
@@ -1757,6 +1788,11 @@ export function WaiterPage() {
       if (!selectedOrder) {
         createOrderIdempotencyKey.current = null;
       }
+      upsertOrder(order);
+      updateLocalTable(order.table_id, {
+        status: "OCCUPIED",
+        current_guests: order.guest_count,
+      });
       setNotice(`Order #${order.id} sent to production.`);
       setCart([]);
       setSelectedTicketLine(null);
@@ -1765,7 +1801,6 @@ export function WaiterPage() {
       } else {
         setSelectedOrderId(order.id);
       }
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not create order.");
     } finally {
@@ -1887,13 +1922,19 @@ export function WaiterPage() {
     setError(null);
     try {
       if (action === "CONFIRM") {
-        await confirmPendingQrOrder(token, order.id, pin);
+        const updatedOrder = await confirmPendingQrOrder(token, order.id, pin);
+        upsertOrder(updatedOrder);
+        updateLocalTable(updatedOrder.table_id, {
+          status: "OCCUPIED",
+          current_guests: updatedOrder.guest_count,
+        });
         setNotice(`Zamówienie QR #${order.id} zostało przyjęte.`);
       } else {
-        await rejectPendingQrOrder(token, order.id, pin, reason);
+        const updatedOrder = await rejectPendingQrOrder(token, order.id, pin, reason);
+        updateLocalTable(updatedOrder.table_id, { status: "FREE", current_guests: null });
         setNotice(`Zamówienie QR #${order.id} zostało odrzucone.`);
       }
-      await loadWaiterData();
+      setPendingQrOrders((items) => items.filter((item) => item.id !== order.id));
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się obsłużyć zamówienia QR.");
     } finally {
@@ -1901,24 +1942,18 @@ export function WaiterPage() {
     }
   }
 
-  async function moveOrderToAnotherTable() {
-    if (!token || !selectedOrder) {
+  async function moveOrderToAnotherTable(target: RestaurantTable) {
+    if (!token || !selectedOrder || target.status !== "FREE") {
       return;
     }
 
-    const freeTables = floorTables
-      .map((item) => item.table)
-      .filter((table): table is RestaurantTable => Boolean(table && table.status === "FREE"));
-    const targetNumber = await prompt({
+    const accepted = await confirm({
       title: "Przenieś rachunek",
-      label: `Wolne stoliki: ${freeTables.map((table) => table.table_number).join(", ") || "brak"}`,
+      message: `Przenieść rachunek #${formatOrderNumber(selectedOrder)} na stolik ${target.table_number}?`,
+      confirmText: "Przenieś",
+      cancelText: "Anuluj",
     });
-    if (targetNumber === null) {
-      return;
-    }
-    const target = freeTables.find((table) => table.table_number === targetNumber.trim());
-    if (!target) {
-      setError("Wybierz numer wolnego stolika z listy.");
+    if (!accepted) {
       return;
     }
 
@@ -1926,11 +1961,17 @@ export function WaiterPage() {
     setIsSubmitting(true);
     setError(null);
     try {
+      const previousTableId = selectedOrder.table_id;
       const updatedOrder = await changeWaiterOrderTable(token, selectedOrder.id, target.id);
       replaceOrder(updatedOrder);
+      updateLocalTable(previousTableId, { status: "FREE", current_guests: null });
+      updateLocalTable(target.id, {
+        status: "OCCUPIED",
+        current_guests: updatedOrder.guest_count,
+      });
       setSelectedTable(target);
       setNotice(`Rachunek przeniesiono na stolik ${target.table_number}.`);
-      await loadWaiterData();
+      setMode("ORDER_BUILDER");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się przenieść rachunku.");
     } finally {
@@ -2000,8 +2041,7 @@ export function WaiterPage() {
     try {
       const logs = await transferAllWaiterOrders(token, waiter.id);
       closeTransferFlow();
-      setNotice(`Przejęto ${logs.length} rachunków.`);
-      await loadWaiterData();
+      setNotice(`Przejęto ${logs.length} rachunków. Naciśnij Odśwież, aby pobrać listę.`);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not transfer orders.");
     } finally {
@@ -2028,9 +2068,9 @@ export function WaiterPage() {
     setError(null);
     try {
       await transferWaiterOrderToCurrent(token, order.id, user.id);
+      upsertOrder({ ...order, waiter_id: user.id });
       closeTransferFlow();
       setNotice(`Przejęto rachunek #${formatOrderNumber(order)}.`);
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not transfer order.");
     } finally {
@@ -2042,10 +2082,11 @@ export function WaiterPage() {
     if (!token || !selectedOrder || !selectedMergeCandidateId) return;
     try {
       setIsMerging(true);
-      await mergeWaiterOrder(token, selectedOrder.id, selectedMergeCandidateId);
+      const mergedOrder = await mergeWaiterOrder(token, selectedOrder.id, selectedMergeCandidateId);
+      replaceOrder(mergedOrder);
+      setOrders((items) => items.filter((order) => order.id !== selectedMergeCandidateId));
       setIsMergeModalOpen(false);
       setNotice("Rachunki zostały połączone!");
-      await loadWaiterData();
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(`Błąd: ${err.message}`);
@@ -2090,15 +2131,18 @@ export function WaiterPage() {
       if (managerPin === null) {
         return;
       }
-      await voidWaiterOrderItem(
+      const updatedOrder = await voidWaiterOrderItem(
         token,
         selectedOrder.id,
         selectedTicketLine.id,
         managerPin || undefined,
       );
+      replaceOrder(updatedOrder);
+      setOrderItems((items) =>
+        items.filter((item) => item.id !== selectedTicketLine.id),
+      );
       setSelectedTicketLine(null);
       setNotice("Selected item was voided.");
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not void selected item.");
     } finally {
@@ -2209,6 +2253,7 @@ export function WaiterPage() {
         const rawQuantity = await prompt({
           title: `Ile przenieść: ${item.product_name}? Dostępne: ${formatQuantity(item.remaining_quantity)}`,
           defaultValue: "1",
+          keyboardMode: "decimal",
         });
         if (rawQuantity === null) {
           return;
@@ -2281,6 +2326,7 @@ export function WaiterPage() {
       const rawGuestCount = await prompt({
         title: `Liczba gości dla ${segment.name}`,
         defaultValue: String(selectedOrder.guest_count ?? guestCount),
+        type: "number",
       });
       if (rawGuestCount === null) {
         return;
@@ -2314,7 +2360,10 @@ export function WaiterPage() {
       setIsBillSplitOpen(false);
       setBillSplitView(null);
       setSelectedBillSplitItemIds([]);
-      await loadWaiterData();
+      setOrders((items) => [
+        ...items.filter((order) => !splitOrders.some((splitOrder) => splitOrder.id === order.id)),
+        ...splitOrders,
+      ]);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not finalize bill split.");
     } finally {
@@ -2326,6 +2375,7 @@ export function WaiterPage() {
     const nextGuestCount = await prompt({
       title: "Liczba gości",
       defaultValue: String(selectedOrder?.guest_count ?? guestCount),
+      type: "number",
     });
     if (nextGuestCount === null) {
       return;
@@ -2353,7 +2403,6 @@ export function WaiterPage() {
       });
       replaceOrder(updatedOrder);
       setNotice("Guest count updated.");
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not update guest count.");
     } finally {
@@ -2387,9 +2436,11 @@ export function WaiterPage() {
     setError(null);
     try {
       await cancelWaiterOrder(token, selectedOrder.id, managerPin);
+      setOrders((items) => items.filter((order) => order.id !== selectedOrder.id));
+      setOrderItems((items) => items.filter((item) => item.order_id !== selectedOrder.id));
+      updateLocalTable(selectedOrder.table_id, { status: "FREE", current_guests: null });
       setNotice(`Order #${selectedOrder.id} cancelled.`);
       resetToDashboard();
-      await loadWaiterData();
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not delete order.");
     } finally {
@@ -3077,9 +3128,10 @@ function ProductOptionsModal({
 
         <label className="compact-field">
           Uwagi
-          <input
+          <TouchInput
+            keyboardLabel="Uwagi do pozycji"
             value={notes}
-            onChange={(event) => setNotes(event.target.value)}
+            onValueChange={setNotes}
             placeholder="np. bez cebuli"
           />
         </label>
@@ -3141,6 +3193,18 @@ function ProductSearchModal({
   onClose: () => void;
   onSelect: (product: Product) => void;
 }) {
+  const { closeKeyboard } = useTouchKeyboard();
+
+  const closeSearch = () => {
+    closeKeyboard();
+    onClose();
+  };
+
+  const selectProduct = (product: Product) => {
+    closeKeyboard();
+    onSelect(product);
+  };
+
   return (
     <div className="modal-backdrop">
       <div className="product-options-modal product-search-modal">
@@ -3149,18 +3213,19 @@ function ProductSearchModal({
             <span className="eyebrow">Wyszukiwanie</span>
             <h2>Szukaj pozycji</h2>
           </div>
-          <button type="button" className="ghost-button" onClick={onClose}>
+          <button type="button" className="ghost-button" onClick={closeSearch}>
             Zamknij
           </button>
         </div>
 
         <label className="compact-field">
           Nazwa produktu
-          <input
+          <TouchInput
             autoFocus
+            keyboardLabel="Nazwa produktu"
             value={query}
             placeholder="Zacznij pisać..."
-            onChange={(event) => onQueryChange(event.target.value)}
+            onValueChange={onQueryChange}
           />
         </label>
 
@@ -3169,7 +3234,7 @@ function ProductSearchModal({
             <button
               key={product.id}
               type="button"
-              onClick={() => onSelect(product)}
+              onClick={() => selectProduct(product)}
             >
               <span>
                 <strong>{product.name}</strong>

@@ -11,6 +11,7 @@ from app.core.security import (
     decode_access_token,
     get_password_hash,
     get_pin_hash,
+    get_pin_lookup,
     verify_password,
     verify_pin,
 )
@@ -32,6 +33,7 @@ def make_user(role: str) -> User:
         email="test@example.com",
         password_hash=get_password_hash("secret-password"),
         pin_hash=get_pin_hash("1234"),
+        pin_lookup=get_pin_lookup("1234"),
         role=role,
         is_active=True,
         created_at=datetime.now(timezone.utc),
@@ -242,19 +244,15 @@ def test_token_login_returns_access_token_for_swagger(monkeypatch):
 def test_pin_login_returns_access_token(monkeypatch):
     test_user = make_user("WAITER")
 
-    async def get(_db, id: int):
-        if id == test_user.id:
-            return test_user
-        return None
+    async def get_active_by_pin_lookup(_db, *, pin_lookup: str):
+        assert pin_lookup == get_pin_lookup("1234")
+        return test_user
 
-    monkeypatch.setattr(crud_user, "get", get)
+    monkeypatch.setattr(crud_user, "get_active_by_pin_lookup", get_active_by_pin_lookup)
 
     response = client.post(
         "/api/v1/auth/pin-login",
-        json={
-            "user_id": test_user.id,
-            "pin": "1234",
-        },
+        json={"pin": "1234"},
     )
 
     assert response.status_code == 200
@@ -270,19 +268,19 @@ def test_pin_login_returns_access_token(monkeypatch):
 def test_pin_login_rejects_wrong_pin(monkeypatch):
     test_user = make_user("WAITER")
 
-    async def get(_db, id: int):
-        if id == test_user.id:
-            return test_user
+    async def get_active_by_pin_lookup(_db, *, pin_lookup: str):
+        assert pin_lookup == get_pin_lookup("9999")
         return None
 
-    monkeypatch.setattr(crud_user, "get", get)
+    async def get_active_without_pin_lookup(_db):
+        return []
+
+    monkeypatch.setattr(crud_user, "get_active_by_pin_lookup", get_active_by_pin_lookup)
+    monkeypatch.setattr(crud_user, "get_active_without_pin_lookup", get_active_without_pin_lookup)
 
     response = client.post(
         "/api/v1/auth/pin-login",
-        json={
-            "user_id": test_user.id,
-            "pin": "9999",
-        },
+        json={"pin": "9999"},
     )
 
     assert response.status_code == 401

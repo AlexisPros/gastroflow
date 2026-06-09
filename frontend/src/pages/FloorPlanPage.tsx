@@ -31,8 +31,7 @@ import {
 } from "../api/floorPlanApi";
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
-import { connectLiveUpdates } from "../ws/liveUpdates";
-
+import { TouchInput } from "../components/TouchKeyboardProvider";
 type LoadingState = "idle" | "loading" | "ready" | "error";
 type EditorTool =
   | "SELECT"
@@ -53,6 +52,10 @@ type Interaction = {
   startPosition: FloorPlanTablePositionInput;
   handle?: ResizeHandle;
 } | null;
+type PendingMapChange = {
+  selection: NonNullable<Selection>;
+  position: FloorPlanTablePositionInput;
+};
 
 const statusLabels: Record<string, string> = {
   FREE: "Free",
@@ -80,12 +83,13 @@ export function FloorPlanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingMapChanges, setPendingMapChanges] = useState<Record<string, PendingMapChange>>({});
   const [mapScale, setMapScale] = useState(0.7);
   const tablesRef = useRef<FloorTableView[]>([]);
   const decorationsRef = useRef<FloorPlanDecoration[]>([]);
   const pendingPositionRef = useRef<FloorPlanTablePositionInput | null>(null);
   const dragFrameRef = useRef<number | null>(null);
-  const liveReloadTimerRef = useRef<number | null>(null);
+  const initialFloorLoadRef = useRef(false);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
   const loadFloorPlansList = useCallback(async () => {
@@ -101,11 +105,7 @@ export function FloorPlanPage() {
     }
   }, [token, selectedFloorPlanId]);
 
-  useEffect(() => {
-    void loadFloorPlansList();
-  }, [loadFloorPlansList]);
-
-  const loadFloorPlan = useCallback(async () => {
+  const loadFloorPlan = useCallback(async (floorPlanId?: number) => {
     if (!token) {
       return;
     }
@@ -114,10 +114,11 @@ export function FloorPlanPage() {
     setError(null);
 
     try {
-      const data = await getFloorPlanView(token, selectedFloorPlanId ?? undefined);
+      const data = await getFloorPlanView(token, floorPlanId);
       setFloorPlan(data.floorPlan);
       setTables(data.tables);
       setDecorations(data.decorations);
+      setPendingMapChanges({});
       if (selectedFloorPlanId === null && data.floorPlan) {
         setSelectedFloorPlanId(data.floorPlan.id);
       }
@@ -126,49 +127,16 @@ export function FloorPlanPage() {
       setError(exc instanceof ApiError ? exc.message : "Could not load floor plan.");
       setStatus("error");
     }
-  }, [token, selectedFloorPlanId]);
+  }, [token]);
 
   useEffect(() => {
-    if (selectedFloorPlanId !== null) {
-      void loadFloorPlan();
-    } else if (floorPlans.length === 0) {
-      void loadFloorPlan(); // initial fallback if no ID is set yet
-    }
-  }, [loadFloorPlan, selectedFloorPlanId, floorPlans.length]);
-
-  useEffect(() => {
-    if (!token) {
+    if (!token || initialFloorLoadRef.current) {
       return;
     }
-
-    const scheduleReload = () => {
-      if (liveReloadTimerRef.current !== null) {
-        window.clearTimeout(liveReloadTimerRef.current);
-      }
-      liveReloadTimerRef.current = window.setTimeout(() => {
-        liveReloadTimerRef.current = null;
-        void loadFloorPlan();
-      }, 100);
-    };
-
-    const disconnect = connectLiveUpdates({
-      channel: "floor",
-      token,
-      onMessage: (message) => {
-        if (message.event !== "connected") {
-          scheduleReload();
-        }
-      },
-    });
-
-    return () => {
-      disconnect();
-      if (liveReloadTimerRef.current !== null) {
-        window.clearTimeout(liveReloadTimerRef.current);
-        liveReloadTimerRef.current = null;
-      }
-    };
-  }, [loadFloorPlan, token]);
+    initialFloorLoadRef.current = true;
+    void loadFloorPlansList();
+    void loadFloorPlan();
+  }, [loadFloorPlan, loadFloorPlansList, token]);
 
   useEffect(() => {
     tablesRef.current = tables;
@@ -255,11 +223,9 @@ export function FloorPlanPage() {
       if (finalPosition) {
         applyPositionLocally(finalSelection, finalPosition);
         setDraftPosition(finalPosition);
+        queueMapPosition(finalSelection, finalPosition);
       }
       setInteraction(null);
-      if (finalPosition) {
-        void persistPosition(finalSelection, finalPosition);
-      }
     };
 
     window.addEventListener("pointermove", handleMove, { passive: false });
@@ -306,7 +272,25 @@ export function FloorPlanPage() {
       <section className="page-stack">
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
           <div className="floor-header-actions">
-            <button type="button" className="ghost-button" onClick={loadFloorPlan}>
+            {canEdit && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isSaving || Object.keys(pendingMapChanges).length === 0}
+                onClick={() => {
+                  void saveMapChanges();
+                }}
+              >
+                Zapisz mapę
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                void loadFloorPlan(selectedFloorPlanId ?? undefined);
+              }}
+            >
               Reload
             </button>
           </div>
@@ -323,6 +307,7 @@ export function FloorPlanPage() {
       const newPlan = await createFloorPlan(token, { name, is_active: true });
       setFloorPlans((prev) => [...prev, newPlan]);
       setSelectedFloorPlanId(newPlan.id);
+      await loadFloorPlan(newPlan.id);
     } catch {
       setError("Nie udało się utworzyć nowej sali");
     }
@@ -339,6 +324,7 @@ export function FloorPlanPage() {
               onClick={() => {
                 setSelection(null);
                 setSelectedFloorPlanId(plan.id);
+                void loadFloorPlan(plan.id);
               }}
               onDoubleClick={async () => {
                 if (!canEdit) return;
@@ -380,6 +366,7 @@ export function FloorPlanPage() {
                       setFloorPlans(remaining);
                       if (remaining.length > 0) {
                         setSelectedFloorPlanId(remaining[0].id);
+                        await loadFloorPlan(remaining[0].id);
                       } else {
                         setSelectedFloorPlanId(null);
                         setFloorPlan(null);
@@ -402,7 +389,28 @@ export function FloorPlanPage() {
             </button>
           )}
           <div className="floor-header-actions">
-            <button type="button" className="ghost-button" onClick={loadFloorPlan}>
+            {canEdit && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isSaving || Object.keys(pendingMapChanges).length === 0}
+                onClick={() => {
+                  void saveMapChanges();
+                }}
+              >
+                Zapisz mapę
+                {Object.keys(pendingMapChanges).length > 0
+                  ? ` (${Object.keys(pendingMapChanges).length})`
+                  : ""}
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                void loadFloorPlan(selectedFloorPlanId ?? undefined);
+              }}
+            >
               Reload
             </button>
           </div>
@@ -610,7 +618,7 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await createRestaurantTableOnFloorPlan(token, floorPlan.id, {
+      const createdTablePosition = await createRestaurantTableOnFloorPlan(token, floorPlan.id, {
         table_number: newTableNumber.trim(),
         current_guests: null,
         is_active: true,
@@ -623,8 +631,22 @@ export function FloorPlanPage() {
           shape,
         },
       });
+      setTables((items) => [
+        ...items,
+        {
+          ...createdTablePosition,
+          table: {
+            id: createdTablePosition.table_id,
+            table_number: newTableNumber.trim(),
+            current_guests: null,
+            status: "FREE",
+            qr_code_url: null,
+            qr_token: null,
+            is_active: true,
+          },
+        },
+      ]);
       setNewTableNumber("");
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create table.");
     } finally {
@@ -648,7 +670,7 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await createFloorPlanDecoration(token, floorPlan.id, {
+      const createdDecoration = await createFloorPlanDecoration(token, floorPlan.id, {
         floor_plan_id: floorPlan.id,
         x,
         y,
@@ -659,8 +681,8 @@ export function FloorPlanPage() {
         color: "#252b2d",
         label: newDecorationLabel.trim() || null,
       });
+      setDecorations((items) => [...items, createdDecoration]);
       setNewDecorationLabel("");
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create object.");
     } finally {
@@ -669,7 +691,7 @@ export function FloorPlanPage() {
   }
 
   async function saveTableNumber(tableId: number, tableNumber: string) {
-    if (!token) {
+    if (!token || !floorPlan) {
       return;
     }
 
@@ -682,10 +704,14 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await updateRestaurantTable(token, tableId, {
+      const updatedTable = await updateRestaurantTable(token, tableId, {
         table_number: nextTableNumber,
       });
-      await loadFloorPlan();
+      setTables((items) =>
+        items.map((item) =>
+          item.table_id === tableId ? { ...item, table: updatedTable } : item,
+        ),
+      );
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not save table number.");
     } finally {
@@ -701,10 +727,12 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await updateFloorPlanDecoration(token, floorPlan.id, decorationId, {
+      const updatedDecoration = await updateFloorPlanDecoration(token, floorPlan.id, decorationId, {
         label: label.trim() || null,
       });
-      await loadFloorPlan();
+      setDecorations((items) =>
+        items.map((item) => (item.id === decorationId ? updatedDecoration : item)),
+      );
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not save label.");
     } finally {
@@ -748,29 +776,43 @@ export function FloorPlanPage() {
     }
 
     applyPositionLocally(selection, draftPosition);
-    await persistPosition(selection, draftPosition);
+    queueMapPosition(selection, draftPosition);
   }
 
-  async function persistPosition(
+  function queueMapPosition(
     targetSelection: NonNullable<Selection>,
     position: FloorPlanTablePositionInput,
   ) {
+    const key = `${targetSelection.type}:${targetSelection.id}`;
+    setPendingMapChanges((changes) => ({
+      ...changes,
+      [key]: { selection: targetSelection, position },
+    }));
+  }
+
+  async function saveMapChanges() {
     if (!token || !floorPlan) {
+      return;
+    }
+
+    const changes = Object.values(pendingMapChanges);
+    if (changes.length === 0) {
       return;
     }
 
     setIsSaving(true);
     setEditorError(null);
     try {
-      if (targetSelection.type === "TABLE") {
-        await updateFloorPlanTablePosition(token, floorPlan.id, targetSelection.id, position);
-      } else {
-        await updateFloorPlanDecoration(token, floorPlan.id, targetSelection.id, position);
-      }
-      await loadFloorPlan();
+      await Promise.all(
+        changes.map(({ selection: targetSelection, position }) =>
+          targetSelection.type === "TABLE"
+            ? updateFloorPlanTablePosition(token, floorPlan.id, targetSelection.id, position)
+            : updateFloorPlanDecoration(token, floorPlan.id, targetSelection.id, position),
+        ),
+      );
+      setPendingMapChanges({});
     } catch (exc) {
-      setEditorError(exc instanceof ApiError ? exc.message : "Could not save position.");
-      await loadFloorPlan();
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not save map.");
     } finally {
       setIsSaving(false);
     }
@@ -786,6 +828,7 @@ export function FloorPlanPage() {
     try {
       if (selection.type === "DECOR") {
         await deleteFloorPlanDecoration(token, floorPlan.id, selection.id);
+        setDecorations((items) => items.filter((item) => item.id !== selection.id));
       } else {
         const table = tables.find((item) => item.id === selection.id);
         if (!table) {
@@ -793,9 +836,15 @@ export function FloorPlanPage() {
         }
         await deleteFloorPlanTable(token, floorPlan.id, table.id);
         await deleteRestaurantTable(token, table.table_id);
+        setTables((items) => items.filter((item) => item.id !== selection.id));
       }
+      const deletedKey = `${selection.type}:${selection.id}`;
+      setPendingMapChanges((changes) => {
+        const nextChanges = { ...changes };
+        delete nextChanges[deletedKey];
+        return nextChanges;
+      });
       setSelection(null);
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not delete object.");
     } finally {
@@ -985,18 +1034,20 @@ function EditorPanel({
       </div>
       <label className="compact-field">
         Table number
-        <input
+        <TouchInput
+          keyboardLabel="Numer stolika"
           value={tableNumber}
-          onChange={(event) => onTableNumberChange(event.target.value)}
+          onValueChange={onTableNumberChange}
           placeholder="e.g. 12"
         />
       </label>
       {isDecorationTool && (
         <label className="compact-field">
           Object label
-          <input
+          <TouchInput
+            keyboardLabel="Nazwa obiektu"
             value={decorationLabel}
-            onChange={(event) => onDecorationLabelChange(event.target.value)}
+            onValueChange={onDecorationLabelChange}
             placeholder="e.g. Bar"
             maxLength={150}
           />
@@ -1087,10 +1138,12 @@ function NumberField({
   return (
     <label className="compact-field">
       {label}
-      <input
-        type="number"
+      <TouchInput
+        keyboardLabel={label}
+        keyboardMode="numeric"
+        type="text"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={onChange}
       />
     </label>
   );
@@ -1154,9 +1207,10 @@ function TableNumberEditor({
       <h2>Table number</h2>
       <label className="compact-field">
         Table number
-        <input
+        <TouchInput
+          keyboardLabel="Numer stolika"
           value={tableNumber}
-          onChange={(event) => setTableNumber(event.target.value)}
+          onValueChange={setTableNumber}
           placeholder="e.g. 12"
           maxLength={20}
         />
@@ -1212,9 +1266,10 @@ function DecorationLabelEditor({
       <h2>Label</h2>
       <label className="compact-field">
         Object label
-        <input
+        <TouchInput
+          keyboardLabel="Nazwa obiektu"
           value={label}
-          onChange={(event) => setLabel(event.target.value)}
+          onValueChange={setLabel}
           placeholder="e.g. Bar"
           maxLength={150}
         />

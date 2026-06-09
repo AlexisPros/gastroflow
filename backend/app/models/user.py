@@ -43,6 +43,13 @@ class User(Base):
         nullable=True,
     )
 
+    pin_lookup: Mapped[str | None] = mapped_column(
+        String(64),
+        unique=True,
+        nullable=True,
+        index=True,
+    )
+
     role: Mapped[str] = mapped_column(
         String(50),
         nullable=False,

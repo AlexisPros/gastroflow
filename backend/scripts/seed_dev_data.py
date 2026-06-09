@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from app.core.security import get_password_hash, get_pin_hash
+from app.core.security import get_password_hash, get_pin_hash, get_pin_lookup
 from app.db.session import AsyncSessionLocal
 from app.models.discount import Discount
 from app.models.floor_plan import FloorPlan
@@ -157,6 +157,7 @@ async def seed_users(db: AsyncSession) -> None:
         user.email = email
         user.password_hash = get_password_hash(DEV_PASSWORD)
         user.pin_hash = get_pin_hash(pin)
+        user.pin_lookup = get_pin_lookup(pin)
         user.role = role
         user.is_active = True
 

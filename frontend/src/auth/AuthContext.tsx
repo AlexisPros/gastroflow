@@ -5,15 +5,15 @@ import {
   type PropsWithChildren,
 } from "react";
 
-import { loginWithPassword } from "../api/authApi";
+import { loginWithPin } from "../api/authApi";
 import { AuthContext, type AuthContextValue } from "./authContextCore";
 import { clearStoredAuth, loadStoredAuth, saveStoredAuth } from "./authStorage";
 
 export function AuthProvider({ children }: PropsWithChildren) {
   const [auth, setAuth] = useState(() => loadStoredAuth());
 
-  const login = useCallback(async (username: string, password: string) => {
-    const response = await loginWithPassword(username, password);
+  const login = useCallback(async (pin: string) => {
+    const response = await loginWithPin(pin);
     const nextAuth = {
       access_token: response.access_token,
       user: response.user,
