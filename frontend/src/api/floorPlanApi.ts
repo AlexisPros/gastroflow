@@ -1,4 +1,5 @@
 import { apiRequest } from "./apiClient";
+import { API_BASE_URL } from "../shared/config";
 
 export type FloorPlan = {
   id: number;
@@ -64,6 +65,25 @@ export type FloorPlanTablePositionInput = {
   rotation?: number;
   shape?: "RECTANGLE" | "CIRCLE";
 };
+
+export function getTableQrImageUrl(
+  qrToken: string,
+  options: { download?: boolean; size?: number } = {},
+): string {
+  const params = new URLSearchParams();
+  if (options.download) {
+    params.set("download", "true");
+  }
+  if (options.size) {
+    params.set("size", String(options.size));
+  }
+  const query = params.size > 0 ? `?${params.toString()}` : "";
+  return `${API_BASE_URL}/qr/${encodeURIComponent(qrToken)}/image.png${query}`;
+}
+
+export function getTableGuestUrl(qrToken: string): string {
+  return `${window.location.origin}/qr/${encodeURIComponent(qrToken)}`;
+}
 
 export async function getActiveFloorPlan(token: string): Promise<FloorPlan> {
   return apiRequest<FloorPlan>("/floor-plans/active", { token });

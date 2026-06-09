@@ -20,6 +20,8 @@ import {
   deleteFloorPlanTable,
   deleteRestaurantTable,
   getFloorPlanView,
+  getTableGuestUrl,
+  getTableQrImageUrl,
   updateFloorPlanDecoration,
   updateFloorPlanTablePosition,
   updateRestaurantTable,
@@ -1178,10 +1180,22 @@ function TableDetails({ item }: { item: FloorTableView }) {
           {item.width} x {item.height}
         </strong>
       </div>
-      {table?.qr_code_url && (
-        <a href={table.qr_code_url} target="_blank" rel="noreferrer">
-          Open QR URL
-        </a>
+      {table?.qr_token && (
+        <div className="table-qr-card">
+          <img
+            src={getTableQrImageUrl(table.qr_token)}
+            alt={`QR code for table ${table.table_number}`}
+          />
+          <span className="detail-label">Permanent guest QR</span>
+          <div className="table-qr-actions">
+            <a href={getTableGuestUrl(table.qr_token)} target="_blank" rel="noreferrer">
+              Open guest page
+            </a>
+            <a href={getTableQrImageUrl(table.qr_token, { download: true, size: 900 })}>
+              Download PNG
+            </a>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { AppLayout } from "../layouts/AppLayout";
 import { DashboardPage } from "../pages/DashboardPage";
 import { FloorPlanPage } from "../pages/FloorPlanPage";
+import { GuestQrPage } from "../pages/GuestQrPage";
 import { LoginPage } from "../pages/LoginPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
@@ -14,6 +15,10 @@ const router = createBrowserRouter([
   {
     path: routes.login,
     element: <LoginPage />,
+  },
+  {
+    path: routes.guestQr,
+    element: <GuestQrPage />,
   },
   {
     element: <ProtectedRoute />,

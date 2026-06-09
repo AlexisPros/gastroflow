@@ -70,6 +70,7 @@ import {
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
 import { TouchInput, useTouchKeyboard } from "../components/TouchKeyboardProvider";
+import { connectLiveUpdates } from "../ws/liveUpdates";
 type LoadingState = "idle" | "loading" | "ready" | "error";
 type WaiterMode = "DASHBOARD" | "TABLE_PICKER" | "ORDER_BUILDER" | "CHECKOUT" | "ORDER_DETAILS";
 type TablePickerPurpose = "CREATE" | "MOVE";
@@ -148,6 +149,9 @@ export function WaiterPage() {
   const waiterMapRef = useRef<HTMLDivElement | null>(null);
   const createOrderIdempotencyKey = useRef<string | null>(null);
   const initialWorkspaceLoadRef = useRef(false);
+  const liveOrderReloadTimerRef = useRef<number | null>(null);
+  const liveOrderReloadInFlightRef = useRef(false);
+  const liveOrderReloadQueuedRef = useRef(false);
   const floorContentSize = useMemo(() => {
     if (!floorPlan) {
       return { width: 0, height: 0 };
@@ -270,6 +274,36 @@ export function WaiterPage() {
     }
   }, [token]);
 
+  const loadLiveOrderData = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    if (liveOrderReloadInFlightRef.current) {
+      liveOrderReloadQueuedRef.current = true;
+      return;
+    }
+
+    liveOrderReloadInFlightRef.current = true;
+    try {
+      const [nextOrders, nextOrderItems, nextPendingQrOrders] = await Promise.all([
+        getWaiterOrders(token),
+        getWaiterOrderItems(token),
+        getPendingQrOrders(token),
+      ]);
+      setOrders(nextOrders);
+      setOrderItems(nextOrderItems);
+      setPendingQrOrders(nextPendingQrOrders);
+    } catch (exc) {
+      console.error("Could not refresh live order data.", exc);
+    } finally {
+      liveOrderReloadInFlightRef.current = false;
+      if (liveOrderReloadQueuedRef.current) {
+        liveOrderReloadQueuedRef.current = false;
+        void loadLiveOrderData();
+      }
+    }
+  }, [token]);
+
   useEffect(() => {
     if (!token || initialWorkspaceLoadRef.current) {
       return;
@@ -278,6 +312,41 @@ export function WaiterPage() {
     void loadFloorPlansList();
     void loadWaiterData();
   }, [loadFloorPlansList, loadWaiterData, token]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const scheduleOrderReload = () => {
+      if (liveOrderReloadTimerRef.current !== null) {
+        window.clearTimeout(liveOrderReloadTimerRef.current);
+      }
+      liveOrderReloadTimerRef.current = window.setTimeout(() => {
+        liveOrderReloadTimerRef.current = null;
+        void loadLiveOrderData();
+      }, 150);
+    };
+
+    const disconnect = connectLiveUpdates({
+      channel: "waiters",
+      token,
+      onMessage: (message) => {
+        if (message.event !== "connected" && message.event !== "raw_message") {
+          scheduleOrderReload();
+        }
+      },
+    });
+
+    return () => {
+      disconnect();
+      if (liveOrderReloadTimerRef.current !== null) {
+        window.clearTimeout(liveOrderReloadTimerRef.current);
+        liveOrderReloadTimerRef.current = null;
+      }
+      liveOrderReloadQueuedRef.current = false;
+    };
+  }, [loadLiveOrderData, token]);
 
   useEffect(() => {
     document.body.classList.toggle("pos-fullscreen", isFullscreenMode(mode));
@@ -1793,7 +1862,12 @@ export function WaiterPage() {
         status: "OCCUPIED",
         current_guests: order.guest_count,
       });
-      setNotice(`Order #${order.id} sent to production.`);
+      try {
+        setOrderItems(await getWaiterOrderItems(token));
+        setNotice(`Order #${order.id} sent to production.`);
+      } catch {
+        setNotice(`Order #${order.id} sent to production. Use Odśwież to reload its saved items.`);
+      }
       setCart([]);
       setSelectedTicketLine(null);
       if (afterSubmit === "DASHBOARD") {

@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import DbSession, ORDER_ROLES, raise_bad_request, require_roles
@@ -7,6 +8,7 @@ from app.crud import restaurant_table as crud_restaurant_table
 from app.schemas import OrderRead
 from app.services import order_service, user_service
 from app.services.order_service import OrderItemRequest
+from app.services.qr_code_service import qr_code_service
 
 router = APIRouter(tags=["QR"])
 
@@ -57,6 +59,40 @@ async def get_table_by_qr_token(qr_token: str, db: DbSession):
 @router.get("/qr/{qr_token}/table", response_model=PublicQRTableRead)
 async def get_qr_table(qr_token: str, db: DbSession):
     return await get_table_by_qr_token(qr_token, db)
+
+
+@router.get(
+    "/qr/{qr_token}/image.png",
+    response_class=Response,
+    responses={200: {"content": {"image/png": {}}}},
+)
+async def get_qr_image(
+    qr_token: str,
+    db: DbSession,
+    size: int = Query(default=420, ge=180, le=1200),
+    download: bool = False,
+):
+    table = await get_table_by_qr_token(qr_token, db)
+    public_url = qr_code_service.build_table_url(qr_token=qr_token)
+    try:
+        image = qr_code_service.generate_png(url=public_url, size=size)
+    except ModuleNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="QR image generator is not installed.",
+        ) from exc
+
+    disposition = "attachment" if download else "inline"
+    return Response(
+        content=image,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "no-cache",
+            "Content-Disposition": (
+                f'{disposition}; filename="gastroflow-table-{qr_token}.png"'
+            ),
+        },
+    )
 
 
 @router.post("/qr/{qr_token}/orders", response_model=OrderRead)

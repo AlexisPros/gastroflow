@@ -78,6 +78,52 @@ small,
   box-shadow: 0 18px 45px rgba(19, 35, 32, 0.08);
 }
 
+.guest-qr-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 20px;
+  background: #f4f7f5;
+}
+
+.guest-qr-panel {
+  display: grid;
+  width: min(520px, 100%);
+  gap: 28px;
+  padding: 32px;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 18px 45px rgba(19, 35, 32, 0.08);
+}
+
+.guest-qr-logo {
+  display: block;
+  width: min(240px, 70%);
+  margin: 0 auto;
+}
+
+.guest-qr-message {
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.guest-qr-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid #cbe3d7;
+  border-radius: 6px;
+  background: var(--brand-green-soft);
+}
+
+.guest-qr-status strong {
+  color: var(--brand-green-dark);
+}
+
 .pin-login-field input {
   min-height: 64px;
   text-align: center;
@@ -790,6 +836,40 @@ small,
 .table-details a {
   color: var(--brand-green-dark);
   font-weight: 800;
+}
+
+.table-details .table-qr-card {
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #dce5e1;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.table-qr-card img {
+  display: block;
+  width: min(100%, 220px);
+  aspect-ratio: 1;
+  margin: 0 auto;
+  image-rendering: pixelated;
+}
+
+.table-details .table-qr-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+}
+
+.table-qr-actions a {
+  display: grid;
+  min-height: 42px;
+  place-items: center;
+  padding: 8px;
+  border: 1px solid #cbd8d3;
+  border-radius: 6px;
+  text-align: center;
 }
 
 .detail-label {
