@@ -3,6 +3,7 @@ from decimal import Decimal
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
     CurrentUser,
@@ -17,6 +18,8 @@ from app.crud import order as crud_order
 from app.crud import order_item as crud_order_item
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.order_item_modifier import OrderItemModifier
+from app.models.product_modifier import ProductModifier
 from app.services import (
     billing_service,
     authorization_service,
@@ -71,6 +74,15 @@ class VerifyManagerPinRequest(BaseModel):
 
 class VerifyManagerPinResponse(BaseModel):
     success: bool
+
+
+class WorkspaceOrderItemModifierRead(BaseModel):
+    name: str
+    price: Decimal
+
+
+class WorkspaceOrderItemRead(OrderItemRead):
+    modifiers: list[WorkspaceOrderItemModifierRead]
 
 
 class VoidOrderItemRequest(BaseModel):
@@ -146,13 +158,42 @@ async def list_workspace_orders(db: DbSession, current_user: CurrentUser):
     return list(result.scalars().all())
 
 
-@router.get("/orders/workspace/items", response_model=list[OrderItemRead])
+@router.get("/orders/workspace/items", response_model=list[WorkspaceOrderItemRead])
 async def list_workspace_order_items(db: DbSession, current_user: CurrentUser):
-    query = select(OrderItem).join(Order, Order.id == OrderItem.order_id)
+    query = (
+        select(OrderItem)
+        .join(Order, Order.id == OrderItem.order_id)
+        .options(
+            selectinload(OrderItem.modifiers)
+            .selectinload(OrderItemModifier.product_modifier)
+            .selectinload(ProductModifier.modifier),
+        )
+    )
     if current_user.role == "WAITER":
         query = query.where(Order.waiter_id == current_user.id)
     result = await db.execute(query.order_by(OrderItem.order_id, OrderItem.position))
-    return list(result.scalars().all())
+    return [
+        WorkspaceOrderItemRead(
+            id=item.id,
+            order_id=item.order_id,
+            product_id=item.product_id,
+            quantity=item.quantity,
+            position=item.position,
+            course_number=item.course_number,
+            unit_price=item.unit_price,
+            total_price=item.total_price,
+            status=item.status,
+            notes=item.notes,
+            modifiers=[
+                WorkspaceOrderItemModifierRead(
+                    name=modifier.product_modifier.modifier.name,
+                    price=modifier.price,
+                )
+                for modifier in item.modifiers
+            ],
+        )
+        for item in result.scalars().all()
+    ]
 
 
 @router.post("/orders/with-items", response_model=OrderRead)

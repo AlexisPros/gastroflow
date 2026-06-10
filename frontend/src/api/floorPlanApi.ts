@@ -77,6 +77,7 @@ export function getTableQrImageUrl(
   if (options.size) {
     params.set("size", String(options.size));
   }
+  params.set("revision", "2");
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return `${API_BASE_URL}/qr/${encodeURIComponent(qrToken)}/image.png${query}`;
 }

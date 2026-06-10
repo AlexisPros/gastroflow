@@ -14,6 +14,7 @@ export type Product = {
   kitchen_section_id: number | null;
   name: string;
   description: string | null;
+  image_url: string | null;
   price: string;
   vat_rate: string;
   preparation_time: number | null;
@@ -108,6 +109,17 @@ export type OrderItem = {
   total_price: string;
   status: string;
   notes: string | null;
+  modifiers?: Array<{
+    name: string;
+    price: string;
+  }>;
+};
+
+export type PendingQrOrderItem = OrderItem & {
+  modifiers: Array<{
+    name: string;
+    price: string;
+  }>;
 };
 
 export type BillSplitOriginalItem = {
@@ -235,6 +247,13 @@ export async function getActiveOrderWaiters(token: string): Promise<ActiveOrderW
 
 export async function getWaiterOrderItems(token: string): Promise<OrderItem[]> {
   return apiRequest<OrderItem[]>("/orders/workspace/items", { token });
+}
+
+export async function getPendingQrOrderItems(
+  token: string,
+  orderId: number,
+): Promise<PendingQrOrderItem[]> {
+  return apiRequest<PendingQrOrderItem[]>(`/qr/orders/${orderId}/items`, { token });
 }
 
 export async function createWaiterOrder(

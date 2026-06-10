@@ -29,6 +29,7 @@ import {
   getPendingQrOrders,
   getProductCategories,
   getProductModifiers,
+  getPendingQrOrderItems,
   getWaiterOrderItems,
   getWaiterOrders,
   getWaiterProducts,
@@ -44,6 +45,7 @@ import {
   type Modifier,
   type Order,
   type OrderItem,
+  type PendingQrOrderItem,
   type Product,
   type ProductCategory,
   type ProductModifier,
@@ -69,6 +71,7 @@ import {
 } from "../api/waiterApi";
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
+import { createClientId } from "../shared/id";
 import { TouchInput, useTouchKeyboard } from "../components/TouchKeyboardProvider";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 type LoadingState = "idle" | "loading" | "ready" | "error";
@@ -105,6 +108,8 @@ export function WaiterPage() {
   const [floorDecorations, setFloorDecorations] = useState<FloorPlanDecoration[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [pendingQrOrders, setPendingQrOrders] = useState<Order[]>([]);
+  const [previewQrOrder, setPreviewQrOrder] = useState<Order | null>(null);
+  const [previewQrOrderItems, setPreviewQrOrderItems] = useState<PendingQrOrderItem[]>([]);
   const [activeOrderWaiters, setActiveOrderWaiters] = useState<ActiveOrderWaiter[]>([]);
   const [selectedOrderOwnerId, setSelectedOrderOwnerId] = useState<number | null>(null);
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
@@ -301,6 +306,21 @@ export function WaiterPage() {
         liveOrderReloadQueuedRef.current = false;
         void loadLiveOrderData();
       }
+    }
+  }, [token]);
+
+  const openQrOrderPreview = useCallback(async (order: Order) => {
+    if (!token) {
+      return;
+    }
+
+    setPreviewQrOrder(order);
+    setPreviewQrOrderItems([]);
+    try {
+      setPreviewQrOrderItems(await getPendingQrOrderItems(token, order.id));
+    } catch (exc) {
+      setPreviewQrOrder(null);
+      setError(exc instanceof ApiError ? exc.message : "Nie udało się pobrać pozycji zamówienia QR.");
     }
   }, [token]);
 
@@ -613,31 +633,24 @@ export function WaiterPage() {
               </div>
               <div className="qr-order-list">
                 {pendingQrOrders.map((order) => (
-                  <article key={order.id}>
+                  <article
+                    key={order.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => void openQrOrderPreview(order)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        void openQrOrderPreview(order);
+                      }
+                    }}
+                  >
                     <span>
                       <strong>Rachunek QR #{order.id}</strong>
                       <small>
                         {getOrderTableLabel(order)} · {order.guest_count ?? 0} os.
                       </small>
                     </span>
-                    <div>
-                      <button
-                        type="button"
-                        className="primary-button"
-                        disabled={isSubmitting}
-                        onClick={() => void handleQrOrder(order, "CONFIRM")}
-                      >
-                        Przyjmij
-                      </button>
-                      <button
-                        type="button"
-                        className="ghost-button danger"
-                        disabled={isSubmitting}
-                        onClick={() => void handleQrOrder(order, "REJECT")}
-                      >
-                        Odrzuć
-                      </button>
-                    </div>
+                    <strong>{formatMoney(Number(order.total_amount))}</strong>
                   </article>
                 ))}
                 {pendingQrOrders.length === 0 && (
@@ -1163,6 +1176,13 @@ export function WaiterPage() {
                       <span>
                         {item.quantity} x {formatMoney(Number(item.unit_price))}
                       </span>
+                      {item.modifiers?.map((modifier) => (
+                        <small key={`${item.id}-${modifier.name}`}>
+                          {modifier.name}
+                          {Number(modifier.price) > 0 && ` +${formatMoney(Number(modifier.price))}`}
+                        </small>
+                      ))}
+                      {item.notes && <small>{item.notes}</small>}
                     </div>
                     <b>{formatMoney(Number(item.total_price))}</b>
                   </div>
@@ -1192,6 +1212,21 @@ export function WaiterPage() {
             });
             setPendingProduct(null);
           }}
+        />
+      )}
+
+      {previewQrOrder && (
+        <QrOrderPreviewModal
+          order={previewQrOrder}
+          items={previewQrOrderItems}
+          productsById={productsById}
+          isSubmitting={isSubmitting}
+          onClose={() => {
+            setPreviewQrOrder(null);
+            setPreviewQrOrderItems([]);
+          }}
+          onConfirm={() => void handleQrOrder(previewQrOrder, "CONFIRM")}
+          onReject={() => void handleQrOrder(previewQrOrder, "REJECT")}
         />
       )}
 
@@ -1391,7 +1426,7 @@ export function WaiterPage() {
     setCart((items) => [
       ...items,
       {
-        id: crypto.randomUUID(),
+        id: createClientId(),
         product,
         quantity: 1,
         position: items.filter(isCartItem).length,
@@ -1471,7 +1506,7 @@ export function WaiterPage() {
       return [
         ...items,
         {
-          id: crypto.randomUUID(),
+          id: createClientId(),
           type: "SEPARATOR",
           nextCourseNumber: getCurrentCourseNumber(items) + 1,
         },
@@ -1683,7 +1718,7 @@ export function WaiterPage() {
       payments.push({
         method: "CARD",
         amount: total.toFixed(2),
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: createClientId(),
       });
     } else if (method === "CASH") {
       const cashReceived = await prompt({
@@ -1704,7 +1739,7 @@ export function WaiterPage() {
         method: "CASH",
         amount: total.toFixed(2),
         cash_received: parsedCash.toFixed(2),
-        idempotency_key: crypto.randomUUID(),
+        idempotency_key: createClientId(),
       });
     } else {
       const cardAmountInput = await prompt({
@@ -1739,13 +1774,13 @@ export function WaiterPage() {
         {
           method: "CARD",
           amount: cardAmount.toFixed(2),
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: createClientId(),
         },
         {
           method: "CASH",
           amount: cashAmount.toFixed(2),
           cash_received: cashReceived.toFixed(2),
-          idempotency_key: crypto.randomUUID(),
+          idempotency_key: createClientId(),
         },
       );
     }
@@ -1851,7 +1886,7 @@ export function WaiterPage() {
             source: "WAITER",
             idempotency_key:
               createOrderIdempotencyKey.current
-              ?? (createOrderIdempotencyKey.current = crypto.randomUUID()),
+              ?? (createOrderIdempotencyKey.current = createClientId()),
             items: payloadItems,
           });
       if (!selectedOrder) {
@@ -2002,6 +2037,10 @@ export function WaiterPage() {
           status: "OCCUPIED",
           current_guests: updatedOrder.guest_count,
         });
+        setOrderItems((items) => [
+          ...items.filter((item) => item.order_id !== updatedOrder.id),
+          ...previewQrOrderItems,
+        ]);
         setNotice(`Zamówienie QR #${order.id} zostało przyjęte.`);
       } else {
         const updatedOrder = await rejectPendingQrOrder(token, order.id, pin, reason);
@@ -2009,6 +2048,8 @@ export function WaiterPage() {
         setNotice(`Zamówienie QR #${order.id} zostało odrzucone.`);
       }
       setPendingQrOrders((items) => items.filter((item) => item.id !== order.id));
+      setPreviewQrOrder(null);
+      setPreviewQrOrderItems([]);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się obsłużyć zamówienia QR.");
     } finally {
@@ -3031,6 +3072,12 @@ function CartList({
               <span>
                 Kurs {item.course_number} · {item.quantity} x {formatMoney(Number(item.unit_price))}
               </span>
+              {item.modifiers?.map((modifier) => (
+                <small key={`${item.id}-${modifier.name}`}>
+                  {modifier.name}
+                  {Number(modifier.price) > 0 && ` +${formatMoney(Number(modifier.price))}`}
+                </small>
+              ))}
               {item.notes && <small>{item.notes}</small>}
             </div>
             <b>{formatMoney(Number(item.total_price))}</b>
@@ -3124,6 +3171,12 @@ function CheckoutOrderDetails({
                   Kurs {item.course_number} · {item.quantity} x{" "}
                   {formatMoney(Number(item.unit_price))}
                 </span>
+                {item.modifiers?.map((modifier) => (
+                  <small key={`${item.id}-${modifier.name}`}>
+                    {modifier.name}
+                    {Number(modifier.price) > 0 && ` +${formatMoney(Number(modifier.price))}`}
+                  </small>
+                ))}
                 {item.notes && <small>{item.notes}</small>}
               </div>
               <b>{formatMoney(Number(item.total_price))}</b>
@@ -3146,6 +3199,72 @@ function CheckoutOrderDetails({
           Suma <strong>{formatMoney(Number(order.total_amount))}</strong>
         </b>
       </div>
+    </div>
+  );
+}
+
+
+function QrOrderPreviewModal({
+  order,
+  items,
+  productsById,
+  isSubmitting,
+  onClose,
+  onConfirm,
+  onReject,
+}: {
+  order: Order;
+  items: PendingQrOrderItem[];
+  productsById: Map<number, Product>;
+  isSubmitting: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  onReject: () => void;
+}) {
+  return (
+    <div className="modal-backdrop">
+      <section className="product-options-modal qr-order-preview-modal">
+        <div className="panel-heading">
+          <div>
+            <span className="eyebrow">Zamówienie QR</span>
+            <h2>Rachunek #{order.id}</h2>
+            <p className="muted">{order.guest_count ?? 0} os.</p>
+          </div>
+          <strong>{formatMoney(Number(order.total_amount))}</strong>
+        </div>
+        <div className="order-detail-list">
+          {items.map((item) => (
+            <div key={item.id} className="order-detail-row">
+              <div>
+                <strong>{productsById.get(item.product_id)?.name ?? `Produkt #${item.product_id}`}</strong>
+                <span>{item.quantity} x {formatMoney(Number(item.unit_price))}</span>
+                {item.modifiers.map((modifier) => (
+                  <small key={`${item.id}-${modifier.name}`}>
+                    + {modifier.name}
+                    {Number(modifier.price) > 0 && ` (${formatMoney(Number(modifier.price))})`}
+                  </small>
+                ))}
+                {item.notes && <small>{item.notes}</small>}
+              </div>
+              <b>{formatMoney(Number(item.total_price))}</b>
+            </div>
+          ))}
+          {items.length === 0 && (
+            <div className="empty-ticket">Brak pozycji do wyświetlenia. Odśwież dane.</div>
+          )}
+        </div>
+        <div className="qr-preview-actions">
+          <button type="button" className="ghost-button" onClick={onClose} disabled={isSubmitting}>
+            Anuluj
+          </button>
+          <button type="button" className="ghost-button danger" onClick={onReject} disabled={isSubmitting}>
+            Odrzuć
+          </button>
+          <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>
+            Potwierdź
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

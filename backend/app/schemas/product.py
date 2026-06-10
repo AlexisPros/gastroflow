@@ -9,6 +9,7 @@ class ProductBase(OrmBaseModel):
     kitchen_section_id: int | None = None
     name: str
     description: str | None = None
+    image_url: str | None = None
     price: Decimal
     vat_rate: Decimal = Decimal("8.00")
     preparation_time: int | None = None
@@ -24,6 +25,7 @@ class ProductUpdate(OrmBaseModel):
     kitchen_section_id: int | None = None
     name: str | None = None
     description: str | None = None
+    image_url: str | None = None
     price: Decimal | None = None
     vat_rate: Decimal | None = None
     preparation_time: int | None = None

@@ -102,7 +102,9 @@ def test_get_qr_table_is_public(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["table_number"] == "A1"
-    assert response.json()["qr_code_url"] == "http://localhost:3000/qr/a1-token"
+    assert response.json()["qr_code_url"] == (
+        f"{settings.PUBLIC_MENU_BASE_URL.rstrip('/')}/a1-token"
+    )
 
 
 def test_get_qr_table_returns_404_for_unknown_token(monkeypatch):
@@ -147,7 +149,7 @@ def test_get_qr_image_uses_permanent_table_url(monkeypatch):
     assert response.status_code == 200
     assert response.content == b"permanent-qr-png"
     assert response.headers["content-type"] == "image/png"
-    assert response.headers["cache-control"] == "no-cache"
+    assert response.headers["cache-control"] == "no-store, max-age=0"
     assert response.headers["content-disposition"].startswith("attachment;")
 
 
@@ -316,7 +318,7 @@ def test_reject_qr_pending_order_uses_pin_user(monkeypatch):
 
     async def find_service_order_user_by_pin(_db, *, pin: str):
         assert pin == "1234"
-        return make_user("WAITER")
+        return make_user("MANAGER")
 
     async def reject_pending_qr_order(_db, *, order, waiter_id: int, reason: str | None):
         assert order.id == 1
@@ -347,3 +349,27 @@ def test_reject_qr_pending_order_uses_pin_user(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "REJECTED"
     assert response.json()["waiter_id"] == 7
+
+
+def test_reject_qr_pending_order_requires_manager_pin(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_pending_qr_order()
+
+    async def find_service_order_user_by_pin(_db, *, pin: str):
+        assert pin == "1234"
+        return make_user("WAITER")
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(
+        user_service,
+        "find_service_order_user_by_pin",
+        find_service_order_user_by_pin,
+    )
+
+    response = client.post(
+        "/api/v1/qr/orders/1/reject",
+        json={"pin": "1234"},
+    )
+
+    assert response.status_code == 403
