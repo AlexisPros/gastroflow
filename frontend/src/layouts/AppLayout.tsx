@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
@@ -9,6 +9,7 @@ import {
   type EmployeeShift,
 } from "../api/shiftApi";
 import { useAuth } from "../auth/useAuth";
+import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { UserRole } from "../shared/types";
 import { routes } from "../routes/routePaths";
 
@@ -29,10 +30,17 @@ const navItems: NavItem[] = [
 
 export function AppLayout() {
   const { token, user, logout } = useAuth();
+  const navigate = useNavigate();
   const [currentShift, setCurrentShift] = useState<EmployeeShift | null>(null);
   const [shiftError, setShiftError] = useState<string | null>(null);
   const [isShiftChanging, setIsShiftChanging] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
+  const [qrOrderAlert, setQrOrderAlert] = useState<{
+    orderId: number;
+    tableNumber: string;
+    guestCount: number;
+    totalAmount: string;
+  } | null>(null);
   const availableItems = user
     ? navItems.filter((item) => item.roles.includes(user.role))
     : [];
@@ -58,6 +66,48 @@ export function AppLayout() {
 
     void loadCurrentShift();
   }, [canUseShift, loadCurrentShift, token]);
+
+  useEffect(() => {
+    if (
+      !token
+      || !currentShift
+      || (user?.role !== "WAITER" && user?.role !== "MANAGER")
+    ) {
+      setQrOrderAlert(null);
+      return;
+    }
+
+    return connectLiveUpdates({
+      channel: "waiters",
+      token,
+      onMessage: (message) => {
+        const data = message.data as {
+          order_id?: unknown;
+          table_number?: unknown;
+          guest_count?: unknown;
+          total_amount?: unknown;
+        };
+        const orderId = Number(data.order_id);
+
+        if (message.event === "qr_order_created" && Number.isFinite(orderId)) {
+          setQrOrderAlert({
+            orderId,
+            tableNumber: String(data.table_number ?? data.order_id ?? ""),
+            guestCount: Number(data.guest_count ?? 0),
+            totalAmount: String(data.total_amount ?? "0"),
+          });
+        }
+
+        if (
+          message.event === "qr_order_confirmed"
+          || message.event === "qr_order_rejected"
+          || message.event === "order_cancelled"
+        ) {
+          setQrOrderAlert((current) => current?.orderId === orderId ? null : current);
+        }
+      },
+    });
+  }, [currentShift, token, user?.role]);
 
   return (
     <div className={`app-shell ${isNavigationOpen ? "navigation-open" : ""}`}>
@@ -130,6 +180,42 @@ export function AppLayout() {
           <Outlet />
         </main>
       </div>
+
+      {qrOrderAlert && (
+        <aside className="qr-order-alert" role="alert" aria-live="assertive">
+          <div className="qr-order-alert-heading">
+            <span className="qr-order-alert-icon">QR</span>
+            <div>
+              <span className="eyebrow">Nowe zamówienie</span>
+              <strong>Oczekuje na potwierdzenie</strong>
+            </div>
+            <button
+              type="button"
+              aria-label="Zamknij powiadomienie"
+              onClick={() => setQrOrderAlert(null)}
+            >
+              ×
+            </button>
+          </div>
+          <div className="qr-order-alert-details">
+            <span>Stolik {qrOrderAlert.tableNumber}</span>
+            <span>{qrOrderAlert.guestCount} os.</span>
+            <strong>{formatAlertMoney(qrOrderAlert.totalAmount)}</strong>
+          </div>
+          <button
+            type="button"
+            className="qr-order-alert-open"
+            onClick={() => {
+              sessionStorage.setItem("gastroflow:open-qr-order-id", String(qrOrderAlert.orderId));
+              window.dispatchEvent(new Event("gastroflow:open-qr-order"));
+              setQrOrderAlert(null);
+              navigate(routes.waiter);
+            }}
+          >
+            Zobacz zamówienie
+          </button>
+        </aside>
+      )}
     </div>
   );
 
@@ -153,4 +239,11 @@ export function AppLayout() {
       setIsShiftChanging(false);
     }
   }
+}
+
+function formatAlertMoney(value: string): string {
+  return new Intl.NumberFormat("pl-PL", {
+    style: "currency",
+    currency: "PLN",
+  }).format(Number(value));
 }

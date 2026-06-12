@@ -248,7 +248,9 @@ class OrderService:
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table.table_number,
                 "guest_count": order.guest_count,
+                "total_amount": str(order.total_amount),
                 "status": order.status,
                 "table_status": table.status,
             },
@@ -716,6 +718,19 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar", "floor"],
+            event="qr_order_confirmed",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "waiter_id": order.waiter_id,
+                "shift_id": order.shift_id,
+                "status": order.status,
+                "estimated_time": order.estimated_time,
+                "table_status": "OCCUPIED",
+            },
+        )
         return order
 
     async def transfer_order(

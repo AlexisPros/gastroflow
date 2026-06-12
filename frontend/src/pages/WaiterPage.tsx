@@ -325,6 +325,28 @@ export function WaiterPage() {
   }, [token]);
 
   useEffect(() => {
+    const openRequestedQrOrder = () => {
+      const storedOrderId = sessionStorage.getItem("gastroflow:open-qr-order-id");
+      if (storedOrderId === null) {
+        return;
+      }
+
+      const requestedOrderId = Number(storedOrderId);
+      const requestedOrder = pendingQrOrders.find((order) => order.id === requestedOrderId);
+      if (!requestedOrder) {
+        return;
+      }
+
+      sessionStorage.removeItem("gastroflow:open-qr-order-id");
+      void openQrOrderPreview(requestedOrder);
+    };
+
+    openRequestedQrOrder();
+    window.addEventListener("gastroflow:open-qr-order", openRequestedQrOrder);
+    return () => window.removeEventListener("gastroflow:open-qr-order", openRequestedQrOrder);
+  }, [openQrOrderPreview, pendingQrOrders]);
+
+  useEffect(() => {
     if (!token || initialWorkspaceLoadRef.current) {
       return;
     }
