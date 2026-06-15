@@ -191,11 +191,10 @@ export function AppLayout() {
             </div>
             <button
               type="button"
+              className="qr-order-alert-close"
               aria-label="Zamknij powiadomienie"
               onClick={() => setQrOrderAlert(null)}
-            >
-              ×
-            </button>
+            />
           </div>
           <div className="qr-order-alert-details">
             <span>Stolik {qrOrderAlert.tableNumber}</span>

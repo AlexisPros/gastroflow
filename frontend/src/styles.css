@@ -1643,7 +1643,8 @@ small,
   font-weight: 800;
 }
 
-.qr-order-alert-heading button {
+.qr-order-alert-close {
+  position: relative;
   display: grid;
   width: 36px;
   height: 36px;
@@ -1653,8 +1654,27 @@ small,
   border-radius: 6px;
   background: #fff;
   color: #465750;
-  font-size: 24px;
-  line-height: 1;
+}
+
+.qr-order-alert-close::before,
+.qr-order-alert-close::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 16px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentcolor;
+  content: "";
+  transform-origin: center;
+}
+
+.qr-order-alert-close::before {
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+.qr-order-alert-close::after {
+  transform: translate(-50%, -50%) rotate(-45deg);
 }
 
 .qr-order-alert-details {
