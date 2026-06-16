@@ -3,10 +3,14 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.bill_segment import BillSegment
+from app.models.invoice import Invoice
 from app.models.kitchen_task import KitchenTask
 from app.models.order import Order
+from app.models.order_action_log import OrderActionLog
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
+from app.models.payment import Payment
 
 
 class BillingService:
@@ -59,6 +63,85 @@ class BillingService:
         )
         await db.refresh(target_order)
         return target_order
+
+    async def merge_orders(
+        self,
+        db: AsyncSession,
+        *,
+        target_order: Order,
+        source_order: Order,
+        user_id: int,
+    ) -> Order:
+        from app.services.order_service import OrderService
+        
+        if target_order.id == source_order.id:
+            raise ValueError("Target and source orders must be different.")
+
+        invalid_statuses = {"PAID", "CLOSED", "CANCELLED", "REJECTED", "MERGED"}
+        if target_order.status in invalid_statuses:
+            raise ValueError("Target order cannot be merged into in its current status.")
+
+        if source_order.status in invalid_statuses:
+            raise ValueError("Source order cannot be merged in its current status.")
+
+        payments_result = await db.execute(
+            select(Payment).where(Payment.order_id == source_order.id).limit(1)
+        )
+        if payments_result.scalar_one_or_none() is not None:
+            raise ValueError("Cannot merge order that already has payments.")
+
+        invoice_result = await db.execute(
+            select(Invoice).where(Invoice.order_id == source_order.id).limit(1)
+        )
+        if invoice_result.scalar_one_or_none() is not None:
+            raise ValueError("Cannot merge order that already has an invoice.")
+
+        segments_result = await db.execute(
+            select(BillSegment).where(BillSegment.order_id == source_order.id).limit(1)
+        )
+        if segments_result.scalar_one_or_none() is not None:
+            raise ValueError("Cannot merge order that has bill split segments.")
+
+        items_result = await db.execute(
+            select(OrderItem).where(OrderItem.order_id == source_order.id)
+        )
+        items = list(items_result.scalars().all())
+
+        for item in items:
+            item.order_id = target_order.id
+            db.add(item)
+
+        source_order.status = "MERGED"
+        source_order.total_amount = Decimal("0.00")
+        source_order.subtotal_amount = Decimal("0.00")
+        source_order.discount_amount = Decimal("0.00")
+        source_order.tip_amount = Decimal("0.00")
+
+        db.add(source_order)
+        await db.flush()
+
+        db.add(
+            OrderActionLog(
+                order_id=source_order.id,
+                user_id=user_id,
+                action_type="ORDER_MERGED_OUT",
+                description=f"Merged into order #{target_order.id}.",
+            )
+        )
+
+        db.add(
+            OrderActionLog(
+                order_id=target_order.id,
+                user_id=user_id,
+                action_type="ORDER_MERGED_IN",
+                description=f"Merged items from order #{source_order.id}.",
+            )
+        )
+
+        await db.flush()
+
+        order_service = OrderService()
+        return await order_service.recalculate_total(db, order=target_order)
 
     async def split_item_quantity(
         self,

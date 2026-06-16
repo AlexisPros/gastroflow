@@ -25,7 +25,6 @@ class LoginRequest(BaseModel):
 
 
 class PinLoginRequest(BaseModel):
-    user_id: int
     pin: str
 
 
@@ -126,15 +125,17 @@ async def token_login(
 
 @router.post("/auth/pin-login", response_model=TokenResponse)
 async def pin_login(body: PinLoginRequest, db: DbSession):
-    user = await user_service.authenticate_by_pin(
-        db,
-        user_id=body.user_id,
-        pin=body.pin,
-    )
+    try:
+        user = await user_service.find_active_user_by_pin(db, pin=body.pin)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        ) from exc
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid user or PIN.",
+            detail="Invalid PIN.",
         )
 
     return build_token_response(user)

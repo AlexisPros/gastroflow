@@ -43,9 +43,20 @@ class Product(Base):
         nullable=True,
     )
 
+    image_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
     price: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
+    )
+
+    vat_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("8.00"),
     )
 
     preparation_time: Mapped[int | None] = mapped_column(

@@ -27,6 +27,12 @@ class Payment(Base):
         nullable=False,
     )
 
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
+    )
+
     method: Mapped[str] = mapped_column(
         String(50),
         nullable=False,
@@ -35,6 +41,16 @@ class Payment(Base):
     amount: Mapped[Decimal] = mapped_column(
         Numeric(10, 2),
         nullable=False,
+    )
+
+    cash_received: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+    )
+
+    change_given: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
     )
 
     status: Mapped[str] = mapped_column(

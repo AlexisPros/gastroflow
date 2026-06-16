@@ -288,11 +288,12 @@ def test_create_restaurant_table_on_floor_plan_reaches_service(monkeypatch):
 
 
 def test_qr_service_builds_permanent_table_url():
+    from app.core.config import settings
     from app.services.qr_code_service import qr_code_service
 
     qr_url = qr_code_service.build_table_url(qr_token="a1-token")
 
-    assert qr_url == "http://localhost:3000/qr/a1-token"
+    assert qr_url == f"{settings.PUBLIC_MENU_BASE_URL.rstrip('/')}/a1-token"
 
 
 def test_update_floor_plan_table_position_reaches_service(monkeypatch):

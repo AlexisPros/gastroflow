@@ -5,6 +5,8 @@ class OrderItemBase(OrmBaseModel):
     order_id: int
     product_id: int
     quantity: int = 1
+    position: int = 0
+    course_number: int = 1
     unit_price: Decimal
     total_price: Decimal
     notes: str | None = None
@@ -18,6 +20,8 @@ class OrderItemUpdate(OrmBaseModel):
     order_id: int | None = None
     product_id: int | None = None
     quantity: int | None = None
+    position: int | None = None
+    course_number: int | None = None
     unit_price: Decimal | None = None
     total_price: Decimal | None = None
     status: str | None = None

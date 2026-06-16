@@ -41,6 +41,7 @@ def make_user(role: str) -> User:
 def make_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=1,
         discount_id=None,
@@ -97,12 +98,16 @@ def test_create_order_with_items_reaches_service(monkeypatch):
         *,
         table_id,
         waiter_id,
+        guest_count,
         source,
+        idempotency_key,
         items,
     ):
         assert table_id == 1
         assert waiter_id == 1
+        assert guest_count == 3
         assert source == "WAITER"
+        assert idempotency_key is None
         assert len(items) == 1
         assert items[0].product_id == 1
         assert items[0].quantity == 2
@@ -124,6 +129,7 @@ def test_create_order_with_items_reaches_service(monkeypatch):
             json={
                 "table_id": 1,
                 "waiter_id": 1,
+                "guest_count": 3,
                 "source": "WAITER",
                 "items": [
                     {
@@ -141,6 +147,143 @@ def test_create_order_with_items_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["id"] == 1
     assert response.json()["total_amount"] == "25.00"
+
+
+def test_add_items_to_order_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def add_items_to_order(_db, *, order, items):
+        assert order.id == 1
+        assert len(items) == 1
+        assert items[0].product_id == 2
+        assert items[0].quantity == 1
+        assert items[0].position == 0
+        assert items[0].course_number == 2
+        assert items[0].notes == "Medium rare"
+        assert items[0].product_modifier_ids == [3]
+        order.subtotal_amount = Decimal("45.00")
+        order.total_amount = Decimal("45.00")
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(order_service, "add_items_to_order", add_items_to_order)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/items",
+            headers={"Authorization": "Bearer fake-token"},
+            json={
+                "items": [
+                    {
+                        "product_id": 2,
+                        "quantity": 1,
+                        "position": 0,
+                        "course_number": 2,
+                        "notes": "Medium rare",
+                        "product_modifier_ids": [3],
+                    }
+                ],
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["id"] == 1
+    assert response.json()["total_amount"] == "45.00"
+
+
+def test_cancel_order_with_manager_pin_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def cancel_order_with_manager_pin(_db, *, order, manager_pin: str):
+        assert order.id == 1
+        assert manager_pin == "2468"
+        order.status = "CANCELLED"
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(
+        order_service,
+        "cancel_order_with_manager_pin",
+        cancel_order_with_manager_pin,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/cancel",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "CANCELLED"
+
+
+def test_verify_manager_pin_reaches_service(monkeypatch):
+    async def verify_manager_pin(_db, *, manager_pin: str):
+        assert manager_pin == "2468"
+        return make_user("MANAGER")
+
+    monkeypatch.setattr(order_service, "verify_manager_pin", verify_manager_pin)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/manager-pin/verify",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["success"] is True
+
+
+def test_void_order_item_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
+    async def void_order_item(
+        _db,
+        *,
+        order,
+        order_item_id: int,
+        current_user,
+        manager_pin: str | None = None,
+    ):
+        assert order.id == 1
+        assert order_item_id == 7
+        assert current_user.role == "WAITER"
+        assert manager_pin == "2468"
+        order.total_amount = Decimal("15.00")
+        return order
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(order_service, "void_order_item", void_order_item)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/1/items/7/void",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"manager_pin": "2468"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["total_amount"] == "15.00"
 
 
 def test_order_item_creates_kitchen_task_for_each_product_step(monkeypatch):
@@ -763,19 +906,7 @@ def test_close_order_keeps_table_occupied_when_other_order_is_active():
     assert db.committed is True
 
 
-def test_close_order_reaches_crud(monkeypatch):
-    async def get(_db, id: int):
-        assert id == 1
-        return make_order()
-
-    async def close(_db, *, db_obj):
-        assert db_obj.id == 1
-        db_obj.status = "CLOSED"
-        db_obj.closed_at = datetime.now(timezone.utc)
-        return db_obj
-
-    monkeypatch.setattr(crud_order, "get", get)
-    monkeypatch.setattr(crud_order, "close", close)
+def test_close_order_requires_payment_endpoint():
     override_current_user("WAITER")
 
     try:
@@ -786,9 +917,61 @@ def test_close_order_reaches_crud(monkeypatch):
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 200
-    assert response.json()["status"] == "CLOSED"
-    assert response.json()["closed_at"] is not None
+    assert response.status_code == 400
+    assert "close-with-payments" in response.json()["detail"]
+
+
+def test_add_tip_recalculates_total_with_discount():
+    class FakeDb:
+        def __init__(self):
+            self.added: list[Any] = []
+            self.committed = False
+
+        def add(self, obj: Any):
+            self.added.append(obj)
+
+        async def commit(self):
+            self.committed = True
+
+        async def refresh(self, _obj):
+            return None
+
+    order = make_order()
+    order.subtotal_amount = Decimal("40.00")
+    order.discount_amount = Decimal("4.00")
+    order.tip_amount = Decimal("0.00")
+    order.total_amount = Decimal("36.00")
+    db = FakeDb()
+
+    updated_order = asyncio.run(
+        crud_order.add_tip(
+            cast(AsyncSession, db),
+            db_obj=order,
+            tip_amount=Decimal("5.00"),
+        ),
+    )
+
+    assert updated_order.tip_amount == Decimal("5.00")
+    assert updated_order.total_amount == Decimal("41.00")
+    assert db.added == [order]
+    assert db.committed is True
+
+
+def test_add_tip_rejects_negative_amount():
+    order = make_order()
+
+    try:
+        asyncio.run(
+            crud_order.add_tip(
+                cast(AsyncSession, object()),
+                db_obj=order,
+                tip_amount=Decimal("-1.00"),
+            ),
+        )
+    except ValueError as exc:
+        assert str(exc) == "Tip amount must be zero or greater."
+    else:
+        raise AssertionError("Negative tip amount should be rejected.")
 
 
 def test_apply_discount_reaches_service(monkeypatch):
@@ -828,7 +1011,7 @@ def test_transfer_order_reaches_service(monkeypatch):
 
     async def transfer_order(_db, *, order, to_waiter_id: int):
         assert order.id == 1
-        assert to_waiter_id == 2
+        assert to_waiter_id == 1
         return OrderTransferLog(
             id=1,
             order_id=order.id,
@@ -853,10 +1036,116 @@ def test_transfer_order_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["order_id"] == 1
     assert response.json()["from_waiter_id"] == 1
-    assert response.json()["to_waiter_id"] == 2
+    assert response.json()["to_waiter_id"] == 1
+
+
+def test_list_active_transfer_waiters_reaches_service(monkeypatch):
+    async def list_active_waiters_for_transfer(_db, *, exclude_waiter_id: int):
+        assert exclude_waiter_id == 1
+        return [
+            {
+                "id": 2,
+                "first_name": "Anna",
+                "last_name": "Waiter",
+                "open_orders_count": 3,
+            },
+        ]
+
+    monkeypatch.setattr(
+        order_service,
+        "list_active_waiters_for_transfer",
+        list_active_waiters_for_transfer,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/orders/transfer/waiters",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == 2
+    assert response.json()[0]["open_orders_count"] == 3
+
+
+def test_list_active_waiters_for_order_view_reaches_service(monkeypatch):
+    async def list_active_waiters_for_order_view(_db):
+        return [
+            {
+                "id": 2,
+                "first_name": "Anna",
+                "last_name": "Waiter",
+            },
+        ]
+
+    monkeypatch.setattr(
+        order_service,
+        "list_active_waiters_for_order_view",
+        list_active_waiters_for_order_view,
+    )
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/orders/view/active-waiters",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "id": 2,
+            "first_name": "Anna",
+            "last_name": "Waiter",
+        },
+    ]
+
+
+def test_transfer_all_waiter_orders_reaches_service(monkeypatch):
+    async def transfer_all_orders(
+        _db,
+        *,
+        from_waiter_id: int,
+        to_waiter_id: int,
+    ):
+        assert from_waiter_id == 2
+        assert to_waiter_id == 1
+        return [
+            OrderTransferLog(
+                id=1,
+                order_id=10,
+                from_waiter_id=2,
+                to_waiter_id=1,
+                transferred_at=datetime.now(timezone.utc),
+            ),
+        ]
+
+    monkeypatch.setattr(order_service, "transfer_all_orders", transfer_all_orders)
+    override_current_user("WAITER")
+
+    try:
+        response = client.post(
+            "/api/v1/orders/transfer/waiters/2/all",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["order_id"] == 10
+    assert response.json()[0]["to_waiter_id"] == 1
 
 
 def test_record_order_action_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_order()
+
     async def record_action(
         _db,
         *,
@@ -879,6 +1168,7 @@ def test_record_order_action_reaches_service(monkeypatch):
         )
 
     monkeypatch.setattr(order_service, "record_action", record_action)
+    monkeypatch.setattr(crud_order, "get", get)
     override_current_user("WAITER")
 
     try:

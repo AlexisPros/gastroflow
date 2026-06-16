@@ -62,6 +62,7 @@ def make_kitchen_task() -> KitchenTask:
 def make_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=1,
         discount_id=None,
@@ -229,6 +230,74 @@ def test_payment_register_reaches_service(monkeypatch):
     assert response.json()["amount"] == "25.00"
 
 
+def test_list_current_user_closed_payments_reaches_service(monkeypatch):
+    closed_order = make_order()
+    closed_order.status = "CLOSED"
+    closed_order.closed_at = datetime.now(timezone.utc)
+
+    async def list_closed_payments_for_user(_db, *, user_id: int):
+        assert user_id == 1
+        return [(make_payment(), closed_order)]
+
+    monkeypatch.setattr(
+        payment_service,
+        "list_closed_payments_for_user",
+        list_closed_payments_for_user,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/payments/current-user/closed",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()[0]["order_id"] == 1
+    assert response.json()[0]["method"] == "CARD"
+
+
+def test_toggle_payment_method_reaches_service(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_payment()
+
+    async def toggle_payment_method(
+        _db,
+        *,
+        payment,
+        user_id: int,
+        authorized_user_id: int,
+        can_manage_all: bool,
+        reason: str,
+    ):
+        assert payment.id == 1
+        assert user_id == 1
+        assert authorized_user_id == 1
+        assert can_manage_all is True
+        assert reason == "Correction"
+        payment.method = "CASH"
+        return payment
+
+    monkeypatch.setattr(crud_payment, "get", get)
+    monkeypatch.setattr(payment_service, "toggle_payment_method", toggle_payment_method)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.post(
+            "/api/v1/payments/1/toggle-method",
+            headers={"Authorization": "Bearer fake-token"},
+            json={"reason": "Correction"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["method"] == "CASH"
+
+
 def test_payment_register_with_close_order_uses_order_close(monkeypatch):
     class FakeDb:
         def __init__(self):
@@ -237,6 +306,13 @@ def test_payment_register_with_close_order_uses_order_close(monkeypatch):
 
         def add(self, obj: Any):
             self.added.append(obj)
+
+        async def execute(self, _query):
+            class Result:
+                def scalar_one(self):
+                    return Decimal("0.00")
+
+            return Result()
 
         async def refresh(self, obj: Any):
             self.refreshed.append(obj)

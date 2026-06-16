@@ -4,17 +4,24 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 
 import { ApiError } from "../api/apiClient";
 import {
+  createFloorPlan,
+  updateFloorPlan,
+  deleteFloorPlan,
+  getFloorPlans,
   createFloorPlanDecoration,
   createRestaurantTableOnFloorPlan,
   deleteFloorPlanDecoration,
   deleteFloorPlanTable,
   deleteRestaurantTable,
   getFloorPlanView,
+  getTableGuestUrl,
+  getTableQrImageUrl,
   updateFloorPlanDecoration,
   updateFloorPlanTablePosition,
   updateRestaurantTable,
@@ -25,8 +32,8 @@ import {
   type RestaurantTableStatus,
 } from "../api/floorPlanApi";
 import { useAuth } from "../auth/useAuth";
-import { connectLiveUpdates } from "../ws/liveUpdates";
-
+import { usePrompt } from "../components/PromptProvider";
+import { TouchInput } from "../components/TouchKeyboardProvider";
 type LoadingState = "idle" | "loading" | "ready" | "error";
 type EditorTool =
   | "SELECT"
@@ -47,6 +54,10 @@ type Interaction = {
   startPosition: FloorPlanTablePositionInput;
   handle?: ResizeHandle;
 } | null;
+type PendingMapChange = {
+  selection: NonNullable<Selection>;
+  position: FloorPlanTablePositionInput;
+};
 
 const statusLabels: Record<string, string> = {
   FREE: "Free",
@@ -57,7 +68,10 @@ const statusLabels: Record<string, string> = {
 
 export function FloorPlanPage() {
   const { token, user } = useAuth();
+  const { prompt, confirm } = usePrompt();
   const [floorPlan, setFloorPlan] = useState<FloorPlan | null>(null);
+  const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
+  const [selectedFloorPlanId, setSelectedFloorPlanId] = useState<number | null>(null);
   const [tables, setTables] = useState<FloorTableView[]>([]);
   const [decorations, setDecorations] = useState<FloorPlanDecoration[]>([]);
   const [selection, setSelection] = useState<Selection>(null);
@@ -71,12 +85,29 @@ export function FloorPlanPage() {
   const [error, setError] = useState<string | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [mapScale, setMapScale] = useState(1);
-  const [wsStatus, setWsStatus] = useState("disconnected");
-  const [lastEvent, setLastEvent] = useState<string | null>(null);
+  const [pendingMapChanges, setPendingMapChanges] = useState<Record<string, PendingMapChange>>({});
+  const [mapScale, setMapScale] = useState(0.7);
+  const tablesRef = useRef<FloorTableView[]>([]);
+  const decorationsRef = useRef<FloorPlanDecoration[]>([]);
+  const pendingPositionRef = useRef<FloorPlanTablePositionInput | null>(null);
+  const dragFrameRef = useRef<number | null>(null);
+  const initialFloorLoadRef = useRef(false);
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER";
 
-  const loadFloorPlan = useCallback(async () => {
+  const loadFloorPlansList = useCallback(async () => {
+    if (!token) return;
+    try {
+      const plans = await getFloorPlans(token);
+      setFloorPlans(plans);
+      if (plans.length > 0 && selectedFloorPlanId === null) {
+        setSelectedFloorPlanId(plans[0].id);
+      }
+    } catch (e) {
+      console.error("Could not load floor plans", e);
+    }
+  }, [token, selectedFloorPlanId]);
+
+  const loadFloorPlan = useCallback(async (floorPlanId?: number) => {
     if (!token) {
       return;
     }
@@ -85,10 +116,14 @@ export function FloorPlanPage() {
     setError(null);
 
     try {
-      const data = await getFloorPlanView(token);
+      const data = await getFloorPlanView(token, floorPlanId);
       setFloorPlan(data.floorPlan);
       setTables(data.tables);
       setDecorations(data.decorations);
+      setPendingMapChanges({});
+      if (selectedFloorPlanId === null && data.floorPlan) {
+        setSelectedFloorPlanId(data.floorPlan.id);
+      }
       setStatus("ready");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Could not load floor plan.");
@@ -97,26 +132,21 @@ export function FloorPlanPage() {
   }, [token]);
 
   useEffect(() => {
-    void loadFloorPlan();
-  }, [loadFloorPlan]);
-
-  useEffect(() => {
-    if (!token) {
+    if (!token || initialFloorLoadRef.current) {
       return;
     }
+    initialFloorLoadRef.current = true;
+    void loadFloorPlansList();
+    void loadFloorPlan();
+  }, [loadFloorPlan, loadFloorPlansList, token]);
 
-    return connectLiveUpdates({
-      channel: "floor",
-      token,
-      onStatusChange: setWsStatus,
-      onMessage: (message) => {
-        setLastEvent(message.event);
-        if (message.event !== "connected") {
-          void loadFloorPlan();
-        }
-      },
-    });
-  }, [loadFloorPlan, token]);
+  useEffect(() => {
+    tablesRef.current = tables;
+  }, [tables]);
+
+  useEffect(() => {
+    decorationsRef.current = decorations;
+  }, [decorations]);
 
   const selectedTable = useMemo(() => {
     if (selection?.type !== "TABLE") {
@@ -138,15 +168,20 @@ export function FloorPlanPage() {
     }
 
     if (selectedTable) {
-      setDraftPosition(toPosition(selectedTable));
+      const position = toPosition(selectedTable);
+      pendingPositionRef.current = position;
+      setDraftPosition(position);
       return;
     }
 
     if (selectedDecoration) {
-      setDraftPosition(toPosition(selectedDecoration));
+      const position = toPosition(selectedDecoration);
+      pendingPositionRef.current = position;
+      setDraftPosition(position);
       return;
     }
 
+    pendingPositionRef.current = null;
     setDraftPosition(null);
   }, [interaction, selectedDecoration, selectedTable]);
 
@@ -155,7 +190,18 @@ export function FloorPlanPage() {
       return;
     }
 
+    const flushPendingPosition = () => {
+      dragFrameRef.current = null;
+      const nextPosition = pendingPositionRef.current;
+      if (!nextPosition) {
+        return;
+      }
+      applyPositionLocally(interaction.selection, nextPosition);
+      setDraftPosition(nextPosition);
+    };
+
     const handleMove = (event: globalThis.PointerEvent) => {
+      event.preventDefault();
       const dx = (event.clientX - interaction.startClientX) / mapScale;
       const dy = (event.clientY - interaction.startClientY) / mapScale;
       const nextPosition =
@@ -163,29 +209,41 @@ export function FloorPlanPage() {
           ? movePosition(interaction.startPosition, dx, dy)
           : resizePosition(interaction.startPosition, dx, dy, interaction.handle ?? "se");
 
-      applyPositionLocally(interaction.selection, nextPosition);
-      setDraftPosition(nextPosition);
+      pendingPositionRef.current = nextPosition;
+      if (dragFrameRef.current === null) {
+        dragFrameRef.current = window.requestAnimationFrame(flushPendingPosition);
+      }
     };
 
     const handleUp = () => {
       const finalSelection = interaction.selection;
-      const finalPosition = getSelectedPosition(finalSelection);
-      setInteraction(null);
-      if (finalPosition) {
-        void persistPosition(finalSelection, finalPosition);
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
       }
+      const finalPosition = pendingPositionRef.current ?? getSelectedPosition(finalSelection);
+      if (finalPosition) {
+        applyPositionLocally(finalSelection, finalPosition);
+        setDraftPosition(finalPosition);
+        queueMapPosition(finalSelection, finalPosition);
+      }
+      setInteraction(null);
     };
 
-    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointermove", handleMove, { passive: false });
     window.addEventListener("pointerup", handleUp, { once: true });
 
     return () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", handleUp);
+      if (dragFrameRef.current !== null) {
+        window.cancelAnimationFrame(dragFrameRef.current);
+        dragFrameRef.current = null;
+      }
     };
-  // The pointer effect must track the current in-flight interaction and latest objects.
+  // The functions use refs/functional state updates, so pointer subscriptions stay stable while dragging.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [interaction, decorations, mapScale, tables]);
+  }, [interaction, mapScale]);
 
   const counts = useMemo(() => {
     return tables.reduce(
@@ -202,7 +260,10 @@ export function FloorPlanPage() {
   if (status === "loading" || status === "idle") {
     return (
       <section className="page-stack">
-        <FloorHeader wsStatus={wsStatus} lastEvent={lastEvent} />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+          <div className="floor-header-actions">
+          </div>
+        </div>
         <div className="module-placeholder">Loading floor plan...</div>
       </section>
     );
@@ -211,23 +272,152 @@ export function FloorPlanPage() {
   if (status === "error") {
     return (
       <section className="page-stack">
-        <FloorHeader wsStatus={wsStatus} lastEvent={lastEvent} />
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "1rem" }}>
+          <div className="floor-header-actions">
+            {canEdit && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isSaving || Object.keys(pendingMapChanges).length === 0}
+                onClick={() => {
+                  void saveMapChanges();
+                }}
+              >
+                Zapisz mapę
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                void loadFloorPlan(selectedFloorPlanId ?? undefined);
+              }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
         <div className="error-box">{error}</div>
-        <button type="button" className="primary-button" onClick={loadFloorPlan}>
-          Reload
-        </button>
       </section>
     );
   }
 
+  const handleCreateFloorPlan = async () => {
+    const name = await prompt({ title: "Wpisz nazwę nowej sali (np. Taras):" });
+    if (!name || !token) return;
+    try {
+      const newPlan = await createFloorPlan(token, { name, is_active: true });
+      setFloorPlans((prev) => [...prev, newPlan]);
+      setSelectedFloorPlanId(newPlan.id);
+      await loadFloorPlan(newPlan.id);
+    } catch {
+      setError("Nie udało się utworzyć nowej sali");
+    }
+  };
+
   return (
     <section className="page-stack">
-      <FloorHeader
-        floorPlan={floorPlan}
-        wsStatus={wsStatus}
-        lastEvent={lastEvent}
-        onReload={loadFloorPlan}
-      />
+      <div className="category-tabs" style={{ marginBottom: "1rem" }}>
+        {floorPlans.map((plan) => (
+          <div key={plan.id} style={{ display: "flex", gap: "4px", flex: "0 0 auto", alignItems: "center" }}>
+            <button
+              type="button"
+              className={selectedFloorPlanId === plan.id ? "active" : ""}
+              onClick={() => {
+                setSelection(null);
+                setSelectedFloorPlanId(plan.id);
+                void loadFloorPlan(plan.id);
+              }}
+              onDoubleClick={async () => {
+                if (!canEdit) return;
+                const newName = await prompt({ title: "Zmień nazwę sali", defaultValue: plan.name });
+                if (newName && newName !== plan.name && token) {
+                  try {
+                    await updateFloorPlan(token, plan.id, { name: newName });
+                    setFloorPlans((prev) =>
+                      prev.map((p) => (p.id === plan.id ? { ...p, name: newName } : p))
+                    );
+                    if (floorPlan?.id === plan.id) {
+                      setFloorPlan((prev) => (prev ? { ...prev, name: newName } : prev));
+                    }
+                  } catch {
+                    setError("Nie udało się zmienić nazwy");
+                  }
+                }
+              }}
+            >
+              {plan.name}
+            </button>
+            {canEdit && selectedFloorPlanId === plan.id && (
+              <button
+                type="button"
+                style={{
+                  padding: "0 8px",
+                  color: "#e63946",
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: "1.1rem",
+                }}
+                onClick={async () => {
+                  const yes = await confirm({ title: `Czy na pewno usunąć salę "${plan.name}"?` });
+                  if (yes && token) {
+                    try {
+                      await deleteFloorPlan(token, plan.id);
+                      const remaining = floorPlans.filter((p) => p.id !== plan.id);
+                      setFloorPlans(remaining);
+                      if (remaining.length > 0) {
+                        setSelectedFloorPlanId(remaining[0].id);
+                        await loadFloorPlan(remaining[0].id);
+                      } else {
+                        setSelectedFloorPlanId(null);
+                        setFloorPlan(null);
+                      }
+                    } catch {
+                      setError("Nie udało się usunąć sali");
+                    }
+                  }
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+        ))}
+        <div style={{ marginLeft: "auto", display: "flex", gap: "1rem", alignItems: "center" }}>
+          {canEdit && (
+            <button type="button" className="ghost-button" onClick={handleCreateFloorPlan}>
+              + Dodaj salę
+            </button>
+          )}
+          <div className="floor-header-actions">
+            {canEdit && (
+              <button
+                type="button"
+                className="primary-button"
+                disabled={isSaving || Object.keys(pendingMapChanges).length === 0}
+                onClick={() => {
+                  void saveMapChanges();
+                }}
+              >
+                Zapisz mapę
+                {Object.keys(pendingMapChanges).length > 0
+                  ? ` (${Object.keys(pendingMapChanges).length})`
+                  : ""}
+              </button>
+            )}
+            <button
+              type="button"
+              className="ghost-button"
+              onClick={() => {
+                void loadFloorPlan(selectedFloorPlanId ?? undefined);
+              }}
+            >
+              Reload
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="floor-layout">
         <div className="floor-map-panel">
@@ -247,9 +437,9 @@ export function FloorPlanPage() {
               <button
                 type="button"
                 className="tool-button"
-                onClick={() => setMapScale(1)}
+                onClick={() => setMapScale(0.7)}
               >
-                {Math.round(mapScale * 100)}%
+                {Math.round((mapScale / 0.7) * 100)}%
               </button>
               <button
                 type="button"
@@ -430,7 +620,7 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await createRestaurantTableOnFloorPlan(token, floorPlan.id, {
+      const createdTablePosition = await createRestaurantTableOnFloorPlan(token, floorPlan.id, {
         table_number: newTableNumber.trim(),
         current_guests: null,
         is_active: true,
@@ -443,8 +633,22 @@ export function FloorPlanPage() {
           shape,
         },
       });
+      setTables((items) => [
+        ...items,
+        {
+          ...createdTablePosition,
+          table: {
+            id: createdTablePosition.table_id,
+            table_number: newTableNumber.trim(),
+            current_guests: null,
+            status: "FREE",
+            qr_code_url: null,
+            qr_token: null,
+            is_active: true,
+          },
+        },
+      ]);
       setNewTableNumber("");
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create table.");
     } finally {
@@ -468,7 +672,7 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await createFloorPlanDecoration(token, floorPlan.id, {
+      const createdDecoration = await createFloorPlanDecoration(token, floorPlan.id, {
         floor_plan_id: floorPlan.id,
         x,
         y,
@@ -479,8 +683,8 @@ export function FloorPlanPage() {
         color: "#252b2d",
         label: newDecorationLabel.trim() || null,
       });
+      setDecorations((items) => [...items, createdDecoration]);
       setNewDecorationLabel("");
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not create object.");
     } finally {
@@ -489,7 +693,7 @@ export function FloorPlanPage() {
   }
 
   async function saveTableNumber(tableId: number, tableNumber: string) {
-    if (!token) {
+    if (!token || !floorPlan) {
       return;
     }
 
@@ -502,10 +706,14 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await updateRestaurantTable(token, tableId, {
+      const updatedTable = await updateRestaurantTable(token, tableId, {
         table_number: nextTableNumber,
       });
-      await loadFloorPlan();
+      setTables((items) =>
+        items.map((item) =>
+          item.table_id === tableId ? { ...item, table: updatedTable } : item,
+        ),
+      );
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not save table number.");
     } finally {
@@ -521,10 +729,12 @@ export function FloorPlanPage() {
     setIsSaving(true);
     setEditorError(null);
     try {
-      await updateFloorPlanDecoration(token, floorPlan.id, decorationId, {
+      const updatedDecoration = await updateFloorPlanDecoration(token, floorPlan.id, decorationId, {
         label: label.trim() || null,
       });
-      await loadFloorPlan();
+      setDecorations((items) =>
+        items.map((item) => (item.id === decorationId ? updatedDecoration : item)),
+      );
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not save label.");
     } finally {
@@ -538,6 +748,7 @@ export function FloorPlanPage() {
     mode: "MOVE" | "RESIZE",
     handle?: ResizeHandle,
   ) {
+    event.preventDefault();
     event.stopPropagation();
     setSelection(nextSelection);
 
@@ -550,6 +761,7 @@ export function FloorPlanPage() {
       return;
     }
 
+    pendingPositionRef.current = startPosition;
     setInteraction({
       mode,
       selection: nextSelection,
@@ -566,29 +778,43 @@ export function FloorPlanPage() {
     }
 
     applyPositionLocally(selection, draftPosition);
-    await persistPosition(selection, draftPosition);
+    queueMapPosition(selection, draftPosition);
   }
 
-  async function persistPosition(
+  function queueMapPosition(
     targetSelection: NonNullable<Selection>,
     position: FloorPlanTablePositionInput,
   ) {
+    const key = `${targetSelection.type}:${targetSelection.id}`;
+    setPendingMapChanges((changes) => ({
+      ...changes,
+      [key]: { selection: targetSelection, position },
+    }));
+  }
+
+  async function saveMapChanges() {
     if (!token || !floorPlan) {
+      return;
+    }
+
+    const changes = Object.values(pendingMapChanges);
+    if (changes.length === 0) {
       return;
     }
 
     setIsSaving(true);
     setEditorError(null);
     try {
-      if (targetSelection.type === "TABLE") {
-        await updateFloorPlanTablePosition(token, floorPlan.id, targetSelection.id, position);
-      } else {
-        await updateFloorPlanDecoration(token, floorPlan.id, targetSelection.id, position);
-      }
-      await loadFloorPlan();
+      await Promise.all(
+        changes.map(({ selection: targetSelection, position }) =>
+          targetSelection.type === "TABLE"
+            ? updateFloorPlanTablePosition(token, floorPlan.id, targetSelection.id, position)
+            : updateFloorPlanDecoration(token, floorPlan.id, targetSelection.id, position),
+        ),
+      );
+      setPendingMapChanges({});
     } catch (exc) {
-      setEditorError(exc instanceof ApiError ? exc.message : "Could not save position.");
-      await loadFloorPlan();
+      setEditorError(exc instanceof ApiError ? exc.message : "Could not save map.");
     } finally {
       setIsSaving(false);
     }
@@ -604,6 +830,7 @@ export function FloorPlanPage() {
     try {
       if (selection.type === "DECOR") {
         await deleteFloorPlanDecoration(token, floorPlan.id, selection.id);
+        setDecorations((items) => items.filter((item) => item.id !== selection.id));
       } else {
         const table = tables.find((item) => item.id === selection.id);
         if (!table) {
@@ -611,9 +838,15 @@ export function FloorPlanPage() {
         }
         await deleteFloorPlanTable(token, floorPlan.id, table.id);
         await deleteRestaurantTable(token, table.table_id);
+        setTables((items) => items.filter((item) => item.id !== selection.id));
       }
+      const deletedKey = `${selection.type}:${selection.id}`;
+      setPendingMapChanges((changes) => {
+        const nextChanges = { ...changes };
+        delete nextChanges[deletedKey];
+        return nextChanges;
+      });
       setSelection(null);
-      await loadFloorPlan();
     } catch (exc) {
       setEditorError(exc instanceof ApiError ? exc.message : "Could not delete object.");
     } finally {
@@ -623,11 +856,13 @@ export function FloorPlanPage() {
 
   function getSelectedPosition(targetSelection: NonNullable<Selection>) {
     if (targetSelection.type === "TABLE") {
-      const item = tables.find((table) => table.id === targetSelection.id);
+      const item = tablesRef.current.find((table) => table.id === targetSelection.id);
       return item ? toPosition(item) : null;
     }
 
-    const item = decorations.find((decoration) => decoration.id === targetSelection.id);
+    const item = decorationsRef.current.find(
+      (decoration) => decoration.id === targetSelection.id,
+    );
     return item ? toPosition(item) : null;
   }
 
@@ -652,38 +887,7 @@ export function FloorPlanPage() {
   }
 }
 
-function FloorHeader({
-  floorPlan,
-  wsStatus,
-  lastEvent,
-  onReload,
-}: {
-  floorPlan?: FloorPlan | null;
-  wsStatus: string;
-  lastEvent: string | null;
-  onReload?: () => void;
-}) {
-  return (
-    <div className="floor-header">
-      <div>
-        <span className="eyebrow">Floor plan</span>
-        <h1>{floorPlan?.name ?? "Room map"}</h1>
-        <p className="muted">
-          Live table status preview for waiter and manager workstations.
-        </p>
-      </div>
-      <div className="floor-header-actions">
-        <span className={`ws-pill ${wsStatus}`}>{wsStatus}</span>
-        {lastEvent && <span className="event-pill">{lastEvent}</span>}
-        {onReload && (
-          <button type="button" className="ghost-button" onClick={onReload}>
-            Reload
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+
 
 function StatusBadge({
   label,
@@ -832,18 +1036,20 @@ function EditorPanel({
       </div>
       <label className="compact-field">
         Table number
-        <input
+        <TouchInput
+          keyboardLabel="Numer stolika"
           value={tableNumber}
-          onChange={(event) => onTableNumberChange(event.target.value)}
+          onValueChange={onTableNumberChange}
           placeholder="e.g. 12"
         />
       </label>
       {isDecorationTool && (
         <label className="compact-field">
           Object label
-          <input
+          <TouchInput
+            keyboardLabel="Nazwa obiektu"
             value={decorationLabel}
-            onChange={(event) => onDecorationLabelChange(event.target.value)}
+            onValueChange={onDecorationLabelChange}
             placeholder="e.g. Bar"
             maxLength={150}
           />
@@ -934,10 +1140,12 @@ function NumberField({
   return (
     <label className="compact-field">
       {label}
-      <input
-        type="number"
+      <TouchInput
+        keyboardLabel={label}
+        keyboardMode="numeric"
+        type="text"
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        onValueChange={onChange}
       />
     </label>
   );
@@ -972,10 +1180,22 @@ function TableDetails({ item }: { item: FloorTableView }) {
           {item.width} x {item.height}
         </strong>
       </div>
-      {table?.qr_code_url && (
-        <a href={table.qr_code_url} target="_blank" rel="noreferrer">
-          Open QR URL
-        </a>
+      {table?.qr_token && (
+        <div className="table-qr-card">
+          <img
+            src={getTableQrImageUrl(table.qr_token)}
+            alt={`QR code for table ${table.table_number}`}
+          />
+          <span className="detail-label">Permanent guest QR</span>
+          <div className="table-qr-actions">
+            <a href={getTableGuestUrl(table.qr_token)} target="_blank" rel="noreferrer">
+              Open guest page
+            </a>
+            <a href={getTableQrImageUrl(table.qr_token, { download: true, size: 900 })}>
+              Download PNG
+            </a>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1001,9 +1221,10 @@ function TableNumberEditor({
       <h2>Table number</h2>
       <label className="compact-field">
         Table number
-        <input
+        <TouchInput
+          keyboardLabel="Numer stolika"
           value={tableNumber}
-          onChange={(event) => setTableNumber(event.target.value)}
+          onValueChange={setTableNumber}
           placeholder="e.g. 12"
           maxLength={20}
         />
@@ -1059,9 +1280,10 @@ function DecorationLabelEditor({
       <h2>Label</h2>
       <label className="compact-field">
         Object label
-        <input
+        <TouchInput
+          keyboardLabel="Nazwa obiektu"
           value={label}
-          onChange={(event) => setLabel(event.target.value)}
+          onValueChange={setLabel}
           placeholder="e.g. Bar"
           maxLength={150}
         />

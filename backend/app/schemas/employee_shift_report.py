@@ -29,6 +29,10 @@ class EmployeeShiftReportUpdate(OrmBaseModel):
     report_data: dict[str, Any] | None = None
 
 
+class EmployeeShiftReportPreview(EmployeeShiftReportBase):
+    pass
+
+
 class EmployeeShiftReportRead(EmployeeShiftReportBase):
     id: int
     created_at: datetime

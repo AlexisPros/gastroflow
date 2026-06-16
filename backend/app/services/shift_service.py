@@ -50,6 +50,18 @@ class ShiftService:
     ) -> EmployeeShift | None:
         return await crud_employee_shift.get_open_by_user(db, user_id=user.id)
 
+    async def preview_current_shift_report(
+        self,
+        db: AsyncSession,
+        *,
+        user: User,
+    ) -> EmployeeShiftReport | None:
+        shift = await self.get_current_shift(db, user=user)
+        if shift is None:
+            return None
+
+        return await self._build_report(db, shift=shift)
+
     async def require_open_shift(
         self,
         db: AsyncSession,
@@ -103,7 +115,7 @@ class ShiftService:
         result = await db.execute(
             select(Order).where(
                 Order.shift_id == shift.id,
-                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
             ),
         )
         active_order = result.scalar_one_or_none()

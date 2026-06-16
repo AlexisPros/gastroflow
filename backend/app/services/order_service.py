@@ -1,27 +1,34 @@
 from dataclasses import dataclass, field
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.websocket_manager import websocket_manager
 from app.crud import order_action_log, order_transfer_log, product_kitchen_step
 from app.crud import employee_shift as crud_employee_shift
 from app.models.kitchen_task import KitchenTask
+from app.models.employee_shift import EmployeeShift
 from app.models.modifier import Modifier
 from app.models.order import Order
 from app.models.order_action_log import OrderActionLog
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
+from app.models.order_transfer_log import OrderTransferLog
 from app.models.product import Product
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
+from app.models.user import User
+from app.core.security import verify_pin
+from app.services.discount_service import discount_service
 
 
 @dataclass(slots=True)
 class OrderItemRequest:
     product_id: int
     quantity: int = 1
+    position: int = 0
+    course_number: int = 1
     notes: str | None = None
     product_modifier_ids: list[int] = field(default_factory=list)
 
@@ -33,11 +40,26 @@ class OrderService:
         *,
         table_id: int | None = None,
         waiter_id: int | None = None,
+        guest_count: int | None = None,
         source: str = "WAITER",
+        idempotency_key: str | None = None,
         items: list[OrderItemRequest],
     ) -> Order:
+        if idempotency_key:
+            existing_result = await db.execute(
+                select(Order).where(Order.idempotency_key == idempotency_key),
+            )
+            existing_order = existing_result.scalar_one_or_none()
+            if existing_order is not None:
+                if existing_order.waiter_id != waiter_id:
+                    raise ValueError("This order request belongs to another user.")
+                return existing_order
+
         if not items:
             raise ValueError("Order must contain at least one item.")
+
+        if guest_count is not None and guest_count <= 0:
+            raise ValueError("Guest count must be greater than zero.")
 
         shift_id: int | None = None
         if waiter_id is not None:
@@ -49,11 +71,16 @@ class OrderService:
                 raise ValueError("Start shift first.")
             shift_id = shift.id
 
+        if table_id is not None:
+            await self._ensure_table_accepts_waiter_order(db, table_id=table_id)
+
         order = Order(
             table_id=table_id,
             waiter_id=waiter_id,
+            guest_count=guest_count,
             shift_id=shift_id,
             source=source,
+            idempotency_key=idempotency_key,
             total_amount=Decimal("0.00"),
         )
         db.add(order)
@@ -81,6 +108,11 @@ class OrderService:
         order.discount_amount = Decimal("0.00")
         order.estimated_time = max(item_estimates) if item_estimates else None
 
+        await self._set_order_table_status(
+            db,
+            order=order,
+            status="OCCUPIED",
+        )
         db.add(order)
         await db.commit()
         await db.refresh(order)
@@ -93,6 +125,73 @@ class OrderService:
                 "waiter_id": order.waiter_id,
                 "source": order.source,
                 "status": order.status,
+                "table_status": "OCCUPIED",
+            },
+        )
+        return order
+
+    async def change_guest_count(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        guest_count: int,
+    ) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Guest count can only be changed for an active order.")
+        if guest_count <= 0:
+            raise ValueError("Guest count must be greater than zero.")
+        order.guest_count = guest_count
+        if order.table_id is not None:
+            result = await db.execute(
+                select(RestaurantTable).where(RestaurantTable.id == order.table_id),
+            )
+            table = result.scalar_one_or_none()
+            if table is not None:
+                table.current_guests = guest_count
+                db.add(table)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        return order
+
+    async def change_order_table(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        table_id: int | None,
+    ) -> Order:
+        if order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Only an active order can be moved.")
+        if table_id == order.table_id:
+            return order
+
+        old_table_id = order.table_id
+        if table_id is not None:
+            table = await self._ensure_table_accepts_waiter_order(db, table_id=table_id)
+            table.status = "OCCUPIED"
+            table.current_guests = order.guest_count
+            db.add(table)
+
+        order.table_id = table_id
+        db.add(order)
+        if old_table_id is not None:
+            await self._release_table_if_no_active_orders(
+                db,
+                order=order,
+                table_id=old_table_id,
+            )
+
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor", "managers"],
+            event="order_table_changed",
+            data={
+                "order_id": order.id,
+                "old_table_id": old_table_id,
+                "table_id": table_id,
             },
         )
         return order
@@ -149,7 +248,9 @@ class OrderService:
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table.table_number,
                 "guest_count": order.guest_count,
+                "total_amount": str(order.total_amount),
                 "status": order.status,
                 "table_status": table.status,
             },
@@ -213,9 +314,12 @@ class OrderService:
             Decimal("0.00"),
         )
         order.subtotal_amount = subtotal_amount
-        order.total_amount = max(
-            subtotal_amount - order.discount_amount,
-            Decimal("0.00"),
+        order.total_amount = (
+            max(
+                subtotal_amount - order.discount_amount,
+                Decimal("0.00"),
+            )
+            + order.tip_amount
         )
         order.estimated_time = await self._calculate_order_estimated_time(
             db,
@@ -240,6 +344,237 @@ class OrderService:
         )
         return order
 
+    async def add_items_to_order(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        items: list[OrderItemRequest],
+    ) -> Order:
+        if order.status != "OPEN":
+            raise ValueError("Only open orders can receive new items.")
+
+        if not items:
+            raise ValueError("Order must contain at least one item.")
+
+        existing_items_result = await db.execute(
+            select(OrderItem).where(OrderItem.order_id == order.id),
+        )
+        existing_items = list(existing_items_result.scalars().all())
+        next_position = (
+            max((item.position for item in existing_items), default=-1) + 1
+        )
+
+        item_estimates: list[int] = []
+        for index, item_request in enumerate(items):
+            item_request.position = next_position + index
+            order_item, item_total = await self._create_order_item(
+                db,
+                order_id=order.id,
+                item_request=item_request,
+            )
+            order.subtotal_amount += item_total
+            order.total_amount += item_total
+            item_estimated_time = await self._create_kitchen_task_for_item(
+                db,
+                order_item=order_item,
+            )
+            if item_estimated_time is not None:
+                item_estimates.append(item_estimated_time)
+
+        if item_estimates:
+            order.estimated_time = max(
+                [order.estimated_time or 0, *item_estimates],
+            )
+
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar"],
+            event="order_items_added",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "status": order.status,
+            },
+        )
+        return order
+
+    async def cancel_order_with_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        manager_pin: str,
+    ) -> Order:
+        await self._authorize_manager_pin(db, manager_pin=manager_pin)
+
+        if order.status not in {"OPEN", "PENDING_CONFIRMATION"}:
+            raise ValueError("Only active orders can be cancelled.")
+
+        order.status = "CANCELLED"
+        await self._release_table_if_no_active_orders(db, order=order)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor", "managers"],
+            event="order_cancelled",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "status": order.status,
+                "table_status": "FREE",
+            },
+        )
+        return order
+
+    async def verify_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        manager_pin: str,
+    ) -> User:
+        return await self._authorize_manager_pin(db, manager_pin=manager_pin)
+
+    async def void_order_item(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        order_item_id: int,
+        current_user: User,
+        manager_pin: str | None = None,
+    ) -> Order:
+        if order.status != "OPEN":
+            raise ValueError("Only open orders can be changed.")
+
+        authorized_user = current_user
+        if current_user.role not in {"ADMIN", "MANAGER"}:
+            if not manager_pin:
+                raise ValueError("Manager PIN is required.")
+            authorized_user = await self._authorize_manager_pin(
+                db,
+                manager_pin=manager_pin,
+            )
+
+        result = await db.execute(
+            select(OrderItem).where(
+                OrderItem.id == order_item_id,
+                OrderItem.order_id == order.id,
+            ),
+        )
+        order_item = result.scalar_one_or_none()
+        if order_item is None:
+            raise ValueError("Order item does not exist in this order.")
+
+        remaining_result = await db.execute(
+            select(OrderItem).where(
+                OrderItem.order_id == order.id,
+                OrderItem.id != order_item.id,
+            ),
+        )
+        base_total = sum(
+            (item.total_price for item in remaining_result.scalars().all()),
+            Decimal("0.00"),
+        )
+        discount_amount = Decimal("0.00")
+        if order.discount_id is not None:
+            discount = await discount_service._get_active_discount(
+                db,
+                discount_id=order.discount_id,
+            )
+            discount_amount = discount_service.calculate_discount_amount(
+                discount=discount,
+                base_total=base_total,
+            )
+
+        order.subtotal_amount = base_total
+        order.discount_amount = discount_amount
+        order.total_amount = (
+            max(base_total - discount_amount, Decimal("0.00"))
+            + order.tip_amount
+        )
+
+        db.add(
+            OrderActionLog(
+                order_id=order.id,
+                user_id=authorized_user.id,
+                action_type="ORDER_ITEM_VOIDED",
+                description=f"Voided order item #{order_item.id}.",
+            ),
+        )
+        await db.delete(order_item)
+        db.add(order)
+        await db.commit()
+        await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar", "managers"],
+            event="order_item_voided",
+            data={
+                "order_id": order.id,
+                "order_item_id": order_item_id,
+                "status": order.status,
+                "total_amount": str(order.total_amount),
+            },
+        )
+        return order
+
+    async def _authorize_manager_pin(
+        self,
+        db: AsyncSession,
+        *,
+        manager_pin: str,
+    ) -> User:
+        result = await db.execute(
+            select(User).where(
+                User.role.in_(["ADMIN", "MANAGER"]),
+                User.is_active.is_(True),
+            ),
+        )
+        for user in result.scalars().all():
+            if user.pin_hash and verify_pin(manager_pin, user.pin_hash):
+                return user
+
+        raise ValueError("Manager PIN is invalid.")
+
+    async def _release_table_if_no_active_orders(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        table_id: int | None = None,
+    ) -> None:
+        target_table_id = order.table_id if table_id is None else table_id
+        if target_table_id is None:
+            return
+
+        active_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == target_table_id,
+                Order.id != order.id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
+            )
+            .limit(1),
+        )
+        if active_order_result.scalar_one_or_none() is not None:
+            return
+
+        result = await db.execute(
+            select(RestaurantTable)
+            .where(RestaurantTable.id == target_table_id)
+            .with_for_update(),
+        )
+        table = result.scalar_one_or_none()
+        if table is None:
+            return
+
+        table.status = "FREE"
+        table.current_guests = None
+        db.add(table)
+
     async def _ensure_table_accepts_qr_order(
         self,
         db: AsyncSession,
@@ -247,7 +582,9 @@ class OrderService:
         table_id: int,
     ) -> RestaurantTable:
         result = await db.execute(
-            select(RestaurantTable).where(RestaurantTable.id == table_id),
+            select(RestaurantTable)
+            .where(RestaurantTable.id == table_id)
+            .with_for_update(),
         )
         table = result.scalar_one_or_none()
 
@@ -273,6 +610,37 @@ class OrderService:
 
         return table
 
+    async def _ensure_table_accepts_waiter_order(
+        self,
+        db: AsyncSession,
+        *,
+        table_id: int,
+    ) -> RestaurantTable:
+        result = await db.execute(
+            select(RestaurantTable)
+            .where(RestaurantTable.id == table_id)
+            .with_for_update(),
+        )
+        table = result.scalar_one_or_none()
+        if table is None:
+            raise ValueError("Restaurant table does not exist.")
+        if not table.is_active:
+            raise ValueError("Restaurant table is not active.")
+        if table.status != "FREE":
+            raise ValueError("Restaurant table is not free.")
+
+        active_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == table_id,
+                Order.status.in_(["PENDING_CONFIRMATION", "OPEN", "IN_PROGRESS"]),
+            )
+            .limit(1),
+        )
+        if active_order_result.scalar_one_or_none() is not None:
+            raise ValueError("Restaurant table already has an active order.")
+        return table
+
     async def _set_order_table_status(
         self,
         db: AsyncSession,
@@ -291,6 +659,8 @@ class OrderService:
             raise ValueError("Restaurant table does not exist.")
 
         table.status = status
+        if status == "OCCUPIED":
+            table.current_guests = order.guest_count
         db.add(table)
 
     async def confirm_pending_qr_order(
@@ -348,6 +718,19 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar", "floor"],
+            event="qr_order_confirmed",
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "waiter_id": order.waiter_id,
+                "shift_id": order.shift_id,
+                "status": order.status,
+                "estimated_time": order.estimated_time,
+                "table_status": "OCCUPIED",
+            },
+        )
         return order
 
     async def transfer_order(
@@ -356,12 +739,137 @@ class OrderService:
         *,
         order: Order,
         to_waiter_id: int,
-    ):
-        return await order_transfer_log.transfer_order(
+    ) -> OrderTransferLog:
+        if order.waiter_id == to_waiter_id:
+            raise ValueError("Order already belongs to this waiter.")
+
+        if order.status in {"CLOSED", "PAID", "CANCELLED", "REJECTED", "MERGED"}:
+            raise ValueError("Only active orders can be transferred.")
+
+        shift = await crud_employee_shift.get_open_by_user(db, user_id=to_waiter_id)
+        if shift is None:
+            raise ValueError("Receiving waiter must have an active shift.")
+
+        transfer_log = await order_transfer_log.transfer_order(
             db,
             order=order,
             to_waiter_id=to_waiter_id,
+            shift_id=shift.id,
         )
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "managers"],
+            event="order_transferred",
+            data={
+                "order_id": order.id,
+                "from_waiter_id": transfer_log.from_waiter_id,
+                "to_waiter_id": transfer_log.to_waiter_id,
+            },
+        )
+        return transfer_log
+
+    async def list_active_waiters_for_transfer(
+        self,
+        db: AsyncSession,
+        *,
+        exclude_waiter_id: int,
+    ) -> list[dict]:
+        active_statuses = ["OPEN", "IN_PROGRESS", "PENDING_CONFIRMATION"]
+        result = await db.execute(
+            select(
+                User.id,
+                User.first_name,
+                User.last_name,
+                func.count(func.distinct(Order.id)).label("open_orders_count"),
+            )
+            .join(EmployeeShift, EmployeeShift.user_id == User.id)
+            .outerjoin(
+                Order,
+                (Order.waiter_id == User.id) & (Order.status.in_(active_statuses)),
+            )
+            .where(
+                User.role.in_(["WAITER", "MANAGER"]),
+                User.is_active.is_(True),
+                EmployeeShift.status == "OPEN",
+                User.id != exclude_waiter_id,
+            )
+            .group_by(User.id)
+            .order_by(User.first_name, User.last_name),
+        )
+        return [
+            {
+                "id": row.id,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+                "open_orders_count": row.open_orders_count,
+            }
+            for row in result.all()
+        ]
+
+    async def list_active_waiters_for_order_view(
+        self,
+        db: AsyncSession,
+    ) -> list[dict]:
+        result = await db.execute(
+            select(
+                User.id,
+                User.first_name,
+                User.last_name,
+            )
+            .join(EmployeeShift, EmployeeShift.user_id == User.id)
+            .where(
+                User.role == "WAITER",
+                User.is_active.is_(True),
+                EmployeeShift.status == "OPEN",
+            )
+            .distinct()
+            .order_by(User.first_name, User.last_name),
+        )
+        return [
+            {
+                "id": row.id,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+            }
+            for row in result.all()
+        ]
+
+    async def list_transferable_orders(
+        self,
+        db: AsyncSession,
+        *,
+        waiter_id: int,
+    ) -> list[Order]:
+        result = await db.execute(
+            select(Order)
+            .where(
+                Order.waiter_id == waiter_id,
+                Order.status.in_(["OPEN", "IN_PROGRESS"]),
+            )
+            .order_by(Order.created_at.asc()),
+        )
+        return list(result.scalars().all())
+
+    async def transfer_all_orders(
+        self,
+        db: AsyncSession,
+        *,
+        from_waiter_id: int,
+        to_waiter_id: int,
+    ) -> list[OrderTransferLog]:
+        orders = await self.list_transferable_orders(db, waiter_id=from_waiter_id)
+        if not orders:
+            raise ValueError("Selected waiter has no transferable orders.")
+
+        logs: list[OrderTransferLog] = []
+        for order in orders:
+            logs.append(
+                await self.transfer_order(
+                    db,
+                    order=order,
+                    to_waiter_id=to_waiter_id,
+                ),
+            )
+        return logs
 
     async def record_action(
         self,
@@ -390,6 +898,9 @@ class OrderService:
         if item_request.quantity <= 0:
             raise ValueError("Order item quantity must be greater than zero.")
 
+        if item_request.course_number <= 0:
+            raise ValueError("Course number must be greater than zero.")
+
         product = await self._get_active_product(db, product_id=item_request.product_id)
         modifier_total = Decimal("0.00")
 
@@ -397,6 +908,8 @@ class OrderService:
             order_id=order_id,
             product_id=product.id,
             quantity=item_request.quantity,
+            position=item_request.position,
+            course_number=item_request.course_number,
             unit_price=product.price,
             total_price=Decimal("0.00"),
             notes=item_request.notes,

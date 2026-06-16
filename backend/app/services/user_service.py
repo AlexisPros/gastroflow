@@ -1,6 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.security import verify_password, verify_pin
+from app.core.security import get_pin_lookup, verify_password, verify_pin
 from app.crud.user import user
 from app.models.user import User
 
@@ -63,6 +63,42 @@ class UserService:
             raise ValueError("PIN is assigned to more than one active order user.")
 
         return matching_users[0] if matching_users else None
+
+    async def find_active_user_by_pin(
+        self,
+        db: AsyncSession,
+        *,
+        pin: str,
+    ) -> User | None:
+        pin_lookup = get_pin_lookup(pin)
+        matched_user = await user.get_active_by_pin_lookup(
+            db,
+            pin_lookup=pin_lookup,
+        )
+        if matched_user is not None:
+            # pin_lookup is a keyed HMAC derived from the submitted PIN. Matching it
+            # authenticates the PIN without repeating the intentionally slow bcrypt check.
+            return matched_user
+
+        users = await user.get_active_without_pin_lookup(db)
+        matching_users = [
+            db_user
+            for db_user in users
+            if self.verify_user_pin(user=db_user, pin=pin)
+        ]
+
+        if len(matching_users) > 1:
+            raise ValueError("PIN is assigned to more than one active user.")
+
+        if not matching_users:
+            return None
+
+        matching_user = matching_users[0]
+        matching_user.pin_lookup = pin_lookup
+        db.add(matching_user)
+        await db.commit()
+        await db.refresh(matching_user)
+        return matching_user
 
 
 user_service = UserService()

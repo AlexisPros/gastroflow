@@ -1,5 +1,6 @@
 export const routes = {
   login: "/login",
+  guestQr: "/qr/:qrToken",
   dashboard: "/",
   floor: "/floor",
   waiter: "/waiter",

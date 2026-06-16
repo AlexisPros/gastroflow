@@ -4,6 +4,7 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_current_user
+from app.core.config import settings
 from app.crud import order as crud_order
 from app.crud import restaurant_table as crud_restaurant_table
 from app.main import app
@@ -11,6 +12,7 @@ from app.models.order import Order
 from app.models.restaurant_table import RestaurantTable
 from app.models.user import User
 from app.services import order_service, user_service
+from app.services.qr_code_service import qr_code_service
 
 
 client = TestClient(app)
@@ -52,6 +54,7 @@ def make_restaurant_table() -> RestaurantTable:
 def make_pending_qr_order() -> Order:
     return Order(
         id=1,
+        version=1,
         table_id=1,
         waiter_id=None,
         discount_id=None,
@@ -99,7 +102,9 @@ def test_get_qr_table_is_public(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["table_number"] == "A1"
-    assert response.json()["qr_code_url"] == "http://localhost:3000/qr/a1-token"
+    assert response.json()["qr_code_url"] == (
+        f"{settings.PUBLIC_MENU_BASE_URL.rstrip('/')}/a1-token"
+    )
 
 
 def test_get_qr_table_returns_404_for_unknown_token(monkeypatch):
@@ -117,6 +122,35 @@ def test_get_qr_table_returns_404_for_unknown_token(monkeypatch):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "QR table not found."
+
+
+def test_get_qr_image_uses_permanent_table_url(monkeypatch):
+    async def get_by_qr_token(_db, *, qr_token: str):
+        assert qr_token == "a1-token"
+        return make_restaurant_table()
+
+    def generate_png(*, url: str, size: int):
+        assert url == f"{settings.PUBLIC_MENU_BASE_URL.rstrip('/')}/a1-token"
+        assert size == 600
+        return b"permanent-qr-png"
+
+    monkeypatch.setattr(
+        crud_restaurant_table,
+        "get_by_qr_token",
+        get_by_qr_token,
+    )
+    monkeypatch.setattr(qr_code_service, "generate_png", generate_png)
+
+    response = client.get(
+        "/api/v1/qr/a1-token/image.png",
+        params={"size": 600, "download": "true"},
+    )
+
+    assert response.status_code == 200
+    assert response.content == b"permanent-qr-png"
+    assert response.headers["content-type"] == "image/png"
+    assert response.headers["cache-control"] == "no-store, max-age=0"
+    assert response.headers["content-disposition"].startswith("attachment;")
 
 
 def test_create_qr_pending_order_reaches_service(monkeypatch):
@@ -284,7 +318,7 @@ def test_reject_qr_pending_order_uses_pin_user(monkeypatch):
 
     async def find_service_order_user_by_pin(_db, *, pin: str):
         assert pin == "1234"
-        return make_user("WAITER")
+        return make_user("MANAGER")
 
     async def reject_pending_qr_order(_db, *, order, waiter_id: int, reason: str | None):
         assert order.id == 1
@@ -315,3 +349,27 @@ def test_reject_qr_pending_order_uses_pin_user(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "REJECTED"
     assert response.json()["waiter_id"] == 7
+
+
+def test_reject_qr_pending_order_requires_manager_pin(monkeypatch):
+    async def get(_db, id: int):
+        assert id == 1
+        return make_pending_qr_order()
+
+    async def find_service_order_user_by_pin(_db, *, pin: str):
+        assert pin == "1234"
+        return make_user("WAITER")
+
+    monkeypatch.setattr(crud_order, "get", get)
+    monkeypatch.setattr(
+        user_service,
+        "find_service_order_user_by_pin",
+        find_service_order_user_by_pin,
+    )
+
+    response = client.post(
+        "/api/v1/qr/orders/1/reject",
+        json={"pin": "1234"},
+    )
+
+    assert response.status_code == 403

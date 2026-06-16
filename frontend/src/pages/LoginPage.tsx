@@ -3,12 +3,12 @@ import { Navigate } from "react-router-dom";
 
 import { ApiError } from "../api/apiClient";
 import { useAuth } from "../auth/useAuth";
+import { OnScreenKeyboard } from "../components/OnScreenKeyboard";
 import { routes } from "../routes/routePaths";
 
 export function LoginPage() {
   const { isAuthenticated, login } = useAuth();
-  const [username, setUsername] = useState("admin@gastroflow.dev");
-  const [password, setPassword] = useState("demo1234");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -22,7 +22,7 @@ export function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      await login(username, password);
+      await login(pin);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Login failed.");
     } finally {
@@ -34,38 +34,38 @@ export function LoginPage() {
     <main className="login-page">
       <section className="login-panel">
         <div>
-          <span className="eyebrow">POS platform</span>
+          <span className="eyebrow">GastroFlow POS</span>
           <h1>GastroFlow</h1>
-          <p className="muted">
-            Sign in to open the correct workspace for your role.
-          </p>
+          <p className="muted">Wpisz swój PIN, aby otworzyć stanowisko.</p>
         </div>
 
         <form className="form-stack" onSubmit={handleSubmit}>
-          <label>
-            Email
-            <input
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              autoComplete="username"
-            />
-          </label>
-
-          <label>
-            Password
+          <label className="pin-login-field">
+            PIN
             <input
               type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
+              inputMode="numeric"
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 8))}
+              autoComplete="off"
+              autoFocus
             />
           </label>
 
           {error && <div className="error-box">{error}</div>}
 
-          <button type="submit" className="primary-button" disabled={isSubmitting}>
-            {isSubmitting ? "Signing in..." : "Sign in"}
-          </button>
+          <OnScreenKeyboard
+            mode="numeric"
+            value={pin}
+            onChange={setPin}
+            onSubmit={() => {
+              if (!isSubmitting && pin) {
+                document.querySelector<HTMLFormElement>(".login-panel form")?.requestSubmit();
+              }
+            }}
+            submitLabel="Zaloguj"
+            maxLength={8}
+          />
         </form>
       </section>
     </main>

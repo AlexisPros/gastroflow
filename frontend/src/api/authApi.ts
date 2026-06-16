@@ -1,16 +1,9 @@
 import { apiRequest } from "./apiClient";
 import type { TokenResponse } from "../shared/types";
 
-export async function loginWithPassword(
-  username: string,
-  password: string,
-): Promise<TokenResponse> {
-  const formData = new FormData();
-  formData.set("username", username);
-  formData.set("password", password);
-
-  return apiRequest<TokenResponse>("/auth/token", {
+export async function loginWithPin(pin: string): Promise<TokenResponse> {
+  return apiRequest<TokenResponse>("/auth/pin-login", {
     method: "POST",
-    body: formData,
+    body: { pin },
   });
 }

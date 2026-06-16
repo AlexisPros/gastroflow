@@ -111,6 +111,31 @@ def test_get_current_shift_returns_null_without_open_shift(monkeypatch):
     assert response.json() is None
 
 
+def test_preview_current_shift_report_returns_live_report(monkeypatch):
+    async def preview_current_shift_report(_db, *, user):
+        assert user.id == 1
+        return make_report()
+
+    monkeypatch.setattr(
+        shift_service,
+        "preview_current_shift_report",
+        preview_current_shift_report,
+    )
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/shifts/current/report",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["orders_count"] == 2
+    assert response.json()["total_sales"] == "100.00"
+
+
 def test_close_current_shift_returns_report(monkeypatch):
     async def close_current_shift(_db, *, user, closing_note):
         assert user.id == 1

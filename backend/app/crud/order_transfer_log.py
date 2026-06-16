@@ -33,6 +33,7 @@ class CRUDOrderTransferLog(
         *,
         order: Order,
         to_waiter_id: int,
+        shift_id: int,
     ) -> OrderTransferLog:
         if order.waiter_id is None:
             raise ValueError("Order must have a waiter before it can be transferred.")
@@ -43,6 +44,7 @@ class CRUDOrderTransferLog(
             to_waiter_id=to_waiter_id,
         )
         order.waiter_id = to_waiter_id
+        order.shift_id = shift_id
 
         db.add(order)
         db.add(db_obj)

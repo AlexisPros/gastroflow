@@ -11,7 +11,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.append(str(ROOT_DIR))
 
-from app.core.security import get_password_hash, get_pin_hash
+from app.core.security import get_password_hash, get_pin_hash, get_pin_lookup
 from app.db.session import AsyncSessionLocal
 from app.models.discount import Discount
 from app.models.floor_plan import FloorPlan
@@ -39,8 +39,9 @@ DEV_USERS = [
 ]
 
 OPERATIONAL_TABLES = [
+    "bill_segment_items",
+    "bill_segments",
     "employee_shift_reports",
-    "employee_shifts",
     "order_action_logs",
     "order_transfer_logs",
     "invoices",
@@ -49,6 +50,7 @@ OPERATIONAL_TABLES = [
     "order_item_modifiers",
     "order_items",
     "orders",
+    "employee_shifts",
     "reservation_tables",
     "reservations",
     "floor_plan_tables",
@@ -57,6 +59,8 @@ OPERATIONAL_TABLES = [
 ]
 
 TABLES_WITH_SERIAL_ID = [
+    "bill_segment_items",
+    "bill_segments",
     "discounts",
     "employee_shift_reports",
     "employee_shifts",
@@ -153,6 +157,7 @@ async def seed_users(db: AsyncSession) -> None:
         user.email = email
         user.password_hash = get_password_hash(DEV_PASSWORD)
         user.pin_hash = get_pin_hash(pin)
+        user.pin_lookup = get_pin_lookup(pin)
         user.role = role
         user.is_active = True
 
@@ -252,6 +257,8 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("35.00"),
             "Wolowina, ser, salata, sos",
             15,
+            Decimal("8.00"),
+            "/menu-images/burger-klasyczny.jpg",
         ),
         (
             "Salatka cezar",
@@ -260,6 +267,8 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("28.00"),
             "Kurczak, salata, grzanki, parmezan",
             10,
+            Decimal("8.00"),
+            "/menu-images/salatka-cezar.webp",
         ),
         (
             "Lemoniada",
@@ -268,11 +277,22 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             Decimal("12.00"),
             "Domowa lemoniada",
             3,
+            Decimal("23.00"),
+            "/menu-images/lemoniada.webp",
         ),
     ]
 
     products: dict[str, Product] = {}
-    for name, category, section, price, description, preparation_time in products_data:
+    for (
+        name,
+        category,
+        section,
+        price,
+        description,
+        preparation_time,
+        vat_rate,
+        image_url,
+    ) in products_data:
         product, _ = await get_or_create(
             db,
             Product,
@@ -282,7 +302,9 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
                 "kitchen_section_id": None,
                 "description": description,
                 "price": price,
+                "vat_rate": vat_rate,
                 "preparation_time": preparation_time,
+                "image_url": image_url,
                 "is_active": True,
             },
         )
@@ -290,7 +312,9 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         product.kitchen_section_id = None
         product.description = description
         product.price = price
+        product.vat_rate = vat_rate
         product.preparation_time = preparation_time
+        product.image_url = image_url
         product.is_active = True
         products[name] = product
 

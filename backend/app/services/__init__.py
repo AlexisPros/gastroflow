@@ -1,4 +1,5 @@
 from app.services.authorization_service import authorization_service
+from app.services.bill_split_service import bill_split_service
 from app.services.billing_service import billing_service
 from app.services.discount_service import discount_service
 from app.services.fiscal_service import fiscal_service

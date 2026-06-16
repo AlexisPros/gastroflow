@@ -10,6 +10,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.bill_segment import BillSegment
     from app.models.discount import Discount
     from app.models.employee_shift import EmployeeShift
     from app.models.invoice import Invoice
@@ -28,6 +29,18 @@ class Order(Base):
         Integer,
         primary_key=True,
         index=True,
+    )
+
+    version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+    )
+
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=True,
     )
 
     table_id: Mapped[int | None] = mapped_column(
@@ -49,6 +62,17 @@ class Order(Base):
         ForeignKey("employee_shifts.id"),
         nullable=True,
         index=True,
+    )
+
+    split_parent_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id"),
+        nullable=True,
+        index=True,
+    )
+
+    split_sequence: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
     )
 
     guest_count: Mapped[int | None] = mapped_column(
@@ -129,6 +153,11 @@ class Order(Base):
         back_populates="orders",
     )
 
+    split_parent_order: Mapped[Order | None] = relationship(
+        "Order",
+        remote_side=[id],
+    )
+
     items: Mapped[list[OrderItem]] = relationship(
         "OrderItem",
         back_populates="order",
@@ -155,3 +184,11 @@ class Order(Base):
         "OrderActionLog",
         back_populates="order",
     )
+
+    bill_segments: Mapped[list[BillSegment]] = relationship(
+        "BillSegment",
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
+
+    __mapper_args__ = {"version_id_col": version}

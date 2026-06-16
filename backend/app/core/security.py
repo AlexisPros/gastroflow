@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import hashlib
+import hmac
 from typing import Any
 
 import bcrypt
@@ -34,6 +35,14 @@ def get_pin_hash(pin: str) -> str:
         _sha256_digest(pin),
         bcrypt.gensalt(),
     ).decode("utf-8")
+
+
+def get_pin_lookup(pin: str) -> str:
+    return hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        pin.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def verify_pin(plain_pin: str, pin_hash: str) -> bool:
