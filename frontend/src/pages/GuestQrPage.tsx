@@ -457,7 +457,6 @@ function GuestProductModal({
         <div className="guest-product-modal-body">
           <h1>{product.name}</h1>
           <p>{product.description}</p>
-          {product.ingredients.length > 0 && <small>{product.ingredients.join(", ")}</small>}
           <strong>{money.format(Number(product.price))}</strong>
           {product.modifiers.length > 0 && (
             <div className="guest-modifier-list">

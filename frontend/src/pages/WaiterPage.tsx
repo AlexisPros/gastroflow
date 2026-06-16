@@ -3352,7 +3352,7 @@ function QrOrderPreviewModal({
           <button type="button" className="ghost-button" onClick={onClose} disabled={isSubmitting}>
             Anuluj
           </button>
-          <button type="button" className="ghost-button danger" onClick={onReject} disabled={isSubmitting}>
+          <button type="button" className="ghost-button danger qr-reject-button" onClick={onReject} disabled={isSubmitting}>
             Odrzuć
           </button>
           <button type="button" className="primary-button" onClick={onConfirm} disabled={isSubmitting}>

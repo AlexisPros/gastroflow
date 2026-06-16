@@ -323,7 +323,7 @@ small,
   height: 166px;
   min-height: 166px;
   width: 100%;
-  grid-template-columns: minmax(0, 1fr) 104px;
+  grid-template-columns: minmax(0, 1fr) 118px;
   gap: 12px;
   padding: 14px;
   border: 0;
@@ -361,8 +361,9 @@ small,
 .guest-product-main > img,
 .guest-product-placeholder {
   display: grid;
-  width: 104px;
-  height: 104px;
+  width: 118px;
+  height: 118px;
+  align-self: center;
   overflow: hidden;
   place-items: center;
   border-radius: 7px;
@@ -376,15 +377,17 @@ small,
 
 .guest-add-button {
   position: absolute;
-  right: 12px;
-  bottom: 12px;
-  width: 42px;
-  height: 42px;
+  right: 16px;
+  bottom: 18px;
+  width: 48px;
+  height: 48px;
   border: 0;
   border-radius: 50%;
   background: var(--brand-green);
   color: #fff;
-  font-size: 26px;
+  font-size: 30px;
+  line-height: 1;
+  box-shadow: 0 10px 24px rgba(16, 171, 101, 0.24);
 }
 
 .guest-cart-dock {
@@ -505,6 +508,10 @@ small,
 .guest-product-modal-body small {
   color: #60716c;
   line-height: 1.45;
+}
+
+.guest-product-modal-body p {
+  font-weight: 300;
 }
 
 .guest-product-modal-body > strong {
@@ -1780,6 +1787,12 @@ small,
 
 .qr-preview-actions button {
   min-height: 52px;
+}
+
+.qr-preview-actions .qr-reject-button {
+  border-color: #ff4d55;
+  background: #ff4d55;
+  color: #ffffff;
 }
 
 .qr-order-list article > span {
