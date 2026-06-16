@@ -258,6 +258,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             "Wolowina, ser, salata, sos",
             15,
             Decimal("8.00"),
+            "/menu-images/burger-klasyczny.jpg",
         ),
         (
             "Salatka cezar",
@@ -267,6 +268,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             "Kurczak, salata, grzanki, parmezan",
             10,
             Decimal("8.00"),
+            "/menu-images/salatka-cezar.webp",
         ),
         (
             "Lemoniada",
@@ -276,11 +278,21 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             "Domowa lemoniada",
             3,
             Decimal("23.00"),
+            "/menu-images/lemoniada.webp",
         ),
     ]
 
     products: dict[str, Product] = {}
-    for name, category, section, price, description, preparation_time, vat_rate in products_data:
+    for (
+        name,
+        category,
+        section,
+        price,
+        description,
+        preparation_time,
+        vat_rate,
+        image_url,
+    ) in products_data:
         product, _ = await get_or_create(
             db,
             Product,
@@ -292,6 +304,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
                 "price": price,
                 "vat_rate": vat_rate,
                 "preparation_time": preparation_time,
+                "image_url": image_url,
                 "is_active": True,
             },
         )
@@ -301,6 +314,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         product.price = price
         product.vat_rate = vat_rate
         product.preparation_time = preparation_time
+        product.image_url = image_url
         product.is_active = True
         products[name] = product
 
