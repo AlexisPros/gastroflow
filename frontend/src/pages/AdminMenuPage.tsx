@@ -32,6 +32,7 @@ import {
 } from "../api/adminMenuApi";
 import { ApiError } from "../api/apiClient";
 import { useAuth } from "../auth/useAuth";
+import { usePrompt } from "../components/PromptProvider";
 
 type ProductFormState = AdminProductPayload & {
   id: number | null;
@@ -61,6 +62,7 @@ const money = new Intl.NumberFormat("pl-PL", {
 
 export function AdminMenuPage() {
   const { token } = useAuth();
+  const { confirm } = usePrompt();
   const [menu, setMenu] = useState<AdminMenu>(emptyMenu);
   const [selectedProductId, setSelectedProductId] = useState<number | "NEW">("NEW");
   const [form, setForm] = useState<ProductFormState>(() => createEmptyProductForm());
@@ -178,6 +180,13 @@ export function AdminMenuPage() {
 
   async function deactivateProduct(product: AdminProduct) {
     if (!token) return;
+    const yes = await confirm({
+      title: "Potwierdź usunięcie",
+      message: `Czy na pewno chcesz usunąć produkt "${product.name}" z menu?`,
+      confirmText: "Usuń",
+      cancelText: "Anuluj",
+    });
+    if (!yes) return;
     setIsSaving(true);
     setError(null);
     try {
@@ -259,6 +268,13 @@ export function AdminMenuPage() {
 
   async function removeCategory(category: AdminCategory) {
     if (!token) return;
+    const yes = await confirm({
+      title: "Potwierdź usunięcie kategorii",
+      message: `Czy na pewno chcesz usunąć kategorię "${category.name}"? Spowoduje to również dezaktywację wszystkich jej podkategorii i produktów.`,
+      confirmText: "Usuń",
+      cancelText: "Anuluj",
+    });
+    if (!yes) return;
     await deleteAdminCategory(token, category.id);
     setIsCategoryModalOpen(false);
     await loadMenu();
@@ -300,6 +316,13 @@ export function AdminMenuPage() {
 
   async function removeDiscount(discount: AdminDiscount) {
     if (!token) return;
+    const yes = await confirm({
+      title: "Potwierdź usunięcie rabatu",
+      message: `Czy na pewno chcesz usunąć rabat "${discount.name}"?`,
+      confirmText: "Usuń",
+      cancelText: "Anuluj",
+    });
+    if (!yes) return;
     await deleteAdminDiscount(token, discount.id);
     await loadMenu();
   }
@@ -1073,6 +1096,13 @@ function DiscountEditor({
         <button type="button" onClick={() => void onSave()}>
           {form.id === null ? "Utwórz rabat" : "Zapisz rabat"}
         </button>
+        <button
+          type="button"
+          className="admin-cancel-button"
+          onClick={() => onChange({ id: null, name: "", type: "PERCENT", value: "10.00", is_active: true })}
+        >
+          Anuluj
+        </button>
       </div>
       <div className="admin-discount-list">
         {discounts.map((discount) => (
@@ -1110,6 +1140,7 @@ function ReferenceEditor({
   onSave: (item: AdminIngredient) => Promise<void>;
   onDelete: (item: AdminIngredient) => Promise<void> | undefined;
 }) {
+  const { confirm } = usePrompt();
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("g");
 
@@ -1145,7 +1176,23 @@ function ReferenceEditor({
             defaultValue={item.unit}
             onBlur={(event) => void onSave({ ...item, unit: event.target.value })}
           />
-          <button type="button" className="danger-link" onClick={() => void onDelete(item)}>Usuń</button>
+          <button
+            type="button"
+            className="danger-link"
+            onClick={async () => {
+              const yes = await confirm({
+                title: "Potwierdź usunięcie składnika",
+                message: `Czy na pewno chcesz usunąć składnik "${item.name}"?`,
+                confirmText: "Usuń",
+                cancelText: "Anuluj",
+              });
+              if (yes) {
+                void onDelete(item);
+              }
+            }}
+          >
+            Usuń
+          </button>
         </div>
       ))}
     </div>
@@ -1165,6 +1212,7 @@ function ModifierEditor({
   onSave: (item: AdminModifier) => Promise<void>;
   onDelete: (item: AdminModifier) => Promise<void> | undefined;
 }) {
+  const { confirm } = usePrompt();
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("0.00");
 
@@ -1204,7 +1252,23 @@ function ModifierEditor({
             defaultValue={item.price}
             onBlur={(event) => void onSave({ ...item, price: event.target.value })}
           />
-          <button type="button" className="danger-link" onClick={() => void onDelete(item)}>Usuń</button>
+          <button
+            type="button"
+            className="danger-link"
+            onClick={async () => {
+              const yes = await confirm({
+                title: "Potwierdź usunięcie modyfikatora",
+                message: `Czy na pewno chcesz usunąć modyfikator "${item.name}"?`,
+                confirmText: "Usuń",
+                cancelText: "Anuluj",
+              });
+              if (yes) {
+                void onDelete(item);
+              }
+            }}
+          >
+            Usuń
+          </button>
         </div>
       ))}
     </div>

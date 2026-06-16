@@ -20,12 +20,12 @@ type NavItem = {
 };
 
 const navItems: NavItem[] = [
-  { label: "Floor", path: routes.floor, roles: ["ADMIN", "MANAGER", "WAITER"] },
-  { label: "Waiter", path: routes.waiter, roles: ["ADMIN", "MANAGER", "WAITER"] },
-  { label: "Kitchen", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN"] },
+  { label: "Układ sali", path: routes.floor, roles: ["ADMIN", "MANAGER", "WAITER"] },
+  { label: "Kelner", path: routes.waiter, roles: ["ADMIN", "MANAGER", "WAITER"] },
+  { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN"] },
   { label: "Bar", path: routes.bar, roles: ["ADMIN", "MANAGER", "BARTENDER"] },
-  { label: "Reports", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
-  { label: "Admin", path: routes.admin, roles: ["ADMIN"] },
+  { label: "Raporty", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
+  { label: "Panel Admina", path: routes.admin, roles: ["ADMIN"] },
 ];
 
 export function AppLayout() {
@@ -55,7 +55,7 @@ export function AppLayout() {
       setShiftError(null);
       setCurrentShift(await getCurrentShift(token));
     } catch (exc) {
-      setShiftError(exc instanceof ApiError ? exc.message : "Could not load shift.");
+      setShiftError(exc instanceof ApiError ? exc.message : "Nie udało się załadować zmiany.");
     }
   }, [token]);
 
@@ -233,7 +233,7 @@ export function AppLayout() {
         setCurrentShift(await startShift(token));
       }
     } catch (exc) {
-      setShiftError(exc instanceof ApiError ? exc.message : "Could not update shift.");
+      setShiftError(exc instanceof ApiError ? exc.message : "Nie udało się zaktualizować zmiany.");
     } finally {
       setIsShiftChanging(false);
     }

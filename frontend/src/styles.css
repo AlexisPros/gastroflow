@@ -3455,6 +3455,16 @@ body.touch-keyboard-open .modal-backdrop:has(.product-options-modal) .product-op
   font-weight: 700;
 }
 
+.admin-inline-form button.admin-cancel-button {
+  background: #ffffff;
+  color: #172026;
+  border: 1px solid #cbd8d2;
+}
+
+.admin-inline-form button.admin-cancel-button:hover {
+  background: #f1f5f3;
+}
+
 .admin-primary:disabled,
 .danger:disabled {
   cursor: not-allowed;

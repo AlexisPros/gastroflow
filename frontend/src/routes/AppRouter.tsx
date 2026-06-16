@@ -51,8 +51,8 @@ const router = createBrowserRouter([
                 path: routes.kitchen,
                 element: (
                   <PlaceholderPage
-                    title="Kitchen Display"
-                    description="Kitchen production board with real-time task updates."
+                    title="Ekran Kuchenny"
+                    description="Tablica produkcyjna kuchni z aktualizacjami zadań w czasie rzeczywistym."
                   />
                 ),
               },
@@ -65,8 +65,8 @@ const router = createBrowserRouter([
                 path: routes.bar,
                 element: (
                   <PlaceholderPage
-                    title="Bar Display"
-                    description="Bar tasks, drink preparation and live order updates."
+                    title="Ekran Baru"
+                    description="Zadania baru, przygotowywanie napojów i aktualizacje zamówień na żywo."
                   />
                 ),
               },
