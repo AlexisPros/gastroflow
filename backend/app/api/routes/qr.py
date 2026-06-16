@@ -49,7 +49,9 @@ class PublicQRProductRead(BaseModel):
 
 class PublicQRCategoryRead(BaseModel):
     id: int
+    parent_category_id: int | None
     name: str
+    department: str
     products: list[PublicQRProductRead]
 
 
@@ -205,11 +207,12 @@ async def get_qr_menu(qr_token: str, db: DbSession):
     return [
         PublicQRCategoryRead(
             id=category.id,
+            parent_category_id=category.parent_category_id,
             name=category.name,
+            department=category.department,
             products=products_by_category.get(category.id, []),
         )
         for category in categories
-        if products_by_category.get(category.id)
     ]
 
 

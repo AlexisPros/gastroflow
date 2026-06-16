@@ -125,6 +125,7 @@ export function WaiterPage() {
   const [guestCount, setGuestCount] = useState(2);
   const [department, setDepartment] = useState<MenuDepartment>("KITCHEN");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | "ALL">("ALL");
+  const [selectedSubcategoryId, setSelectedSubcategoryId] = useState<number | null>(null);
   const [cart, setCart] = useState<CartEntry[]>([]);
   const [selectedTicketLine, setSelectedTicketLine] = useState<TicketSelection | null>(null);
   const [isFunctionsMenuOpen, setIsFunctionsMenuOpen] = useState(false);
@@ -429,6 +430,21 @@ export function WaiterPage() {
     () => new Map(categories.map((category) => [category.id, category])),
     [categories],
   );
+  const childCategoriesByParent = useMemo(() => {
+    const map = new Map<number, ProductCategory[]>();
+    for (const category of categories) {
+      if (category.parent_category_id === null) continue;
+      map.set(category.parent_category_id, [
+        ...(map.get(category.parent_category_id) ?? []),
+        category,
+      ]);
+    }
+    return map;
+  }, [categories]);
+  const rootCategories = useMemo(
+    () => categories.filter((category) => category.parent_category_id === null),
+    [categories],
+  );
   const modifiersById = useMemo(
     () => new Map(modifiers.map((modifier) => [modifier.id, modifier])),
     [modifiers],
@@ -449,23 +465,52 @@ export function WaiterPage() {
 
   const departmentCategories = useMemo(
     () =>
-      categories.filter((category) =>
+      rootCategories.filter((category) =>
         department === "BAR"
-          ? isBarCategory(category.name)
-          : !isBarCategory(category.name),
+          ? category.department === "BAR"
+          : category.department !== "BAR",
       ),
-    [categories, department],
+    [department, rootCategories],
+  );
+
+  const selectedSubcategories = useMemo(
+    () =>
+      selectedCategoryId === "ALL"
+        ? []
+        : childCategoriesByParent.get(selectedCategoryId) ?? [],
+    [childCategoriesByParent, selectedCategoryId],
+  );
+
+  const departmentCategoryIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const category of departmentCategories) {
+      ids.add(category.id);
+      for (const child of childCategoriesByParent.get(category.id) ?? []) {
+        ids.add(child.id);
+      }
+    }
+    return ids;
+  }, [childCategoriesByParent, departmentCategories]);
+
+  const selectedCategoryTreeIds = useMemo(() => {
+    if (selectedCategoryId === "ALL") {
+      return departmentCategoryIds;
+    }
+    const ids = new Set<number>([selectedCategoryId]);
+    for (const child of childCategoriesByParent.get(selectedCategoryId) ?? []) {
+      ids.add(child.id);
+    }
+    return ids;
+  }, [childCategoriesByParent, departmentCategoryIds, selectedCategoryId]);
+
+  const activeProductCategoryIds = useMemo(
+    () => (selectedSubcategoryId === null ? selectedCategoryTreeIds : new Set([selectedSubcategoryId])),
+    [selectedCategoryTreeIds, selectedSubcategoryId],
   );
 
   const visibleProducts = useMemo(() => {
-    const departmentCategoryIds = new Set(departmentCategories.map((category) => category.id));
-    return products.filter((product) => {
-      if (!departmentCategoryIds.has(product.category_id)) {
-        return false;
-      }
-      return selectedCategoryId === "ALL" || product.category_id === selectedCategoryId;
-    });
-  }, [departmentCategories, products, selectedCategoryId]);
+    return products.filter((product) => activeProductCategoryIds.has(product.category_id));
+  }, [activeProductCategoryIds, products]);
 
   const productSearchResults = useMemo(() => {
     const query = productSearchQuery.trim().toLowerCase();
@@ -856,7 +901,10 @@ export function WaiterPage() {
               <button
                 type="button"
                 className={selectedCategoryId === "ALL" ? "active" : ""}
-                onClick={() => setSelectedCategoryId("ALL")}
+                onClick={() => {
+                  setSelectedCategoryId("ALL");
+                  setSelectedSubcategoryId(null);
+                }}
               >
                 Wszystko
               </button>
@@ -865,12 +913,37 @@ export function WaiterPage() {
                   key={category.id}
                   type="button"
                   className={selectedCategoryId === category.id ? "active" : ""}
-                  onClick={() => setSelectedCategoryId(category.id)}
+                  onClick={() => {
+                    setSelectedCategoryId(category.id);
+                    setSelectedSubcategoryId(null);
+                  }}
                 >
                   {category.name}
                 </button>
               ))}
             </div>
+
+            {selectedSubcategories.length > 0 && (
+              <div className="subcategory-tabs">
+                <button
+                  type="button"
+                  className={selectedSubcategoryId === null ? "active" : ""}
+                  onClick={() => setSelectedSubcategoryId(null)}
+                >
+                  Wszystkie
+                </button>
+                {selectedSubcategories.map((subcategory) => (
+                  <button
+                    key={subcategory.id}
+                    type="button"
+                    className={selectedSubcategoryId === subcategory.id ? "active" : ""}
+                    onClick={() => setSelectedSubcategoryId(subcategory.id)}
+                  >
+                    {subcategory.name}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div className="product-grid">
               {visibleProducts.map((product) => (
@@ -881,7 +954,6 @@ export function WaiterPage() {
                   onClick={() => startProductAdd(product)}
                 >
                   <span>{product.name}</span>
-                  {product.description && <small>{product.description}</small>}
                   <strong>{formatMoney(Number(product.price))}</strong>
                 </button>
               ))}
@@ -1381,6 +1453,7 @@ export function WaiterPage() {
   function switchDepartment(nextDepartment: MenuDepartment) {
     setDepartment(nextDepartment);
     setSelectedCategoryId("ALL");
+    setSelectedSubcategoryId(null);
   }
 
   function openExistingOrder(order: Order) {
@@ -3514,8 +3587,16 @@ function isBarProduct(
   product: Product,
   categoriesById: Map<number, ProductCategory>,
 ): boolean {
-  const category = categoriesById.get(product.category_id);
-  return category ? isBarCategory(category.name) : false;
+  let category = categoriesById.get(product.category_id);
+  while (category) {
+    if (category.department === "BAR" || isBarCategory(category.name)) {
+      return true;
+    }
+    category = category.parent_category_id === null
+      ? undefined
+      : categoriesById.get(category.parent_category_id);
+  }
+  return false;
 }
 
 function formatDiscountValue(discount: Discount): string {

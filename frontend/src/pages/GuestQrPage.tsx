@@ -13,6 +13,7 @@ import {
 import { createClientId } from "../shared/id";
 
 type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT";
+type MenuDepartment = "KITCHEN" | "BAR";
 type GuestCartItem = {
   id: string;
   product: PublicQrProduct;
@@ -32,7 +33,9 @@ export function GuestQrPage() {
   const [categories, setCategories] = useState<PublicQrCategory[]>([]);
   const [screen, setScreen] = useState<Screen>("GUESTS");
   const [guestCount, setGuestCount] = useState(2);
+  const [department, setDepartment] = useState<MenuDepartment>("KITCHEN");
   const [activeCategoryId, setActiveCategoryId] = useState<number | "ALL">("ALL");
+  const [activeSubcategoryId, setActiveSubcategoryId] = useState<number | null>(null);
   const [selectedProduct, setSelectedProduct] = useState<PublicQrProduct | null>(null);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [cart, setCart] = useState<GuestCartItem[]>([]);
@@ -61,13 +64,56 @@ export function GuestQrPage() {
     };
   }, [qrToken]);
 
-  const visibleProducts = useMemo(
+  const childCategoriesByParent = useMemo(() => {
+    const map = new Map<number, PublicQrCategory[]>();
+    for (const category of categories) {
+      if (category.parent_category_id === null) continue;
+      map.set(category.parent_category_id, [
+        ...(map.get(category.parent_category_id) ?? []),
+        category,
+      ]);
+    }
+    return map;
+  }, [categories]);
+  const rootCategories = useMemo(
+    () =>
+      categories.filter(
+        (category) =>
+          category.parent_category_id === null && category.department === department,
+      ),
+    [categories, department],
+  );
+  const departmentCategories = useMemo(
+    () => categories.filter((category) => category.department === department),
+    [categories, department],
+  );
+  const activeSubcategories = useMemo(
     () =>
       activeCategoryId === "ALL"
-        ? categories.flatMap((category) => category.products)
-        : categories.find((category) => category.id === activeCategoryId)?.products ?? [],
-    [activeCategoryId, categories],
+        ? []
+        : childCategoriesByParent.get(activeCategoryId) ?? [],
+    [activeCategoryId, childCategoriesByParent],
   );
+  const visibleProducts = useMemo(() => {
+    if (activeCategoryId === "ALL") {
+      return departmentCategories.flatMap((category) => category.products);
+    }
+    if (activeSubcategoryId !== null) {
+      return categories.find((category) => category.id === activeSubcategoryId)?.products ?? [];
+    }
+    const parent = categories.find((category) => category.id === activeCategoryId);
+    const children = childCategoriesByParent.get(activeCategoryId) ?? [];
+    return [
+      ...(parent?.products ?? []),
+      ...children.flatMap((category) => category.products),
+    ];
+  }, [
+    activeCategoryId,
+    activeSubcategoryId,
+    categories,
+    childCategoriesByParent,
+    departmentCategories,
+  ]);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
   const cartTotal = cart.reduce((total, item) => {
     const modifiers = item.modifierIds.reduce((sum, modifierId) => {
@@ -82,6 +128,12 @@ export function GuestQrPage() {
   function openProduct(product: PublicQrProduct, itemId?: string) {
     setSelectedProduct(product);
     setEditingItemId(itemId ?? null);
+  }
+
+  function switchDepartment(nextDepartment: MenuDepartment) {
+    setDepartment(nextDepartment);
+    setActiveCategoryId("ALL");
+    setActiveSubcategoryId(null);
   }
 
   function saveProduct(options: { modifierIds: number[]; notes: string }) {
@@ -179,25 +231,68 @@ export function GuestQrPage() {
 
       {screen === "MENU" && (
         <>
+          <nav className="guest-department-tabs">
+            <button
+              type="button"
+              className={department === "KITCHEN" ? "active" : ""}
+              onClick={() => switchDepartment("KITCHEN")}
+            >
+              Dania
+            </button>
+            <button
+              type="button"
+              className={department === "BAR" ? "active" : ""}
+              onClick={() => switchDepartment("BAR")}
+            >
+              Napoje
+            </button>
+          </nav>
           <nav className="guest-category-tabs">
             <button
               type="button"
               className={activeCategoryId === "ALL" ? "active" : ""}
-              onClick={() => setActiveCategoryId("ALL")}
+              onClick={() => {
+                setActiveCategoryId("ALL");
+                setActiveSubcategoryId(null);
+              }}
             >
               Wszystko
             </button>
-            {categories.map((category) => (
+            {rootCategories.map((category) => (
               <button
                 key={category.id}
                 type="button"
                 className={activeCategoryId === category.id ? "active" : ""}
-                onClick={() => setActiveCategoryId(category.id)}
+                onClick={() => {
+                  setActiveCategoryId(category.id);
+                  setActiveSubcategoryId(null);
+                }}
               >
                 {category.name}
               </button>
             ))}
           </nav>
+          {activeSubcategories.length > 0 && (
+            <nav className="guest-subcategory-tabs">
+              <button
+                type="button"
+                className={activeSubcategoryId === null ? "active" : ""}
+                onClick={() => setActiveSubcategoryId(null)}
+              >
+                Wszystkie
+              </button>
+              {activeSubcategories.map((subcategory) => (
+                <button
+                  key={subcategory.id}
+                  type="button"
+                  className={activeSubcategoryId === subcategory.id ? "active" : ""}
+                  onClick={() => setActiveSubcategoryId(subcategory.id)}
+                >
+                  {subcategory.name}
+                </button>
+              ))}
+            </nav>
+          )}
           <section className="guest-menu-list">
             {visibleProducts.map((product) => (
               <article key={product.id} className="guest-product-row">

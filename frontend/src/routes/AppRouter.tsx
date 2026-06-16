@@ -5,6 +5,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { FloorPlanPage } from "../pages/FloorPlanPage";
 import { GuestQrPage } from "../pages/GuestQrPage";
 import { LoginPage } from "../pages/LoginPage";
+import { AdminMenuPage } from "../pages/AdminMenuPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { WaiterPage } from "../pages/WaiterPage";
@@ -85,12 +86,11 @@ const router = createBrowserRouter([
             children: [
               {
                 path: routes.admin,
-                element: (
-                  <PlaceholderPage
-                    title="Admin"
-                    description="Users, resources, menu data and system configuration."
-                  />
-                ),
+                element: <AdminMenuPage />,
+              },
+              {
+                path: routes.adminMenu,
+                element: <AdminMenuPage />,
               },
             ],
           },

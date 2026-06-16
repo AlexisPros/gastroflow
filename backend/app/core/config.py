@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     RECEIPTS_DIR: str = "backend/generated_receipts"
+    MENU_IMAGES_DIR: str = "frontend/public/menu-images"
+    MENU_IMAGES_PUBLIC_PATH: str = "/menu-images"
     PUBLIC_MENU_BASE_URL: str = "http://localhost:3000/qr"
     CORS_ORIGIN_REGEX: str = (
         r"^https?://("
