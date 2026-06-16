@@ -45,7 +45,7 @@ const actions: DashboardAction[] = [
   {
     title: "Admin",
     description: "Zarządzaj użytkownikami, menu i ustawieniami systemu.",
-    path: routes.admin,
+    path: routes.adminMenu,
     roles: ["ADMIN"],
   },
 ];

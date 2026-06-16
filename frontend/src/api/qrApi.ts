@@ -27,7 +27,9 @@ export type PublicQrProduct = {
 
 export type PublicQrCategory = {
   id: number;
+  parent_category_id: number | null;
   name: string;
+  department: "KITCHEN" | "BAR";
   products: PublicQrProduct[];
 };
 

@@ -16,6 +16,7 @@ from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
 from app.models.order_transfer_log import OrderTransferLog
 from app.models.product import Product
+from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
 from app.models.user import User
@@ -972,9 +973,7 @@ class OrderService:
                     ),
                 )
             await db.flush()
-            return self._calculate_product_estimated_time(
-                [step.estimated_time for step in kitchen_steps],
-            )
+            return self._calculate_product_estimated_time(kitchen_steps)
 
         if product.kitchen_section_id is None:
             return None
@@ -1010,14 +1009,50 @@ class OrderService:
 
     def _calculate_product_estimated_time(
         self,
-        step_estimates: list[int | None],
+        kitchen_steps: list[ProductKitchenStep | int | None],
     ) -> int | None:
-        known_estimates = [
-            estimate
-            for estimate in step_estimates
-            if estimate is not None
+        if all(
+            step is None or isinstance(step, int)
+            for step in kitchen_steps
+        ):
+            known_estimates = [
+                estimate
+                for estimate in kitchen_steps
+                if isinstance(estimate, int)
+            ]
+            return max(known_estimates) if known_estimates else None
+
+        active_steps = [
+            step
+            for step in kitchen_steps
+            if isinstance(step, ProductKitchenStep)
+            if step.estimated_time is not None
         ]
-        return max(known_estimates) if known_estimates else None
+        if not active_steps:
+            return None
+
+        step_by_sequence = {
+            step.sequence: step
+            for step in active_steps
+        }
+        memo: dict[int, int] = {}
+
+        def chain_time(sequence: int, visiting: set[int]) -> int:
+            if sequence in memo:
+                return memo[sequence]
+
+            step = step_by_sequence[sequence]
+            own_time = step.estimated_time or 0
+            dependency = step.depends_on_sequence
+            if dependency is None or dependency not in step_by_sequence or dependency in visiting:
+                memo[sequence] = own_time
+                return own_time
+
+            total_time = own_time + chain_time(dependency, {*visiting, sequence})
+            memo[sequence] = total_time
+            return total_time
+
+        return max(chain_time(step.sequence, set()) for step in active_steps)
 
     async def _calculate_order_estimated_time(
         self,

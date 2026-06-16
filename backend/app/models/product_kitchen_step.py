@@ -52,6 +52,11 @@ class ProductKitchenStep(Base):
         nullable=True,
     )
 
+    depends_on_sequence: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

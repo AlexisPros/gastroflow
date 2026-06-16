@@ -5,6 +5,7 @@ import { DashboardPage } from "../pages/DashboardPage";
 import { FloorPlanPage } from "../pages/FloorPlanPage";
 import { GuestQrPage } from "../pages/GuestQrPage";
 import { LoginPage } from "../pages/LoginPage";
+import { AdminMenuPage } from "../pages/AdminMenuPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { WaiterPage } from "../pages/WaiterPage";
@@ -50,8 +51,8 @@ const router = createBrowserRouter([
                 path: routes.kitchen,
                 element: (
                   <PlaceholderPage
-                    title="Kitchen Display"
-                    description="Kitchen production board with real-time task updates."
+                    title="Ekran Kuchenny"
+                    description="Tablica produkcyjna kuchni z aktualizacjami zadań w czasie rzeczywistym."
                   />
                 ),
               },
@@ -64,8 +65,8 @@ const router = createBrowserRouter([
                 path: routes.bar,
                 element: (
                   <PlaceholderPage
-                    title="Bar Display"
-                    description="Bar tasks, drink preparation and live order updates."
+                    title="Ekran Baru"
+                    description="Zadania baru, przygotowywanie napojów i aktualizacje zamówień na żywo."
                   />
                 ),
               },
@@ -85,12 +86,11 @@ const router = createBrowserRouter([
             children: [
               {
                 path: routes.admin,
-                element: (
-                  <PlaceholderPage
-                    title="Admin"
-                    description="Users, resources, menu data and system configuration."
-                  />
-                ),
+                element: <AdminMenuPage />,
+              },
+              {
+                path: routes.adminMenu,
+                element: <AdminMenuPage />,
               },
             ],
           },

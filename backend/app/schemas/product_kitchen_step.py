@@ -8,6 +8,7 @@ class ProductKitchenStepBase(OrmBaseModel):
     description: str | None = None
     sequence: int = 1
     estimated_time: int | None = None
+    depends_on_sequence: int | None = None
     is_active: bool = True
 
 
@@ -22,6 +23,7 @@ class ProductKitchenStepUpdate(OrmBaseModel):
     description: str | None = None
     sequence: int | None = None
     estimated_time: int | None = None
+    depends_on_sequence: int | None = None
     is_active: bool | None = None
 
 
