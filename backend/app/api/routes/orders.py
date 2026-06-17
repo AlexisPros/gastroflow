@@ -83,6 +83,8 @@ class WorkspaceOrderItemModifierRead(BaseModel):
 
 class WorkspaceOrderItemRead(OrderItemRead):
     modifiers: list[WorkspaceOrderItemModifierRead]
+    completed_steps: int = 0
+    total_steps: int = 0
 
 
 class VoidOrderItemRequest(BaseModel):
@@ -167,6 +169,7 @@ async def list_workspace_order_items(db: DbSession, current_user: CurrentUser):
             selectinload(OrderItem.modifiers)
             .selectinload(OrderItemModifier.product_modifier)
             .selectinload(ProductModifier.modifier),
+            selectinload(OrderItem.kitchen_tasks),
         )
     )
     if current_user.role == "WAITER":
@@ -191,6 +194,8 @@ async def list_workspace_order_items(db: DbSession, current_user: CurrentUser):
                 )
                 for modifier in item.modifiers
             ],
+            completed_steps=sum(1 for task in item.kitchen_tasks if task.status == "COMPLETED"),
+            total_steps=len(item.kitchen_tasks),
         )
         for item in result.scalars().all()
     ]

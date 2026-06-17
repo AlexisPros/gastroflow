@@ -17,7 +17,7 @@ class AuthorizationService:
             raise PermissionError("You cannot modify another employee's order.")
 
     def can_manage_kitchen(self, *, user: User) -> bool:
-        return user.role in {"ADMIN", "MANAGER", "KITCHEN"}
+        return user.role in {"ADMIN", "MANAGER", "KITCHEN", "CHEF", "BARTENDER", "WYDAWKA"}
 
     def can_manage_users(self, *, user: User) -> bool:
         return user.role in {"ADMIN", "MANAGER"}

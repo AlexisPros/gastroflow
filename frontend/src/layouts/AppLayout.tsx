@@ -22,7 +22,7 @@ type NavItem = {
 const navItems: NavItem[] = [
   { label: "Układ sali", path: routes.floor, roles: ["ADMIN", "MANAGER", "WAITER"] },
   { label: "Kelner", path: routes.waiter, roles: ["ADMIN", "MANAGER", "WAITER"] },
-  { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN"] },
+  { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"] },
   { label: "Bar", path: routes.bar, roles: ["ADMIN", "MANAGER", "BARTENDER"] },
   { label: "Raporty", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
   { label: "Panel Admina", path: routes.admin, roles: ["ADMIN"] },
@@ -40,6 +40,10 @@ export function AppLayout() {
     tableNumber: string;
     guestCount: number;
     totalAmount: string;
+  } | null>(null);
+  const [orderReadyAlert, setOrderReadyAlert] = useState<{
+    orderId: number;
+    tableNumber: string;
   } | null>(null);
   const availableItems = user
     ? navItems.filter((item) => item.roles.includes(user.role))
@@ -74,6 +78,7 @@ export function AppLayout() {
       || (user?.role !== "WAITER" && user?.role !== "MANAGER")
     ) {
       setQrOrderAlert(null);
+      setOrderReadyAlert(null);
       return;
     }
 
@@ -104,6 +109,14 @@ export function AppLayout() {
           || message.event === "order_cancelled"
         ) {
           setQrOrderAlert((current) => current?.orderId === orderId ? null : current);
+        }
+
+        if (message.event === "order_ready" && Number.isFinite(orderId)) {
+          playReadyChime();
+          setOrderReadyAlert({
+            orderId,
+            tableNumber: String(data.table_number ?? "Bez stolika"),
+          });
         }
       },
     });
@@ -215,6 +228,40 @@ export function AppLayout() {
           </button>
         </aside>
       )}
+      {orderReadyAlert && (
+        <aside className="qr-order-alert" style={{ borderLeft: "5px solid var(--brand-green)" }} role="alert" aria-live="assertive">
+          <div className="qr-order-alert-heading">
+            <span className="qr-order-alert-icon" style={{ background: "var(--brand-green)", color: "#ffffff" }}>OK</span>
+            <div>
+              <span className="eyebrow" style={{ color: "var(--brand-green-dark)" }}>Powiadomienie</span>
+              <strong>Zamówienie gotowe do wydania!</strong>
+            </div>
+            <button
+              type="button"
+              className="qr-order-alert-close"
+              aria-label="Zamknij powiadomienie"
+              onClick={() => setOrderReadyAlert(null)}
+            />
+          </div>
+          <div className="qr-order-alert-details">
+            <span>Stolik {orderReadyAlert.tableNumber}</span>
+            <span>Zam. #{orderReadyAlert.orderId}</span>
+          </div>
+          <button
+            type="button"
+            className="qr-order-alert-open"
+            style={{ background: "var(--brand-green)" }}
+            onClick={() => {
+              sessionStorage.setItem("gastroflow:open-order-id", String(orderReadyAlert.orderId));
+              window.dispatchEvent(new Event("gastroflow:open-order"));
+              setOrderReadyAlert(null);
+              navigate(routes.waiter);
+            }}
+          >
+            Zobacz rachunek
+          </button>
+        </aside>
+      )}
     </div>
   );
 
@@ -246,3 +293,26 @@ function formatAlertMoney(value: string): string {
     currency: "PLN",
   }).format(Number(value));
 }
+
+const playReadyChime = () => {
+  try {
+    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+    osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.15); // E5
+    
+    gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+    
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    
+    osc.start();
+    osc.stop(audioCtx.currentTime + 0.5);
+  } catch (e) {
+    console.error("Failed playing ready chime", e);
+  }
+};

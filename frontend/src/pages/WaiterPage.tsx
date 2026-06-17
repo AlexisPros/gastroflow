@@ -348,6 +348,23 @@ export function WaiterPage() {
   }, [openQrOrderPreview, pendingQrOrders]);
 
   useEffect(() => {
+    const openRequestedOrder = () => {
+      const storedOrderId = sessionStorage.getItem("gastroflow:open-order-id");
+      if (storedOrderId === null) {
+        return;
+      }
+
+      const requestedOrderId = Number(storedOrderId);
+      sessionStorage.removeItem("gastroflow:open-order-id");
+      setSelectedOrderId(requestedOrderId);
+    };
+
+    openRequestedOrder();
+    window.addEventListener("gastroflow:open-order", openRequestedOrder);
+    return () => window.removeEventListener("gastroflow:open-order", openRequestedOrder);
+  }, []);
+
+  useEffect(() => {
     if (!token || initialWorkspaceLoadRef.current) {
       return;
     }
@@ -614,23 +631,52 @@ export function WaiterPage() {
             )}
 
             <div className="order-card-grid">
-              {openOrders.map((order) => (
-                <button
-                  key={order.id}
-                  type="button"
-                  className="order-overview-card"
-                  onClick={() => {
-                    openExistingOrder(order);
-                  }}
-                >
-                  <span>Rachunek #{formatOrderNumber(order)}</span>
-                  <strong>{getOrderTableLabel(order)}</strong>
-                  <small>
-                    {order.guest_count ?? 0} os. · {order.status === 'OPEN' ? 'OTWARTY' : (order.status === 'IN_PROGRESS' ? 'W TRAKCIE' : order.status)}
-                  </small>
-                  <b>{formatMoney(Number(order.total_amount))}</b>
-                </button>
-              ))}
+              {openOrders.map((order) => {
+                const items = orderItems.filter((item) => item.order_id === order.id);
+                const totalSteps = items.reduce((acc, item) => acc + (item.total_steps ?? 0), 0);
+                const completedSteps = items.reduce((acc, item) => acc + (item.completed_steps ?? 0), 0);
+                const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
+                const hasTasks = totalSteps > 0;
+
+                return (
+                  <button
+                    key={order.id}
+                    type="button"
+                    className="order-overview-card"
+                    onClick={() => {
+                      openExistingOrder(order);
+                    }}
+                  >
+                    <span>Rachunek #{formatOrderNumber(order)}</span>
+                    <strong>{getOrderTableLabel(order)}</strong>
+                    <small>
+                      {order.guest_count ?? 0} os. · {order.status === 'OPEN' ? 'OTWARTY' : (order.status === 'IN_PROGRESS' ? 'W TRAKCIE' : order.status)}
+                    </small>
+                    <b>{formatMoney(Number(order.total_amount))}</b>
+                    {hasTasks && (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "4px",
+                          background: "#e2e8f0",
+                          borderRadius: "2px",
+                          overflow: "hidden",
+                          marginTop: "8px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            height: "100%",
+                            width: `${progress}%`,
+                            background: progress === 100 ? "var(--brand-green)" : "#3182ce",
+                            transition: "width 0.3s ease",
+                          }}
+                        />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
               {openOrders.length === 0 && (
                 <div className="empty-orders-state">
                   <strong>Brak otwartych rachunków</strong>
@@ -1277,6 +1323,31 @@ export function WaiterPage() {
                         </small>
                       ))}
                       {item.notes && <small>{item.notes}</small>}
+                      
+                      {(item.total_steps ?? 0) > 0 && (
+                        <div style={{ marginTop: "6px", width: "120px" }}>
+                          <div
+                            style={{
+                              height: "4px",
+                              background: "#e2e8f0",
+                              borderRadius: "2px",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "100%",
+                                width: `${((item.completed_steps ?? 0) / (item.total_steps ?? 1)) * 100}%`,
+                                background: (item.completed_steps ?? 0) === (item.total_steps ?? 0) ? "var(--brand-green)" : "#3182ce",
+                                transition: "width 0.3s ease",
+                              }}
+                            />
+                          </div>
+                          <span style={{ fontSize: "0.7rem", color: "#718096", marginTop: "2px", display: "block" }}>
+                            Przygotowanie: {item.completed_steps}/{item.total_steps}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     <b>{formatMoney(Number(item.total_price))}</b>
                   </div>

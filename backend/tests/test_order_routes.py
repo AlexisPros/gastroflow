@@ -805,6 +805,43 @@ def test_product_estimated_time_uses_longest_parallel_step():
     assert estimated_time == 10
 
 
+def test_product_estimated_time_adds_dependent_steps():
+    estimated_time = order_service._calculate_product_estimated_time(
+        [
+            ProductKitchenStep(
+                id=1,
+                product_id=1,
+                kitchen_section_id=1,
+                name="Przygotowanie miesa",
+                sequence=1,
+                estimated_time=12,
+                is_active=True,
+            ),
+            ProductKitchenStep(
+                id=2,
+                product_id=1,
+                kitchen_section_id=2,
+                name="Zlozenie burgera",
+                sequence=2,
+                estimated_time=5,
+                depends_on_sequence=1,
+                is_active=True,
+            ),
+            ProductKitchenStep(
+                id=3,
+                product_id=1,
+                kitchen_section_id=3,
+                name="Przygotowanie dodatkow",
+                sequence=3,
+                estimated_time=4,
+                is_active=True,
+            ),
+        ],
+    )
+
+    assert estimated_time == 17
+
+
 def test_close_order_releases_table_when_no_other_active_orders():
     class FakeResult:
         def __init__(self, value: Any):

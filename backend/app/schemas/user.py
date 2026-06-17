@@ -11,6 +11,7 @@ class UserBase(OrmBaseModel):
     email: EmailStr
     role: str
     is_active: bool = True
+    kitchen_section_id: int | None = None
 
 
 class UserCreate(UserBase):

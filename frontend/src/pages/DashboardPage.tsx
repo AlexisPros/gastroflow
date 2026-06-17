@@ -28,7 +28,7 @@ const actions: DashboardAction[] = [
     title: "Ekran kuchni",
     description: "Śledź zadania kuchenne z przyjętych zamówień.",
     path: routes.kitchen,
-    roles: ["ADMIN", "MANAGER", "KITCHEN"],
+    roles: ["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"],
   },
   {
     title: "Ekran baru",

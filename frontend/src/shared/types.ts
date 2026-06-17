@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "MANAGER" | "WAITER" | "KITCHEN" | "BARTENDER";
+export type UserRole = "ADMIN" | "MANAGER" | "WAITER" | "KITCHEN" | "CHEF" | "WYDAWKA" | "BARTENDER";
 
 export type User = {
   id: number;
@@ -6,6 +6,7 @@ export type User = {
   last_name: string;
   email: string;
   role: UserRole;
+  kitchen_section_id?: number | null;
   is_active: boolean;
   created_at: string;
 };

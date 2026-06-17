@@ -14,6 +14,10 @@ class KitchenService:
     ) -> KitchenTask:
         if task.status == "COMPLETED":
             raise ValueError("Completed kitchen task cannot be started again.")
+        if task.status == "NEW":
+            raise ValueError("Kitchen order must be accepted before the task can be started.")
+        if task.status not in {"PENDING", "IN_PROGRESS"}:
+            raise ValueError("Kitchen task cannot be started from its current status.")
 
         task = await kitchen_task.start(db, db_obj=task)
         await websocket_manager.broadcast_many(
@@ -36,6 +40,11 @@ class KitchenService:
     ) -> KitchenTask:
         if task.status == "COMPLETED":
             return task
+
+        if task.status == "NEW":
+            raise ValueError("Kitchen order must be accepted before the task can be completed.")
+        if task.status not in {"PENDING", "IN_PROGRESS"}:
+            raise ValueError("Kitchen task cannot be completed from its current status.")
 
         if task.started_at is None:
             task = await kitchen_task.start(db, db_obj=task)

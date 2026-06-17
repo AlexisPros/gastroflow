@@ -49,7 +49,14 @@ from app.schemas.kitchen_section import (
     KitchenSectionRead,
     KitchenSectionUpdate,
 )
-from app.schemas.kitchen_task import KitchenTaskCreate, KitchenTaskRead, KitchenTaskUpdate
+from app.schemas.kitchen_task import (
+    KitchenTaskCreate,
+    KitchenTaskRead,
+    KitchenTaskUpdate,
+    KitchenOrderItemRead,
+    KitchenOrderRead,
+    KitchenSectionTaskRead,
+)
 from app.schemas.modifier import ModifierCreate, ModifierRead, ModifierUpdate
 from app.schemas.order import (
     OrderCreate,

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     from app.models.kitchen_task import KitchenTask
     from app.models.product import Product
     from app.models.product_kitchen_step import ProductKitchenStep
+    from app.models.user import User
 
 
 class KitchenSection(Base):
@@ -42,5 +43,10 @@ class KitchenSection(Base):
 
     product_steps: Mapped[list[ProductKitchenStep]] = relationship(
         "ProductKitchenStep",
+        back_populates="kitchen_section",
+    )
+
+    users: Mapped[list[User]] = relationship(
+        "User",
         back_populates="kitchen_section",
     )

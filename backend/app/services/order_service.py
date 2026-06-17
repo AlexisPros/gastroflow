@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.websocket_manager import websocket_manager
 from app.crud import order_action_log, order_transfer_log, product_kitchen_step
@@ -117,12 +118,14 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        table_number = await self._get_order_table_number(db, order=order)
         await websocket_manager.broadcast_many(
-            channels=["waiters", "floor"],
+            channels=["waiters", "kitchen", "bar", "floor"],
             event="order_created",
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table_number,
                 "waiter_id": order.waiter_id,
                 "source": order.source,
                 "status": order.status,
@@ -330,12 +333,14 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        table_number = await self._get_order_table_number(db, order=order)
         await websocket_manager.broadcast_many(
-            channels=["waiters", "kitchen", "bar", "floor"],
-            event="qr_order_confirmed",
+            channels=["waiters", "floor"],
+            event="order_total_updated",
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table_number,
                 "waiter_id": order.waiter_id,
                 "shift_id": order.shift_id,
                 "status": order.status,
@@ -391,12 +396,14 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        table_number = await self._get_order_table_number(db, order=order)
         await websocket_manager.broadcast_many(
             channels=["waiters", "kitchen", "bar"],
             event="order_items_added",
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table_number,
                 "status": order.status,
             },
         )
@@ -420,7 +427,7 @@ class OrderService:
         await db.commit()
         await db.refresh(order)
         await websocket_manager.broadcast_many(
-            channels=["waiters", "floor", "managers"],
+            channels=["waiters", "kitchen", "bar", "floor", "managers"],
             event="order_cancelled",
             data={
                 "order_id": order.id,
@@ -664,6 +671,20 @@ class OrderService:
             table.current_guests = order.guest_count
         db.add(table)
 
+    async def _get_order_table_number(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+    ) -> str | None:
+        if order.table_id is None:
+            return None
+
+        result = await db.execute(
+            select(RestaurantTable.table_number).where(RestaurantTable.id == order.table_id),
+        )
+        return result.scalar_one_or_none()
+
     async def confirm_pending_qr_order(
         self,
         db: AsyncSession,
@@ -719,12 +740,14 @@ class OrderService:
         db.add(order)
         await db.commit()
         await db.refresh(order)
+        table_number = await self._get_order_table_number(db, order=order)
         await websocket_manager.broadcast_many(
             channels=["waiters", "kitchen", "bar", "floor"],
             event="qr_order_confirmed",
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
+                "table_number": table_number,
                 "waiter_id": order.waiter_id,
                 "shift_id": order.shift_id,
                 "status": order.status,
@@ -1065,17 +1088,34 @@ class OrderService:
             return None
 
         result = await db.execute(
-            select(KitchenTask.estimated_time).where(
-                KitchenTask.order_item_id.in_(order_item_ids),
-                KitchenTask.estimated_time.is_not(None),
-            ),
+            select(KitchenTask)
+            .options(selectinload(KitchenTask.product_kitchen_step))
+            .where(KitchenTask.order_item_id.in_(order_item_ids)),
         )
-        estimates = [
-            estimate
-            for estimate in result.scalars().all()
-            if estimate is not None
-        ]
-        return max(estimates) if estimates else None
+        tasks_by_item_id: dict[int, list[KitchenTask]] = {}
+        for task in result.scalars().all():
+            tasks_by_item_id.setdefault(task.order_item_id, []).append(task)
+
+        item_estimates: list[int] = []
+        for item_tasks in tasks_by_item_id.values():
+            step_estimate = self._calculate_product_estimated_time(
+                [
+                    task.product_kitchen_step
+                    for task in item_tasks
+                    if task.product_kitchen_step is not None
+                ],
+            )
+            if step_estimate is not None:
+                item_estimates.append(step_estimate)
+                continue
+
+            task_estimate = self._calculate_product_estimated_time(
+                [task.estimated_time for task in item_tasks],
+            )
+            if task_estimate is not None:
+                item_estimates.append(task_estimate)
+
+        return max(item_estimates) if item_estimates else None
 
     async def _get_active_product(self, db: AsyncSession, *, product_id: int) -> Product:
         result = await db.execute(

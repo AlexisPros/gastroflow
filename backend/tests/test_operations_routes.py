@@ -34,6 +34,7 @@ def make_user(role: str) -> User:
         email="test@example.com",
         password_hash="hash",
         role=role,
+        kitchen_section_id=1 if role in {"KITCHEN", "BARTENDER"} else None,
         is_active=True,
         created_at=datetime.now(timezone.utc),
     )
@@ -163,6 +164,17 @@ def test_kitchen_task_start_reaches_service(monkeypatch):
     assert response.status_code == 200
     assert response.json()["status"] == "IN_PROGRESS"
     assert response.json()["started_at"] is not None
+
+
+def test_kitchen_task_start_requires_accepted_task():
+    task = make_kitchen_task()
+
+    try:
+        asyncio.run(kitchen_service.start_task(cast(AsyncSession, None), task=task))
+    except ValueError as exc:
+        assert str(exc) == "Kitchen order must be accepted before the task can be started."
+    else:
+        raise AssertionError("NEW task was started before kitchen pass accepted the order.")
 
 
 def test_kitchen_task_complete_reaches_service(monkeypatch):

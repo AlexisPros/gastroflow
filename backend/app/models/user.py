@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -11,6 +11,7 @@ from app.db.base import Base
 if TYPE_CHECKING:
     from app.models.employee_shift import EmployeeShift
     from app.models.employee_shift_report import EmployeeShiftReport
+    from app.models.kitchen_section import KitchenSection
     from app.models.kitchen_task import KitchenTask
     from app.models.order import Order
     from app.models.order_action_log import OrderActionLog
@@ -55,6 +56,11 @@ class User(Base):
         nullable=False,
     )
 
+    kitchen_section_id: Mapped[int | None] = mapped_column(
+        ForeignKey("kitchen_sections.id"),
+        nullable=True,
+    )
+
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -76,6 +82,11 @@ class User(Base):
     assigned_kitchen_tasks: Mapped[list[KitchenTask]] = relationship(
         "KitchenTask",
         back_populates="assigned_user",
+    )
+
+    kitchen_section: Mapped[KitchenSection | None] = relationship(
+        "KitchenSection",
+        back_populates="users",
     )
 
     outgoing_transfer_logs: Mapped[list[OrderTransferLog]] = relationship(
