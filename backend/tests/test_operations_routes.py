@@ -17,6 +17,7 @@ from app.models.kitchen_task import KitchenTask
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.payment import Payment
+from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.stock_item import StockItem
 from app.models.stock_movement import StockMovement
 from app.models.user import User
@@ -58,6 +59,74 @@ def make_kitchen_task() -> KitchenTask:
         started_at=None,
         completed_at=None,
     )
+
+
+def make_product_step(
+    *,
+    id: int,
+    sequence: int,
+    depends_on_sequence: int | None = None,
+) -> ProductKitchenStep:
+    return ProductKitchenStep(
+        id=id,
+        product_id=1,
+        kitchen_section_id=id,
+        name=f"Step {sequence}",
+        description=None,
+        sequence=sequence,
+        estimated_time=5,
+        depends_on_sequence=depends_on_sequence,
+        is_active=True,
+    )
+
+
+def make_task_for_step(
+    *,
+    id: int,
+    step: ProductKitchenStep,
+    status: str = "PENDING",
+) -> KitchenTask:
+    return KitchenTask(
+        id=id,
+        order_item_id=1,
+        kitchen_section_id=step.kitchen_section_id,
+        product_kitchen_step_id=step.id,
+        assigned_user_id=None,
+        status=status,
+        estimated_time=step.estimated_time,
+        started_at=None,
+        completed_at=None,
+        product_kitchen_step=step,
+    )
+
+
+class FakeKitchenResult:
+    def __init__(self, tasks: list[KitchenTask]) -> None:
+        self.tasks = tasks
+
+    def scalars(self):
+        return self
+
+    def all(self) -> list[KitchenTask]:
+        return self.tasks
+
+
+class FakeKitchenSession:
+    def __init__(self, tasks: list[KitchenTask]) -> None:
+        self.tasks = tasks
+        self.commits = 0
+
+    async def execute(self, _statement: Any) -> FakeKitchenResult:
+        return FakeKitchenResult(self.tasks)
+
+    def add(self, _obj: Any) -> None:
+        return None
+
+    async def commit(self) -> None:
+        self.commits += 1
+
+    async def refresh(self, _obj: Any) -> None:
+        return None
 
 
 def make_order() -> Order:
@@ -175,6 +244,91 @@ def test_kitchen_task_start_requires_accepted_task():
         assert str(exc) == "Kitchen order must be accepted before the task can be started."
     else:
         raise AssertionError("NEW task was started before kitchen pass accepted the order.")
+
+
+def test_kitchen_task_start_starts_parallel_steps(monkeypatch):
+    step_one = make_product_step(id=1, sequence=1)
+    step_two = make_product_step(id=2, sequence=2)
+    dependent_step = make_product_step(id=3, sequence=3, depends_on_sequence=1)
+    tasks = [
+        make_task_for_step(id=1, step=step_one),
+        make_task_for_step(id=2, step=step_two),
+        make_task_for_step(id=3, step=dependent_step),
+    ]
+    db = FakeKitchenSession(tasks)
+    events: list[tuple[str, int]] = []
+
+    async def broadcast(*, event: str, task: KitchenTask) -> None:
+        events.append((event, task.id))
+
+    monkeypatch.setattr(kitchen_service, "_broadcast_task_event", broadcast)
+
+    asyncio.run(kitchen_service.start_task(cast(AsyncSession, db), task=tasks[0]))
+
+    assert tasks[0].status == "IN_PROGRESS"
+    assert tasks[1].status == "IN_PROGRESS"
+    assert tasks[2].status == "PENDING"
+    assert db.commits == 1
+    assert events == [
+        ("kitchen_task_started", 1),
+        ("kitchen_task_started", 2),
+    ]
+
+
+def test_bartender_can_start_new_bar_task_without_starting_kitchen_task(monkeypatch):
+    bar_step = make_product_step(id=1, sequence=1)
+    kitchen_step = make_product_step(id=2, sequence=1)
+    tasks = [
+        make_task_for_step(id=1, step=bar_step, status="NEW"),
+        make_task_for_step(id=2, step=kitchen_step, status="NEW"),
+    ]
+    db = FakeKitchenSession(tasks)
+    events: list[tuple[str, int]] = []
+
+    async def broadcast(*, event: str, task: KitchenTask) -> None:
+        events.append((event, task.id))
+
+    monkeypatch.setattr(kitchen_service, "_broadcast_task_event", broadcast)
+
+    asyncio.run(
+        kitchen_service.start_task(
+            cast(AsyncSession, db),
+            task=tasks[0],
+            allow_new=True,
+            start_section_id=bar_step.kitchen_section_id,
+        )
+    )
+
+    assert tasks[0].status == "IN_PROGRESS"
+    assert tasks[1].status == "NEW"
+    assert db.commits == 1
+    assert events == [("kitchen_task_started", 1)]
+
+
+def test_kitchen_task_complete_starts_ready_dependent_step(monkeypatch):
+    parent_step = make_product_step(id=1, sequence=1)
+    child_step = make_product_step(id=2, sequence=2, depends_on_sequence=1)
+    tasks = [
+        make_task_for_step(id=1, step=parent_step, status="IN_PROGRESS"),
+        make_task_for_step(id=2, step=child_step),
+    ]
+    db = FakeKitchenSession(tasks)
+    events: list[tuple[str, int]] = []
+
+    async def broadcast(*, event: str, task: KitchenTask) -> None:
+        events.append((event, task.id))
+
+    monkeypatch.setattr(kitchen_service, "_broadcast_task_event", broadcast)
+
+    asyncio.run(kitchen_service.complete_task(cast(AsyncSession, db), task=tasks[0]))
+
+    assert tasks[0].status == "COMPLETED"
+    assert tasks[1].status == "IN_PROGRESS"
+    assert db.commits == 1
+    assert events == [
+        ("kitchen_task_completed", 1),
+        ("kitchen_task_started", 2),
+    ]
 
 
 def test_kitchen_task_complete_reaches_service(monkeypatch):

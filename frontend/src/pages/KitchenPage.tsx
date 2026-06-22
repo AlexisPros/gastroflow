@@ -9,6 +9,7 @@ import {
   completeKitchenTask,
   getKitchenSections,
   KitchenOrder,
+  KitchenTask,
   KitchenSectionTask,
   KitchenSection,
 } from "../api/kitchenApi";
@@ -267,6 +268,39 @@ export function KitchenPage() {
   };
 
   const previewOrder = orders.find((o) => o.id === previewOrderId);
+  const getSectionName = (sectionId: number | null | undefined) =>
+    allSections.find((section) => section.id === sectionId)?.name || "Kuchnia";
+  const isWydawkaSection = (sectionId: number | null | undefined) =>
+    getSectionName(sectionId).toLowerCase().includes("wydawka");
+  const canCompleteTaskFromTicket = (task: KitchenTask) => {
+    if (!["PENDING", "IN_PROGRESS"].includes(task.status)) {
+      return false;
+    }
+    if (isChef) {
+      return true;
+    }
+    if (user?.role !== "WYDAWKA") {
+      return false;
+    }
+    return (
+      (user.kitchen_section_id !== null &&
+        user.kitchen_section_id !== undefined &&
+        task.kitchen_section_id === user.kitchen_section_id) ||
+      isWydawkaSection(task.kitchen_section_id)
+    );
+  };
+  const getPreviewTasks = () => {
+    if (!previewOrder) return [];
+    return previewOrder.items.flatMap((item) =>
+      item.kitchen_tasks.map((task) => ({
+        ...task,
+        product_name: item.product_name,
+        quantity: item.quantity,
+        notes: item.notes,
+        course_number: item.course_number,
+      })),
+    );
+  };
 
   return (
     <section className="page-stack" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -360,10 +394,6 @@ export function KitchenPage() {
       {/* -------------------- WYDAWKA VIEW (Tickets Rail) -------------------- */}
       {isWydawka && (!isChef || chefTab === "WYDAWKA") && (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <h2 style={{ fontSize: "1.3rem", fontWeight: 800, color: "var(--brand-navy)", margin: 0 }}>
-            Listki Zamówień (Kolejka Wydawki)
-          </h2>
-
           <div
             className="kitchen-tickets-rail"
             style={{
@@ -407,6 +437,14 @@ export function KitchenPage() {
                 <div
                   key={order.id}
                   className="kitchen-ticket"
+                  onClick={() => setPreviewOrderId(order.id)}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      setPreviewOrderId(order.id);
+                    }
+                  }}
                   style={{
                     width: "320px",
                     background: "#ffffff",
@@ -418,6 +456,7 @@ export function KitchenPage() {
                     justifyContent: "space-between",
                     position: "relative",
                     overflow: "hidden",
+                    cursor: "pointer",
                     borderTop: isReady
                       ? "8px solid var(--brand-green)"
                       : hasNew
@@ -481,24 +520,6 @@ export function KitchenPage() {
                                 <div key={task.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.85rem", borderBottom: "1px dashed #edf2f7", paddingBottom: "2px", alignItems: "center" }}>
                                   <span style={{ color: "#4a5568", fontWeight: 500, display: "flex", alignItems: "center", gap: "6px" }}>
                                     {task.step_name || "Przygotowanie"}
-                                    {task.step_description && (
-                                      <button
-                                        type="button"
-                                        onClick={() => setInfoTaskId(task.id)}
-                                        style={{
-                                          padding: "1px 4px",
-                                          fontSize: "0.65rem",
-                                          background: "rgba(49, 130, 206, 0.1)",
-                                          color: "#3182ce",
-                                          border: "1px solid rgba(49, 130, 206, 0.2)",
-                                          borderRadius: "3px",
-                                          fontWeight: 700,
-                                          cursor: "pointer",
-                                        }}
-                                      >
-                                        Info
-                                      </button>
-                                    )}
                                   </span>
                                   <span style={{ color: statusColor, fontWeight: 700, fontSize: "0.8rem" }}>
                                     {statusText}
@@ -534,7 +555,10 @@ export function KitchenPage() {
                       <button
                         type="button"
                         className="primary-button"
-                        onClick={() => handleAcceptOrder(order.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleAcceptOrder(order.id);
+                        }}
                         disabled={loading}
                         style={{ width: "100%", background: "#3182ce", padding: "8px", fontSize: "0.85rem" }}
                       >
@@ -544,7 +568,10 @@ export function KitchenPage() {
                       <button
                         type="button"
                         className="primary-button"
-                        onClick={() => handleCompleteOrder(order.id)}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleCompleteOrder(order.id);
+                        }}
                         disabled={loading}
                         style={{
                           width: "100%",
@@ -967,71 +994,182 @@ export function KitchenPage() {
         ))}
       </div>
 
-      {/* Preview Order Modal (For Acceptance Flow) */}
-      {previewOrderId && previewOrder && (
-        <div className="modal-backdrop" style={{ zIndex: 9900 }}>
-          <div className="product-options-modal" style={{ maxWidth: "500px", width: "100%", padding: "24px" }}>
-            <div className="modal-header" style={{ marginBottom: "16px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ margin: 0, fontSize: "1.3rem" }}>
-                Zatwierdzenie zamówienia: Stolik {previewOrder.table_number || "Bez stolika"}
-              </h3>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setPreviewOrderId(null)}
-                style={{ border: "none", background: "none", fontSize: "1.2rem", cursor: "pointer" }}
-              >
-                ✕
-              </button>
-            </div>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginBottom: "20px" }}>
-              {previewOrder.items.map((item) => (
-                <div
-                  key={item.id}
+      {/* Ticket Details Modal */}
+      {previewOrderId && previewOrder && (() => {
+        const ticketTasks = getPreviewTasks();
+        const hasNewTasks = ticketTasks.some((task) => task.status === "NEW");
+        const taskGroups = [
+          {
+            title: "Oczekujące",
+            statuses: ["NEW", "PENDING"],
+            color: "#718096",
+          },
+          {
+            title: "Rozpoczęte",
+            statuses: ["IN_PROGRESS"],
+            color: "#dd6b20",
+          },
+          {
+            title: "Zakończone",
+            statuses: ["COMPLETED"],
+            color: "var(--brand-green-dark)",
+          },
+        ];
+
+        return (
+          <div className="modal-backdrop" style={{ zIndex: 9900 }} onClick={() => setPreviewOrderId(null)}>
+            <div
+              className="product-options-modal"
+              style={{ maxWidth: "1120px", width: "100%", padding: "24px", gap: "18px" }}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="modal-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "18px" }}>
+                <div>
+                  <span className="eyebrow">Szczegóły listka</span>
+                  <h3 style={{ margin: 0, fontSize: "1.7rem", color: "var(--brand-navy)", fontWeight: 800 }}>
+                    Stolik {previewOrder.table_number || "Bez stolika"} · Zam. #{previewOrder.id}
+                  </h3>
+                  <p className="muted" style={{ margin: "6px 0 0 0" }}>
+                    Kelner: {previewOrder.waiter_name || "Brak"} · {getElapsedTimeText(previewOrder.created_at)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="ghost-button"
+                  onClick={() => setPreviewOrderId(null)}
                   style={{
-                    padding: "12px",
-                    background: "rgba(0,0,0,0.02)",
-                    borderRadius: "6px",
-                    border: "1px solid rgba(0,0,0,0.04)",
+                    width: "44px",
+                    height: "44px",
+                    display: "grid",
+                    placeItems: "center",
+                    padding: 0,
+                    fontSize: "1.2rem",
+                    lineHeight: 1,
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700 }}>
-                    <span>{item.quantity}x {item.product_name}</span>
-                    <span className="muted" style={{ fontWeight: 400, fontSize: "0.8rem" }}>
-                      Danie {item.course_number}
-                    </span>
-                  </div>
-                  {item.notes && (
-                    <div style={{ color: "#dd6b20", fontSize: "0.85rem", marginTop: "4px", fontWeight: 600 }}>
-                      Uwaga: {item.notes}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
+                  ✕
+                </button>
+              </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <button
-                type="button"
-                className="ghost-button"
-                onClick={() => setPreviewOrderId(null)}
-                style={{ background: "#ffffff", border: "1px solid #718096", color: "#2d3748" }}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                  gap: "14px",
+                  alignItems: "stretch",
+                }}
               >
-                Zamknij (Anuluj)
-              </button>
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => handleAcceptOrder(previewOrder.id)}
-                style={{ background: "var(--brand-green)" }}
-              >
-                Zatwierdź i Rozpocznij
-              </button>
+                {taskGroups.map((group) => {
+                  const groupTasks = ticketTasks.filter((task) => group.statuses.includes(task.status));
+                  return (
+                    <section
+                      key={group.title}
+                      style={{
+                        border: "1px solid #d7dfda",
+                        borderRadius: "10px",
+                        background: "#fbfcfb",
+                        minHeight: "360px",
+                        maxHeight: "58vh",
+                        overflow: "auto",
+                        padding: "14px",
+                      }}
+                    >
+                      <h4
+                        style={{
+                          margin: "0 0 12px 0",
+                          fontSize: "1rem",
+                          color: group.color,
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                        }}
+                      >
+                        <span>{group.title}</span>
+                        <span>{groupTasks.length}</span>
+                      </h4>
+
+                      <div style={{ display: "grid", gap: "10px" }}>
+                        {groupTasks.map((task) => (
+                          <article
+                            key={task.id}
+                            style={{
+                              border: "1px solid #edf1ef",
+                              borderRadius: "8px",
+                              background: "#ffffff",
+                              padding: "12px",
+                              display: "grid",
+                              gap: "8px",
+                            }}
+                          >
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: "8px" }}>
+                              <strong style={{ color: "var(--brand-navy)", fontSize: "0.95rem" }}>
+                                {task.step_name || "Przygotowanie"}
+                              </strong>
+                              <span style={{ color: "#60716c", fontSize: "0.78rem", fontWeight: 800 }}>
+                                {getSectionName(task.kitchen_section_id)}
+                              </span>
+                            </div>
+                            <span style={{ color: "#40514c", fontSize: "0.9rem", fontWeight: 700 }}>
+                              {task.quantity}x {task.product_name} · Kurs {task.course_number}
+                            </span>
+                            {task.step_description && (
+                              <p style={{ margin: 0, color: "#60716c", fontSize: "0.82rem", lineHeight: 1.35, whiteSpace: "pre-line" }}>
+                                {task.step_description}
+                              </p>
+                            )}
+                            {task.notes && (
+                              <span style={{ color: "#dd6b20", fontWeight: 800, fontSize: "0.82rem" }}>
+                                Uwaga: {task.notes}
+                              </span>
+                            )}
+                            {canCompleteTaskFromTicket(task) && (
+                              <button
+                                type="button"
+                                className="primary-button"
+                                onClick={() => handleCompleteTask(task.id)}
+                                disabled={loading}
+                                style={{
+                                  width: "100%",
+                                  minHeight: "42px",
+                                  background: isWydawkaSection(task.kitchen_section_id)
+                                    ? "var(--brand-green)"
+                                    : "var(--brand-navy)",
+                                }}
+                              >
+                                {isWydawkaSection(task.kitchen_section_id)
+                                  ? "Zakończ krok wydawki"
+                                  : "Zakończ krok"}
+                              </button>
+                            )}
+                          </article>
+                        ))}
+
+                        {groupTasks.length === 0 && (
+                          <div className="empty-ticket" style={{ minHeight: "120px", padding: "18px", fontSize: "0.9rem" }}>
+                            Brak kroków.
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+
+              {hasNewTasks && (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => handleAcceptOrder(previewOrder.id)}
+                  disabled={loading}
+                  style={{ background: "var(--brand-green)", minHeight: "50px" }}
+                >
+                  Przyjmij zamówienie i otwórz kroki
+                </button>
+              )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Step Info Modal */}
       {infoTaskId && (() => {

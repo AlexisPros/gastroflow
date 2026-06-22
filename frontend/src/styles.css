@@ -2284,6 +2284,33 @@ small,
   font-weight: 800;
 }
 
+.cart-row .item-progress {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.cart-row .item-progress-track {
+  width: 150px;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe8e4;
+}
+
+.cart-row .item-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--brand-green);
+  transition: width 0.2s ease;
+}
+
+.cart-row .item-progress small {
+  color: #60716c;
+  font-size: 11px;
+}
+
 .course-separator {
   display: grid;
   min-height: 34px;

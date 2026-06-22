@@ -175,7 +175,7 @@ export function BarPage() {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const pendingTasks = tasks.filter((t) => t.status === "PENDING");
+  const pendingTasks = tasks.filter((t) => t.status === "NEW" || t.status === "PENDING");
   const inProgressTasks = tasks.filter((t) => t.status === "IN_PROGRESS");
 
   return (
@@ -355,7 +355,7 @@ export function BarPage() {
                     onClick={() => handleStartTask(task.id)}
                     style={{ padding: "6px 16px", background: "var(--brand-navy)", fontSize: "0.85rem" }}
                   >
-                    Rozpocznij
+                    {task.status === "NEW" ? "Przyjmij i rozpocznij" : "Rozpocznij"}
                   </button>
                 </div>
               </div>

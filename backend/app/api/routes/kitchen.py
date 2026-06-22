@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, status
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import DbSession, RequireKitchenRole, get_or_404, raise_bad_request, CurrentUser
@@ -33,6 +33,13 @@ async def _get_bar_section_id(db: DbSession) -> int | None:
     return result.scalar_one_or_none()
 
 
+async def _get_wydawka_section_id(db: DbSession) -> int | None:
+    result = await db.execute(
+        select(KitchenSection.id).where(KitchenSection.name.ilike("wydawka")),
+    )
+    return result.scalar_one_or_none()
+
+
 def _require_order_queue_access(current_user: CurrentUser) -> None:
     if current_user.role not in ORDER_QUEUE_ROLES:
         raise HTTPException(
@@ -46,6 +53,7 @@ def _require_section_access(
     current_user: CurrentUser,
     target_section_id: int | None,
     bar_section_id: int | None,
+    wydawka_section_id: int | None = None,
 ) -> None:
     if current_user.role in ALL_SECTION_TASK_ROLES:
         return
@@ -66,6 +74,16 @@ def _require_section_access(
             detail="Kitchen user can only access assigned kitchen section tasks.",
         )
 
+    if current_user.role == "WYDAWKA":
+        if current_user.kitchen_section_id is not None and target_section_id == current_user.kitchen_section_id:
+            return
+        if wydawka_section_id is not None and target_section_id == wydawka_section_id:
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Kitchen pass user can only complete kitchen pass tasks.",
+        )
+
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
         detail="User does not have permission for section tasks.",
@@ -77,11 +95,13 @@ def _require_task_access(
     current_user: CurrentUser,
     task: KitchenTask,
     bar_section_id: int | None,
+    wydawka_section_id: int | None = None,
 ) -> None:
     _require_section_access(
         current_user=current_user,
         target_section_id=task.kitchen_section_id,
         bar_section_id=bar_section_id,
+        wydawka_section_id=wydawka_section_id,
     )
 
 
@@ -97,12 +117,7 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
         .join(KitchenTask, KitchenTask.order_item_id == OrderItem.id)
     )
     if bar_section_id is not None:
-        query = query.where(
-            or_(
-                KitchenTask.kitchen_section_id != bar_section_id,
-                KitchenTask.status == "NEW",
-            )
-        )
+        query = query.where(KitchenTask.kitchen_section_id != bar_section_id)
 
     result = await db.execute(
         query
@@ -126,7 +141,7 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
                 visible_tasks = [
                     task
                     for task in item.kitchen_tasks
-                    if task.kitchen_section_id != bar_section_id or task.status == "NEW"
+                    if task.kitchen_section_id != bar_section_id
                 ]
 
             if not visible_tasks:
@@ -186,6 +201,7 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
 @router.post("/kitchen/orders/{order_id}/accept")
 async def accept_kitchen_order(order_id: int, db: DbSession, current_user: CurrentUser):
     _require_order_queue_access(current_user)
+    bar_section_id = await _get_bar_section_id(db)
     order_result = await db.execute(
         select(Order).where(Order.id == order_id),
     )
@@ -195,12 +211,16 @@ async def accept_kitchen_order(order_id: int, db: DbSession, current_user: Curre
     if order.status != "OPEN":
         raise_bad_request(ValueError("Only open orders can be accepted by kitchen pass."))
 
-    result = await db.execute(
+    tasks_query = (
         select(KitchenTask)
         .join(OrderItem, OrderItem.id == KitchenTask.order_item_id)
         .where(OrderItem.order_id == order_id)
         .where(KitchenTask.status == "NEW")
     )
+    if bar_section_id is not None:
+        tasks_query = tasks_query.where(KitchenTask.kitchen_section_id != bar_section_id)
+
+    result = await db.execute(tasks_query)
     tasks = result.scalars().all()
     for task in tasks:
         task.status = "PENDING"
@@ -213,9 +233,16 @@ async def accept_kitchen_order(order_id: int, db: DbSession, current_user: Curre
     )
     items = result_items.scalars().all()
     for item in items:
-        result_tasks_for_item = await db.execute(
-            select(KitchenTask).where(KitchenTask.order_item_id == item.id)
+        tasks_for_item_query = (
+            select(KitchenTask)
+            .where(KitchenTask.order_item_id == item.id)
         )
+        if bar_section_id is not None:
+            tasks_for_item_query = tasks_for_item_query.where(
+                KitchenTask.kitchen_section_id != bar_section_id
+            )
+
+        result_tasks_for_item = await db.execute(tasks_for_item_query)
         if result_tasks_for_item.scalars().first():
             item.status = "PENDING"
             db.add(item)
@@ -304,19 +331,25 @@ async def list_active_section_tasks(
     if target_section_id is None:
         target_section_id = current_user.kitchen_section_id
 
+    active_statuses = ["PENDING", "IN_PROGRESS"]
+    bar_section_id = await _get_bar_section_id(db)
+    if bar_section_id is not None and target_section_id == bar_section_id:
+        active_statuses.append("NEW")
+
     query = (
         select(KitchenTask)
         .join(OrderItem, OrderItem.id == KitchenTask.order_item_id)
         .join(Order, Order.id == OrderItem.order_id)
         .where(Order.status == "OPEN")
-        .where(KitchenTask.status.in_(["PENDING", "IN_PROGRESS"]))
+        .where(KitchenTask.status.in_(active_statuses))
     )
 
-    bar_section_id = await _get_bar_section_id(db)
+    wydawka_section_id = await _get_wydawka_section_id(db) if current_user.role == "WYDAWKA" else None
     _require_section_access(
         current_user=current_user,
         target_section_id=target_section_id,
         bar_section_id=bar_section_id,
+        wydawka_section_id=wydawka_section_id,
     )
 
     if target_section_id is not None:
@@ -363,6 +396,11 @@ async def list_active_section_tasks(
 
 @router.post("/kitchen-tasks/{task_id}/start", response_model=KitchenTaskRead)
 async def start_kitchen_task(task_id: int, db: DbSession, current_user: CurrentUser):
+    if current_user.role == "WYDAWKA":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Kitchen pass can only complete its own issuing steps.",
+        )
     task = await get_or_404(
         crud_obj=crud_kitchen_task,
         db=db,
@@ -373,8 +411,17 @@ async def start_kitchen_task(task_id: int, db: DbSession, current_user: CurrentU
         current_user=current_user,
         task=task,
         bar_section_id=await _get_bar_section_id(db) if current_user.role == "BARTENDER" else None,
+        wydawka_section_id=await _get_wydawka_section_id(db) if current_user.role == "WYDAWKA" else None,
     )
     try:
+        if current_user.role == "BARTENDER":
+            bar_section_id = await _get_bar_section_id(db)
+            return await kitchen_service.start_task(
+                db,
+                task=task,
+                allow_new=True,
+                start_section_id=bar_section_id,
+            )
         return await kitchen_service.start_task(db, task=task)
     except ValueError as exc:
         raise_bad_request(exc)
@@ -392,6 +439,7 @@ async def complete_kitchen_task(task_id: int, db: DbSession, current_user: Curre
         current_user=current_user,
         task=task,
         bar_section_id=await _get_bar_section_id(db) if current_user.role == "BARTENDER" else None,
+        wydawka_section_id=await _get_wydawka_section_id(db) if current_user.role == "WYDAWKA" else None,
     )
     try:
         return await kitchen_service.complete_task(db, task=task)

@@ -588,6 +588,11 @@ async def assign_user_sections(db: AsyncSession, sections: dict[str, KitchenSect
         bartender.kitchen_section_id = sections["bar"].id
         db.add(bartender)
 
+    wydawka = await get_one(db, User, email="kitchen@gastroflow.dev")
+    if wydawka:
+        wydawka.kitchen_section_id = sections["pass"].id
+        db.add(wydawka)
+
     await db.flush()
 
 

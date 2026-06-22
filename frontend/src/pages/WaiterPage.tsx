@@ -1986,7 +1986,11 @@ export function WaiterPage() {
   }
 
   async function askForInvoiceNip(): Promise<string | null> {
-    const wantsNip = await confirm({ title: "Czy dodać NIP do rachunku?" });
+    const wantsNip = await confirm({
+      title: "Czy dodać NIP do rachunku?",
+      cancelText: "Nie",
+      confirmText: "Tak",
+    });
     if (!wantsNip) {
       return "";
     }
@@ -3245,6 +3249,22 @@ function CartList({
                 </small>
               ))}
               {item.notes && <small>{item.notes}</small>}
+              {(item.total_steps ?? 0) > 0 && (
+                <div className="item-progress">
+                  <div className="item-progress-track">
+                    <span
+                      style={{
+                        width: `${Math.round(
+                          ((item.completed_steps ?? 0) / (item.total_steps ?? 1)) * 100,
+                        )}%`,
+                      }}
+                    />
+                  </div>
+                  <small>
+                    Gotowość: {item.completed_steps ?? 0}/{item.total_steps ?? 0}
+                  </small>
+                </div>
+              )}
             </div>
             <b>{formatMoney(Number(item.total_price))}</b>
           </button>
