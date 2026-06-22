@@ -19,6 +19,15 @@ type NavItem = {
   roles: UserRole[];
 };
 
+type ReadyDepartment = "KITCHEN" | "BAR";
+
+type DepartmentReadyAlert = {
+  key: string;
+  orderId: number;
+  tableNumber: string;
+  department: ReadyDepartment;
+};
+
 const navItems: NavItem[] = [
   { label: "Układ sali", path: routes.floor, roles: ["ADMIN", "MANAGER", "WAITER"] },
   { label: "Kelner", path: routes.waiter, roles: ["ADMIN", "MANAGER", "WAITER"] },
@@ -41,10 +50,7 @@ export function AppLayout() {
     guestCount: number;
     totalAmount: string;
   } | null>(null);
-  const [orderReadyAlert, setOrderReadyAlert] = useState<{
-    orderId: number;
-    tableNumber: string;
-  } | null>(null);
+  const [departmentReadyAlerts, setDepartmentReadyAlerts] = useState<DepartmentReadyAlert[]>([]);
   const availableItems = user
     ? navItems.filter((item) => item.roles.includes(user.role))
     : [];
@@ -78,7 +84,7 @@ export function AppLayout() {
       || (user?.role !== "WAITER" && user?.role !== "MANAGER")
     ) {
       setQrOrderAlert(null);
-      setOrderReadyAlert(null);
+      setDepartmentReadyAlerts([]);
       return;
     }
 
@@ -91,6 +97,8 @@ export function AppLayout() {
           table_number?: unknown;
           guest_count?: unknown;
           total_amount?: unknown;
+          waiter_id?: unknown;
+          department?: unknown;
         };
         const orderId = Number(data.order_id);
 
@@ -109,18 +117,42 @@ export function AppLayout() {
           || message.event === "order_cancelled"
         ) {
           setQrOrderAlert((current) => current?.orderId === orderId ? null : current);
+          setDepartmentReadyAlerts((current) =>
+            current.filter((alert) => alert.orderId !== orderId)
+          );
         }
 
-        if (message.event === "order_ready" && Number.isFinite(orderId)) {
-          playReadyChime();
-          setOrderReadyAlert({
+        if (
+          (message.event === "kitchen_order_ready" || message.event === "bar_order_ready")
+          && Number.isFinite(orderId)
+        ) {
+          const waiterId = Number(data.waiter_id);
+          if (
+            user?.role === "WAITER"
+            && Number.isFinite(waiterId)
+            && waiterId !== user.id
+          ) {
+            return;
+          }
+
+          const department: ReadyDepartment =
+            message.event === "bar_order_ready" ? "BAR" : "KITCHEN";
+          const alert: DepartmentReadyAlert = {
+            key: `${department}-${orderId}`,
             orderId,
             tableNumber: String(data.table_number ?? "Bez stolika"),
-          });
+            department,
+          };
+
+          playReadyChime();
+          setDepartmentReadyAlerts((current) => [
+            ...current.filter((item) => item.key !== alert.key),
+            alert,
+          ].slice(-4));
         }
       },
     });
-  }, [currentShift, token, user?.role]);
+  }, [currentShift, token, user?.id, user?.role]);
 
   return (
     <div className={`app-shell ${isNavigationOpen ? "navigation-open" : ""}`}>
@@ -194,73 +226,99 @@ export function AppLayout() {
         </main>
       </div>
 
-      {qrOrderAlert && (
-        <aside className="qr-order-alert" role="alert" aria-live="assertive">
-          <div className="qr-order-alert-heading">
-            <span className="qr-order-alert-icon">QR</span>
-            <div>
-              <span className="eyebrow">Nowe zamówienie</span>
-              <strong>Oczekuje na potwierdzenie</strong>
-            </div>
-            <button
-              type="button"
-              className="qr-order-alert-close"
-              aria-label="Zamknij powiadomienie"
-              onClick={() => setQrOrderAlert(null)}
-            />
-          </div>
-          <div className="qr-order-alert-details">
-            <span>Stolik {qrOrderAlert.tableNumber}</span>
-            <span>{qrOrderAlert.guestCount} os.</span>
-            <strong>{formatAlertMoney(qrOrderAlert.totalAmount)}</strong>
-          </div>
-          <button
-            type="button"
-            className="qr-order-alert-open"
-            onClick={() => {
-              sessionStorage.setItem("gastroflow:open-qr-order-id", String(qrOrderAlert.orderId));
-              window.dispatchEvent(new Event("gastroflow:open-qr-order"));
-              setQrOrderAlert(null);
-              navigate(routes.waiter);
-            }}
-          >
-            Zobacz zamówienie
-          </button>
-        </aside>
-      )}
-      {orderReadyAlert && (
-        <aside className="qr-order-alert" style={{ borderLeft: "5px solid var(--brand-green)" }} role="alert" aria-live="assertive">
-          <div className="qr-order-alert-heading">
-            <span className="qr-order-alert-icon" style={{ background: "var(--brand-green)", color: "#ffffff" }}>OK</span>
-            <div>
-              <span className="eyebrow" style={{ color: "var(--brand-green-dark)" }}>Powiadomienie</span>
-              <strong>Zamówienie gotowe do wydania!</strong>
-            </div>
-            <button
-              type="button"
-              className="qr-order-alert-close"
-              aria-label="Zamknij powiadomienie"
-              onClick={() => setOrderReadyAlert(null)}
-            />
-          </div>
-          <div className="qr-order-alert-details">
-            <span>Stolik {orderReadyAlert.tableNumber}</span>
-            <span>Zam. #{orderReadyAlert.orderId}</span>
-          </div>
-          <button
-            type="button"
-            className="qr-order-alert-open"
-            style={{ background: "var(--brand-green)" }}
-            onClick={() => {
-              sessionStorage.setItem("gastroflow:open-order-id", String(orderReadyAlert.orderId));
-              window.dispatchEvent(new Event("gastroflow:open-order"));
-              setOrderReadyAlert(null);
-              navigate(routes.waiter);
-            }}
-          >
-            Zobacz rachunek
-          </button>
-        </aside>
+      {(qrOrderAlert || departmentReadyAlerts.length > 0) && (
+        <div className="live-alert-stack">
+          {qrOrderAlert && (
+            <aside className="qr-order-alert" role="alert" aria-live="assertive">
+              <div className="qr-order-alert-heading">
+                <span className="qr-order-alert-icon">QR</span>
+                <div>
+                  <span className="eyebrow">Nowe zamówienie</span>
+                  <strong>Oczekuje na potwierdzenie</strong>
+                </div>
+                <button
+                  type="button"
+                  className="qr-order-alert-close"
+                  aria-label="Zamknij powiadomienie"
+                  onClick={() => setQrOrderAlert(null)}
+                />
+              </div>
+              <div className="qr-order-alert-details">
+                <span>Stolik {qrOrderAlert.tableNumber}</span>
+                <span>{qrOrderAlert.guestCount} os.</span>
+                <strong>{formatAlertMoney(qrOrderAlert.totalAmount)}</strong>
+              </div>
+              <button
+                type="button"
+                className="qr-order-alert-open"
+                onClick={() => {
+                  sessionStorage.setItem("gastroflow:open-qr-order-id", String(qrOrderAlert.orderId));
+                  window.dispatchEvent(new Event("gastroflow:open-qr-order"));
+                  setQrOrderAlert(null);
+                  navigate(routes.waiter);
+                }}
+              >
+                Zobacz zamówienie
+              </button>
+            </aside>
+          )}
+
+          {departmentReadyAlerts.map((alert) => {
+            const isBar = alert.department === "BAR";
+            return (
+              <aside
+                key={alert.key}
+                className={`qr-order-alert department-ready-alert ${isBar ? "bar" : "kitchen"}`}
+                role="alert"
+                aria-live="assertive"
+              >
+                <div className="qr-order-alert-heading">
+                  <span className="qr-order-alert-icon">
+                    {isBar ? "BAR" : "K"}
+                  </span>
+                  <div>
+                    <span className="eyebrow">
+                      {isBar ? "Bar gotowy" : "Kuchnia gotowa"}
+                    </span>
+                    <strong>
+                      {isBar
+                        ? "Wszystkie napoje są gotowe"
+                        : "Wszystkie dania są gotowe"}
+                    </strong>
+                  </div>
+                  <button
+                    type="button"
+                    className="qr-order-alert-close"
+                    aria-label="Zamknij powiadomienie"
+                    onClick={() =>
+                      setDepartmentReadyAlerts((current) =>
+                        current.filter((item) => item.key !== alert.key)
+                      )
+                    }
+                  />
+                </div>
+                <div className="qr-order-alert-details">
+                  <span>Stolik {alert.tableNumber}</span>
+                  <span>Zam. #{alert.orderId}</span>
+                </div>
+                <button
+                  type="button"
+                  className="qr-order-alert-open"
+                  onClick={() => {
+                    sessionStorage.setItem("gastroflow:open-order-id", String(alert.orderId));
+                    window.dispatchEvent(new Event("gastroflow:open-order"));
+                    setDepartmentReadyAlerts((current) =>
+                      current.filter((item) => item.key !== alert.key)
+                    );
+                    navigate(routes.waiter);
+                  }}
+                >
+                  Zobacz rachunek
+                </button>
+              </aside>
+            );
+          })}
+        </div>
       )}
     </div>
   );

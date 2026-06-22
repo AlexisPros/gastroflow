@@ -107,6 +107,7 @@ export function BarPage() {
           "kitchen_task_completed",
           "order_cancelled",
           "kitchen_order_accepted",
+          "bar_order_ready",
         ];
 
         if (refreshEvents.includes(message.event)) {

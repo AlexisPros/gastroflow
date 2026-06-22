@@ -147,7 +147,7 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
             if not visible_tasks:
                 continue
 
-            if item.status in {"READY", "COMPLETED"} and all(
+            if item.status in {"KITCHEN_READY", "READY", "COMPLETED"} and all(
                 task.status == "COMPLETED" for task in visible_tasks
             ):
                 continue
@@ -290,17 +290,30 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
     if unfinished_tasks:
         raise_bad_request(ValueError("All kitchen tasks must be completed before issuing the order."))
 
+    newly_ready_items = False
     for item in order.items:
         item_kitchen_tasks = [
             task
             for task in item.kitchen_tasks
             if bar_section_id is None or task.kitchen_section_id != bar_section_id
         ]
-        if item_kitchen_tasks and all(task.status == "COMPLETED" for task in item_kitchen_tasks):
-            item.status = "READY"
+        if (
+            item_kitchen_tasks
+            and all(task.status == "COMPLETED" for task in item_kitchen_tasks)
+            and item.status not in {"KITCHEN_READY", "READY", "COMPLETED"}
+        ):
+            item.status = (
+                "READY"
+                if all(task.status == "COMPLETED" for task in item.kitchen_tasks)
+                else "KITCHEN_READY"
+            )
             db.add(item)
+            newly_ready_items = True
 
     await db.commit()
+
+    if not newly_ready_items:
+        return {"success": True}
 
     table_number = None
     if order.table_id:
@@ -311,11 +324,13 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
 
     await websocket_manager.broadcast_many(
         channels=["waiters", "kitchen", "bar", "floor"],
-        event="order_ready",
+        event="kitchen_order_ready",
         data={
             "order_id": order.id,
             "table_id": order.table_id,
             "table_number": table_number,
+            "waiter_id": order.waiter_id,
+            "department": "KITCHEN",
         },
     )
     return {"success": True}
@@ -442,6 +457,24 @@ async def complete_kitchen_task(task_id: int, db: DbSession, current_user: Curre
         wydawka_section_id=await _get_wydawka_section_id(db) if current_user.role == "WYDAWKA" else None,
     )
     try:
-        return await kitchen_service.complete_task(db, task=task)
+        was_completed = task.status == "COMPLETED"
+        completed_task = await kitchen_service.complete_task(db, task=task)
+
+        if not was_completed and current_user.role in ALL_SECTION_TASK_ROLES | {"BARTENDER"}:
+            bar_section_id = await _get_bar_section_id(db)
+            if (
+                bar_section_id is not None
+                and completed_task.kitchen_section_id == bar_section_id
+            ):
+                await kitchen_service.broadcast_section_ready_if_complete(
+                    db,
+                    task=completed_task,
+                    section_id=bar_section_id,
+                    event="bar_order_ready",
+                    department="BAR",
+                    channels=["waiters", "bar"],
+                )
+
+        return completed_task
     except ValueError as exc:
         raise_bad_request(exc)

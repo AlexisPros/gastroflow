@@ -6,9 +6,28 @@ from sqlalchemy.orm import selectinload
 
 from app.core.websocket_manager import websocket_manager
 from app.models.kitchen_task import KitchenTask
+from app.models.order import Order
+from app.models.order_item import OrderItem
 
 
 class KitchenService:
+    async def _load_order_for_task(
+        self,
+        db: AsyncSession,
+        *,
+        order_item_id: int,
+    ) -> Order | None:
+        result = await db.execute(
+            select(Order)
+            .join(OrderItem, OrderItem.order_id == Order.id)
+            .where(OrderItem.id == order_item_id)
+            .options(
+                selectinload(Order.table),
+                selectinload(Order.items).selectinload(OrderItem.kitchen_tasks),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def _load_order_item_tasks(
         self,
         db: AsyncSession,
@@ -82,6 +101,67 @@ class KitchenService:
                 "status": task.status,
             },
         )
+
+    async def broadcast_section_ready_if_complete(
+        self,
+        db: AsyncSession,
+        *,
+        task: KitchenTask,
+        section_id: int,
+        event: str,
+        department: str,
+        channels: list[str],
+    ) -> bool:
+        order = await self._load_order_for_task(
+            db,
+            order_item_id=task.order_item_id,
+        )
+        if order is None or order.status != "OPEN":
+            return False
+
+        section_tasks = [
+            section_task
+            for item in order.items
+            for section_task in item.kitchen_tasks
+            if section_task.kitchen_section_id == section_id
+        ]
+        if not section_tasks or any(
+            section_task.status != "COMPLETED"
+            for section_task in section_tasks
+        ):
+            return False
+
+        updated_items = False
+        for item in order.items:
+            item_section_tasks = [
+                item_task
+                for item_task in item.kitchen_tasks
+                if item_task.kitchen_section_id == section_id
+            ]
+            if (
+                item_section_tasks
+                and all(item_task.status == "COMPLETED" for item_task in item.kitchen_tasks)
+                and item.status not in {"READY", "COMPLETED"}
+            ):
+                item.status = "READY"
+                db.add(item)
+                updated_items = True
+
+        if updated_items:
+            await db.commit()
+
+        await websocket_manager.broadcast_many(
+            channels=channels,
+            event=event,
+            data={
+                "order_id": order.id,
+                "table_id": order.table_id,
+                "table_number": order.table.table_number if order.table else None,
+                "waiter_id": order.waiter_id,
+                "department": department,
+            },
+        )
+        return True
 
     async def start_task(
         self,

@@ -148,7 +148,7 @@ export function KitchenPage() {
           "kitchen_task_completed",
           "kitchen_order_accepted",
           "order_cancelled",
-          "order_ready",
+          "kitchen_order_ready",
         ];
 
         if (refreshEvents.includes(message.event)) {
