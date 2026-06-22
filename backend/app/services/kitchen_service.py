@@ -74,11 +74,19 @@ class KitchenService:
     def _ready_to_start_tasks(
         self,
         tasks: list[KitchenTask],
+        *,
+        allow_new: bool = False,
+        start_section_id: int | None = None,
     ) -> list[KitchenTask]:
+        startable_statuses = {"PENDING"}
+        if allow_new:
+            startable_statuses.add("NEW")
+
         return [
             task
             for task in tasks
-            if task.status == "PENDING"
+            if task.status in startable_statuses
+            and (start_section_id is None or task.kitchen_section_id == start_section_id)
             and self._dependency_completed(
                 tasks,
                 depends_on_sequence=self._depends_on_sequence(task),
@@ -229,8 +237,14 @@ class KitchenService:
         db: AsyncSession,
         *,
         tasks: list[KitchenTask],
+        allow_new: bool = False,
+        start_section_id: int | None = None,
     ) -> list[KitchenTask]:
-        ready_tasks = self._ready_to_start_tasks(tasks)
+        ready_tasks = self._ready_to_start_tasks(
+            tasks,
+            allow_new=allow_new,
+            start_section_id=start_section_id,
+        )
         started_at = datetime.now(timezone.utc)
 
         for item in ready_tasks:
@@ -264,6 +278,8 @@ class KitchenService:
         db: AsyncSession,
         *,
         task: KitchenTask,
+        allow_new_following: bool = False,
+        start_section_id: int | None = None,
     ) -> tuple[KitchenTask, list[KitchenTask]]:
         tasks = await self._load_order_item_tasks(db, order_item_id=task.order_item_id)
         current_task = next((item for item in tasks if item.id == task.id), task)
@@ -282,6 +298,8 @@ class KitchenService:
         following_tasks = await self._start_ready_following_tasks(
             db,
             tasks=tasks,
+            allow_new=allow_new_following,
+            start_section_id=start_section_id,
         )
 
         await db.commit()
@@ -296,11 +314,18 @@ class KitchenService:
         db: AsyncSession,
         *,
         task: KitchenTask,
+        allow_new_following: bool = False,
+        start_section_id: int | None = None,
     ) -> KitchenTask:
         if task.status == "COMPLETED":
             return task
 
-        completed_task, started_tasks = await self._finish_task_and_start_following(db, task=task)
+        completed_task, started_tasks = await self._finish_task_and_start_following(
+            db,
+            task=task,
+            allow_new_following=allow_new_following,
+            start_section_id=start_section_id,
+        )
         await self._broadcast_task_event(event="kitchen_task_completed", task=completed_task)
         for started_task in started_tasks:
             await self._broadcast_task_event(event="kitchen_task_started", task=started_task)

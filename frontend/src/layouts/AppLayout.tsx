@@ -99,6 +99,7 @@ export function AppLayout() {
           total_amount?: unknown;
           waiter_id?: unknown;
           department?: unknown;
+          departments?: unknown;
         };
         const orderId = Number(data.order_id);
 
@@ -119,6 +120,24 @@ export function AppLayout() {
           setQrOrderAlert((current) => current?.orderId === orderId ? null : current);
           setDepartmentReadyAlerts((current) =>
             current.filter((alert) => alert.orderId !== orderId)
+          );
+        }
+
+        if (message.event === "order_items_added" && Number.isFinite(orderId)) {
+          const departments = Array.isArray(data.departments)
+            ? new Set(
+                data.departments.filter(
+                  (department): department is ReadyDepartment =>
+                    department === "KITCHEN" || department === "BAR",
+                ),
+              )
+            : new Set<ReadyDepartment>(["KITCHEN", "BAR"]);
+
+          setDepartmentReadyAlerts((current) =>
+            current.filter(
+              (alert) =>
+                alert.orderId !== orderId || !departments.has(alert.department),
+            ),
           );
         }
 

@@ -35,20 +35,17 @@ const playBarAlertSound = () => {
 };
 
 export function BarPage() {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   
   const [tasks, setTasks] = useState<KitchenSectionTask[]>([]);
-  const [barSectionId, setBarSectionId] = useState<number | undefined>(
-    user?.kitchen_section_id ?? undefined
-  );
+  const [barSectionId, setBarSectionId] = useState<number | undefined>();
   
   const [toasts, setToasts] = useState<Array<{ id: string; title: string; subtitle: string }>>([]);
   const [infoTaskId, setInfoTaskId] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
 
-  // Fetch sections to auto-detect the Bar section ID
+  // The bar screen must never fall back to a kitchen section.
   useEffect(() => {
     if (token) {
       getKitchenSections(token)
@@ -56,15 +53,20 @@ export function BarPage() {
           const barSec = data.find((s) => s.name.toLowerCase() === "bar");
           if (barSec) {
             setBarSectionId(barSec.id);
-          } else if (user?.kitchen_section_id) {
-            setBarSectionId(user.kitchen_section_id);
-          } else if (data.length > 0) {
-            setBarSectionId(data[0].id);
+            setError(null);
+          } else {
+            setBarSectionId(undefined);
+            setTasks([]);
+            setError("Sekcja Bar nie jest skonfigurowana.");
           }
         })
-        .catch(console.error);
+        .catch((err) => {
+          setBarSectionId(undefined);
+          setTasks([]);
+          setError("Błąd pobierania sekcji baru: " + (err.message || err));
+        });
     }
-  }, [token, user]);
+  }, [token]);
 
   // Load bar tasks
   const loadTasks = async () => {
@@ -106,7 +108,6 @@ export function BarPage() {
           "kitchen_task_started",
           "kitchen_task_completed",
           "order_cancelled",
-          "kitchen_order_accepted",
           "bar_order_ready",
         ];
 
@@ -118,8 +119,7 @@ export function BarPage() {
             if (
               message.event === "order_created" ||
               message.event === "qr_order_confirmed" ||
-              message.event === "order_items_added" ||
-              message.event === "kitchen_order_accepted"
+              message.event === "order_items_added"
             ) {
               const data = message.data as any;
               const orderId = Number(data.order_id);

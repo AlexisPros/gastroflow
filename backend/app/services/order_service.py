@@ -17,6 +17,7 @@ from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
 from app.models.order_transfer_log import OrderTransferLog
 from app.models.product import Product
+from app.models.product_category import ProductCategory
 from app.models.product_kitchen_step import ProductKitchenStep
 from app.models.product_modifier import ProductModifier
 from app.models.restaurant_table import RestaurantTable
@@ -363,6 +364,15 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
+        product_ids = {item.product_id for item in items}
+        departments_result = await db.execute(
+            select(ProductCategory.department)
+            .join(Product, Product.category_id == ProductCategory.id)
+            .where(Product.id.in_(product_ids))
+            .distinct(),
+        )
+        added_departments = sorted(set(departments_result.scalars().all()))
+
         existing_items_result = await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id),
         )
@@ -405,6 +415,7 @@ class OrderService:
                 "table_id": order.table_id,
                 "table_number": table_number,
                 "status": order.status,
+                "departments": added_departments,
             },
         )
         return order

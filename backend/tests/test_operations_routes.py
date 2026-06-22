@@ -250,6 +250,33 @@ def test_kitchen_task_start_forbidden_for_waiter():
     assert response.status_code == 403
 
 
+def test_bartender_cannot_start_kitchen_section_task(monkeypatch):
+    task = make_kitchen_task()
+    task.kitchen_section_id = 2
+
+    async def get(_db, id: int):
+        assert id == 1
+        return task
+
+    async def get_bar_section_id(_db):
+        return 1
+
+    monkeypatch.setattr(crud_kitchen_task, "get", get)
+    monkeypatch.setattr(kitchen_routes, "_get_bar_section_id", get_bar_section_id)
+    override_current_user("BARTENDER")
+
+    try:
+        response = client.post(
+            "/api/v1/kitchen-tasks/1/start",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Bartender can only access bar tasks."
+
+
 def test_kitchen_task_start_reaches_service(monkeypatch):
     async def get(_db, id: int):
         assert id == 1
@@ -374,6 +401,41 @@ def test_kitchen_task_complete_starts_ready_dependent_step(monkeypatch):
     ]
 
 
+def test_bartender_completion_starts_new_dependent_bar_step(monkeypatch):
+    first_step = make_product_step(id=7, sequence=1)
+    second_step = make_product_step(id=8, sequence=2, depends_on_sequence=1)
+    first_step.kitchen_section_id = 7
+    second_step.kitchen_section_id = 7
+    tasks = [
+        make_task_for_step(id=1, step=first_step, status="IN_PROGRESS"),
+        make_task_for_step(id=2, step=second_step, status="NEW"),
+    ]
+    db = FakeKitchenSession(tasks)
+    events: list[tuple[str, int]] = []
+
+    async def broadcast(*, event: str, task: KitchenTask) -> None:
+        events.append((event, task.id))
+
+    monkeypatch.setattr(kitchen_service, "_broadcast_task_event", broadcast)
+
+    asyncio.run(
+        kitchen_service.complete_task(
+            cast(AsyncSession, db),
+            task=tasks[0],
+            allow_new_following=True,
+            start_section_id=7,
+        )
+    )
+
+    assert tasks[0].status == "COMPLETED"
+    assert tasks[1].status == "IN_PROGRESS"
+    assert db.commits == 1
+    assert events == [
+        ("kitchen_task_completed", 1),
+        ("kitchen_task_started", 2),
+    ]
+
+
 def test_kitchen_task_complete_reaches_service(monkeypatch):
     async def get(_db, id: int):
         assert id == 1
@@ -382,7 +444,15 @@ def test_kitchen_task_complete_reaches_service(monkeypatch):
         task.started_at = datetime.now(timezone.utc)
         return task
 
-    async def complete_task(_db, *, task):
+    async def complete_task(
+        _db,
+        *,
+        task,
+        allow_new_following=False,
+        start_section_id=None,
+    ):
+        assert allow_new_following is False
+        assert start_section_id is None
         assert task.id == 1
         task.status = "COMPLETED"
         task.completed_at = datetime.now(timezone.utc)
@@ -540,7 +610,15 @@ def test_bartender_completion_checks_bar_order_readiness(monkeypatch):
         assert id == 1
         return task
 
-    async def complete_task(_db, *, task):
+    async def complete_task(
+        _db,
+        *,
+        task,
+        allow_new_following=False,
+        start_section_id=None,
+    ):
+        assert allow_new_following is True
+        assert start_section_id == 1
         task.status = "COMPLETED"
         task.completed_at = datetime.now(timezone.utc)
         return task
@@ -593,7 +671,15 @@ def test_completed_bar_task_does_not_repeat_ready_event(monkeypatch):
         assert id == 1
         return task
 
-    async def complete_task(_db, *, task):
+    async def complete_task(
+        _db,
+        *,
+        task,
+        allow_new_following=False,
+        start_section_id=None,
+    ):
+        assert allow_new_following is True
+        assert start_section_id == 1
         return task
 
     async def get_bar_section_id(_db):

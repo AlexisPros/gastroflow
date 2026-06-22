@@ -450,18 +450,29 @@ async def complete_kitchen_task(task_id: int, db: DbSession, current_user: Curre
         id=task_id,
         entity_name="kitchen task",
     )
+    bar_section_id = (
+        await _get_bar_section_id(db)
+        if current_user.role == "BARTENDER"
+        else None
+    )
     _require_task_access(
         current_user=current_user,
         task=task,
-        bar_section_id=await _get_bar_section_id(db) if current_user.role == "BARTENDER" else None,
+        bar_section_id=bar_section_id,
         wydawka_section_id=await _get_wydawka_section_id(db) if current_user.role == "WYDAWKA" else None,
     )
     try:
         was_completed = task.status == "COMPLETED"
-        completed_task = await kitchen_service.complete_task(db, task=task)
+        completed_task = await kitchen_service.complete_task(
+            db,
+            task=task,
+            allow_new_following=current_user.role == "BARTENDER",
+            start_section_id=bar_section_id,
+        )
 
         if not was_completed and current_user.role in ALL_SECTION_TASK_ROLES | {"BARTENDER"}:
-            bar_section_id = await _get_bar_section_id(db)
+            if bar_section_id is None:
+                bar_section_id = await _get_bar_section_id(db)
             if (
                 bar_section_id is not None
                 and completed_task.kitchen_section_id == bar_section_id
