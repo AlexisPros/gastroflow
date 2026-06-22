@@ -114,6 +114,8 @@ export type OrderItem = {
     name: string;
     price: string;
   }>;
+  completed_steps?: number;
+  total_steps?: number;
 };
 
 export type PendingQrOrderItem = OrderItem & {

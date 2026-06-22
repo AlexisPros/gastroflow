@@ -11,7 +11,7 @@ router = APIRouter(tags=["WebSocket"])
 
 CHANNEL_ROLES = {
     "waiters": {"ADMIN", "MANAGER", "WAITER"},
-    "kitchen": {"ADMIN", "MANAGER", "KITCHEN"},
+    "kitchen": {"ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"},
     "bar": {"ADMIN", "MANAGER", "BARTENDER"},
     "floor": {"ADMIN", "MANAGER", "WAITER"},
     "managers": {"ADMIN", "MANAGER"},

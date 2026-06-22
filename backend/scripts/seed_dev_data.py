@@ -34,7 +34,11 @@ DEV_USERS = [
     ("Admin", "User", "admin@gastroflow.dev", "ADMIN", "1001"),
     ("Manager", "User", "manager@gastroflow.dev", "MANAGER", "1002"),
     ("Waiter", "User", "waiter@gastroflow.dev", "WAITER", "1234"),
-    ("Kitchen", "User", "kitchen@gastroflow.dev", "KITCHEN", "2001"),
+    ("Kitchen", "User", "kitchen@gastroflow.dev", "WYDAWKA", "2001"),
+    ("Cook Hot", "User", "cook_hot@gastroflow.dev", "KITCHEN", "2002"),
+    ("Cook Cold", "User", "cook_cold@gastroflow.dev", "KITCHEN", "2003"),
+    ("Cook Meat", "User", "cook_meat@gastroflow.dev", "KITCHEN", "2004"),
+    ("Chef", "User", "chef@gastroflow.dev", "CHEF", "2005"),
     ("Bartender", "User", "bar@gastroflow.dev", "BARTENDER", "3001"),
 ]
 
@@ -299,7 +303,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             name=name,
             defaults={
                 "category_id": category.id,
-                "kitchen_section_id": None,
+                "kitchen_section_id": section.id,
                 "description": description,
                 "price": price,
                 "vat_rate": vat_rate,
@@ -309,7 +313,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
             },
         )
         product.category_id = category.id
-        product.kitchen_section_id = None
+        product.kitchen_section_id = section.id
         product.description = description
         product.price = price
         product.vat_rate = vat_rate
@@ -359,6 +363,7 @@ async def seed_menu(db: AsyncSession) -> dict[str, Any]:
         description="Zlozenie burgera i przygotowanie cieplych dodatkow.",
         sequence=2,
         estimated_time=5,
+        depends_on_sequence=1,
     )
     await link_product_kitchen_step(
         db,
@@ -428,6 +433,7 @@ async def link_product_kitchen_step(
     description: str,
     sequence: int,
     estimated_time: int,
+    depends_on_sequence: int | None = None,
 ) -> ProductKitchenStep:
     step, _ = await get_or_create(
         db,
@@ -439,6 +445,7 @@ async def link_product_kitchen_step(
             "name": name,
             "description": description,
             "estimated_time": estimated_time,
+            "depends_on_sequence": depends_on_sequence,
             "is_active": True,
         },
     )
@@ -446,6 +453,7 @@ async def link_product_kitchen_step(
     step.name = name
     step.description = description
     step.estimated_time = estimated_time
+    step.depends_on_sequence = depends_on_sequence
     step.is_active = True
     return step
 
@@ -559,12 +567,42 @@ async def seed_floor_plan(db: AsyncSession) -> None:
     floor_plan.is_active = True
 
 
+async def assign_user_sections(db: AsyncSession, sections: dict[str, KitchenSection]) -> None:
+    cook_meat = await get_one(db, User, email="cook_meat@gastroflow.dev")
+    if cook_meat:
+        cook_meat.kitchen_section_id = sections["meat"].id
+        db.add(cook_meat)
+
+    cook_hot = await get_one(db, User, email="cook_hot@gastroflow.dev")
+    if cook_hot:
+        cook_hot.kitchen_section_id = sections["hot"].id
+        db.add(cook_hot)
+
+    cook_cold = await get_one(db, User, email="cook_cold@gastroflow.dev")
+    if cook_cold:
+        cook_cold.kitchen_section_id = sections["cold"].id
+        db.add(cook_cold)
+
+    bartender = await get_one(db, User, email="bar@gastroflow.dev")
+    if bartender:
+        bartender.kitchen_section_id = sections["bar"].id
+        db.add(bartender)
+
+    wydawka = await get_one(db, User, email="kitchen@gastroflow.dev")
+    if wydawka:
+        wydawka.kitchen_section_id = sections["pass"].id
+        db.add(wydawka)
+
+    await db.flush()
+
+
 async def seed() -> None:
     async with AsyncSessionLocal() as db:
         await clear_operational_data(db)
         await seed_users(db)
         await seed_restaurant_config(db)
         menu = await seed_menu(db)
+        await assign_user_sections(db, menu["sections"])
         await seed_stock(db, menu["products"])
         await seed_discounts(db)
         await seed_floor_plan(db)

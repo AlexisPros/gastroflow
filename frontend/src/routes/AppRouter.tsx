@@ -9,6 +9,8 @@ import { AdminMenuPage } from "../pages/AdminMenuPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { WaiterPage } from "../pages/WaiterPage";
+import { KitchenPage } from "../pages/KitchenPage";
+import { BarPage } from "../pages/BarPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { routes } from "./routePaths";
 
@@ -45,16 +47,11 @@ const router = createBrowserRouter([
             ],
           },
           {
-            element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "KITCHEN"]} />,
+            element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"]} />,
             children: [
               {
                 path: routes.kitchen,
-                element: (
-                  <PlaceholderPage
-                    title="Ekran Kuchenny"
-                    description="Tablica produkcyjna kuchni z aktualizacjami zadań w czasie rzeczywistym."
-                  />
-                ),
+                element: <KitchenPage />,
               },
             ],
           },
@@ -63,12 +60,7 @@ const router = createBrowserRouter([
             children: [
               {
                 path: routes.bar,
-                element: (
-                  <PlaceholderPage
-                    title="Ekran Baru"
-                    description="Zadania baru, przygotowywanie napojów i aktualizacje zamówień na żywo."
-                  />
-                ),
+                element: <BarPage />,
               },
             ],
           },
