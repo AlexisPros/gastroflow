@@ -72,6 +72,17 @@ class CRUDUser(CRUDBase[User, UserCreate, UserUpdate]):
         )
         return result.scalar_one_or_none()
 
+    async def get_by_pin_lookup(
+        self,
+        db: AsyncSession,
+        *,
+        pin_lookup: str,
+    ) -> User | None:
+        result = await db.execute(
+            select(User).where(User.pin_lookup == pin_lookup),
+        )
+        return result.scalar_one_or_none()
+
     async def get_active_by_roles(
         self,
         db: AsyncSession,

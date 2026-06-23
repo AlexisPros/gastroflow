@@ -43,9 +43,15 @@ const actions: DashboardAction[] = [
     roles: ["ADMIN", "MANAGER"],
   },
   {
-    title: "Admin",
-    description: "Zarządzaj użytkownikami, menu i ustawieniami systemu.",
+    title: "Menu",
+    description: "Zarządzaj kategoriami, produktami, składnikami i rabatami.",
     path: routes.adminMenu,
+    roles: ["ADMIN"],
+  },
+  {
+    title: "Pracownicy",
+    description: "Twórz konta pracowników, role, PIN-y i dostęp do sekcji kuchni.",
+    path: routes.adminUsers,
     roles: ["ADMIN"],
   },
 ];

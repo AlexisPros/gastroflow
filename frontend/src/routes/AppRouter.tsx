@@ -6,6 +6,7 @@ import { FloorPlanPage } from "../pages/FloorPlanPage";
 import { GuestQrPage } from "../pages/GuestQrPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AdminMenuPage } from "../pages/AdminMenuPage";
+import { AdminUsersPage } from "../pages/AdminUsersPage";
 import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { WaiterPage } from "../pages/WaiterPage";
@@ -83,6 +84,10 @@ const router = createBrowserRouter([
               {
                 path: routes.adminMenu,
                 element: <AdminMenuPage />,
+              },
+              {
+                path: routes.adminUsers,
+                element: <AdminUsersPage />,
               },
             ],
           },

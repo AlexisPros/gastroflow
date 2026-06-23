@@ -83,6 +83,7 @@ def test_openapi_builds():
     openapi = response.json()
     assert "/api/v1/auth/login" in openapi["paths"]
     assert "/api/v1/auth/token" in openapi["paths"]
+    assert "/api/v1/admin/users" in openapi["paths"]
     assert (
         openapi["components"]["securitySchemes"]["OAuth2PasswordBearer"][
             "flows"
@@ -156,6 +157,20 @@ def test_wrong_role_gets_403_on_protected_write_route():
     try:
         response = client.post(
             "/api/v1/floor-plans/1/activate",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 403
+
+
+def test_admin_users_route_requires_admin_role():
+    override_current_user("WAITER")
+
+    try:
+        response = client.get(
+            "/api/v1/admin/users",
             headers={"Authorization": "Bearer fake-token"},
         )
     finally:
