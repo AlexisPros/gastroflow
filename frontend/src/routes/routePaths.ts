@@ -9,4 +9,5 @@ export const routes = {
   reports: "/reports",
   admin: "/admin",
   adminMenu: "/admin/menu",
+  adminUsers: "/admin/users",
 } as const;

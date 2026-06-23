@@ -3299,11 +3299,163 @@ body.touch-keyboard-open .modal-backdrop:has(.product-options-modal) .product-op
   gap: 18px;
 }
 
+.admin-users-page {
+  display: grid;
+  gap: 18px;
+}
+
 .admin-menu-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
+}
+
+.admin-users-header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.admin-users-filters {
+  grid-template-columns: minmax(260px, 1fr) minmax(180px, 240px) minmax(180px, 240px);
+  align-items: end;
+}
+
+.admin-users-filters label {
+  display: grid;
+  gap: 6px;
+  color: #40514c;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.admin-users-filters input,
+.admin-users-filters select {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid #cbd8d2;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #172026;
+}
+
+.admin-users-list-panel {
+  min-height: 540px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.admin-users-list-heading,
+.admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.3fr) minmax(110px, 0.7fr) minmax(130px, 0.8fr) minmax(110px, 0.6fr) 230px;
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-users-list-heading {
+  padding: 0 12px;
+  color: #60716c;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-users-list-heading span:last-child {
+  text-align: right;
+}
+
+.admin-users-list {
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.admin-user-row {
+  padding: 12px;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.admin-user-row strong {
+  display: block;
+  color: #172026;
+}
+
+.admin-user-row small {
+  display: block;
+  margin-top: 3px;
+  color: #60716c;
+  font-weight: 700;
+}
+
+.admin-user-role {
+  color: var(--brand-navy);
+  font-weight: 800;
+}
+
+.admin-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.admin-user-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #d7dfda;
+  border-radius: 8px;
+  background: #ffffff;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-pill {
+  display: inline-flex;
+  width: max-content;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-pill.active {
+  background: var(--brand-green-soft);
+  color: var(--brand-green-dark);
+}
+
+.status-pill.inactive-status {
+  background: #fff2f0;
+  color: #a83427;
+}
+
+.admin-users-empty {
+  margin: 0;
+  padding: 18px;
+  border: 1px dashed #cbd8d2;
+  border-radius: 8px;
+  color: #60716c;
+  font-weight: 700;
+  text-align: center;
+}
+
+.admin-user-modal {
+  width: min(780px, 100%);
+}
+
+.admin-user-modal small {
+  color: #60716c;
+  font-size: 12px;
 }
 
 .admin-menu-grid {

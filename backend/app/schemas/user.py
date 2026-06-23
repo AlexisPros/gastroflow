@@ -27,6 +27,7 @@ class UserUpdate(OrmBaseModel):
     pin: str | None = None
     role: str | None = None
     is_active: bool | None = None
+    kitchen_section_id: int | None = None
 
 
 class UserRead(UserBase):

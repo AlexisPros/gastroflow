@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     admin_menu,
+    admin_users,
     auth,
     bill_split,
     fiscal,
@@ -23,6 +24,7 @@ api_router = APIRouter(prefix="/api/v1")
 
 api_router.include_router(auth.router)
 api_router.include_router(admin_menu.router)
+api_router.include_router(admin_users.router)
 api_router.include_router(orders.router)
 api_router.include_router(bill_split.router)
 api_router.include_router(kitchen.router)

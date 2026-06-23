@@ -34,7 +34,8 @@ const navItems: NavItem[] = [
   { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"] },
   { label: "Bar", path: routes.bar, roles: ["ADMIN", "MANAGER", "BARTENDER"] },
   { label: "Raporty", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
-  { label: "Panel Admina", path: routes.admin, roles: ["ADMIN"] },
+  { label: "Menu", path: routes.adminMenu, roles: ["ADMIN"] },
+  { label: "Pracownicy", path: routes.adminUsers, roles: ["ADMIN"] },
 ];
 
 export function AppLayout() {
