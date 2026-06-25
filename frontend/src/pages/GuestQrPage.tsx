@@ -7,6 +7,7 @@ import {
   getPublicQrMenu,
   getPublicQrOrderStatus,
   getPublicQrTable,
+  unlockPublicQrOrder,
   type PublicQrCategory,
   type PublicQrOrderStatus,
   type PublicQrProduct,
@@ -15,7 +16,7 @@ import {
 import { WS_BASE_URL } from "../shared/config";
 import { createClientId } from "../shared/id";
 
-type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT";
+type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT" | "LOCKED";
 type MenuDepartment = "KITCHEN" | "BAR";
 type GuestCartItem = {
   id: string;
@@ -24,11 +25,48 @@ type GuestCartItem = {
   modifierIds: number[];
   notes: string;
 };
+type GuestQrStorage = {
+  screen?: Screen;
+  guestCount?: number;
+  sentOrderId?: number | null;
+  orderStatus?: PublicQrOrderStatus | null;
+  cart?: GuestCartItem[];
+};
+
+const QR_STORAGE_PREFIX = "gastroflow:qr:";
 
 const money = new Intl.NumberFormat("pl-PL", {
   style: "currency",
   currency: "PLN",
 });
+
+function getGuestQrStorageKey(qrToken: string) {
+  return `${QR_STORAGE_PREFIX}${qrToken}`;
+}
+
+function readGuestQrState(qrToken: string): GuestQrStorage | null {
+  try {
+    const raw = window.localStorage.getItem(getGuestQrStorageKey(qrToken));
+    return raw ? (JSON.parse(raw) as GuestQrStorage) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeGuestQrState(qrToken: string, state: GuestQrStorage) {
+  try {
+    window.localStorage.setItem(getGuestQrStorageKey(qrToken), JSON.stringify(state));
+  } catch {
+    // Browsers can block storage in private mode; QR flow still works for the active tab.
+  }
+}
+
+function getActivePublicOrderId(
+  status: PublicQrOrderStatus | null,
+  sentOrderId: number | null,
+) {
+  return status?.target_order_id ?? status?.order_id ?? sentOrderId;
+}
 
 export function GuestQrPage() {
   const { qrToken = "" } = useParams();
@@ -47,26 +85,61 @@ export function GuestQrPage() {
   const [submitting, setSubmitting] = useState(false);
   const [sentOrderId, setSentOrderId] = useState<number | null>(null);
   const [orderStatus, setOrderStatus] = useState<PublicQrOrderStatus | null>(null);
+  const [orderCodeInput, setOrderCodeInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
     let active = true;
+    const savedState = readGuestQrState(qrToken);
     Promise.all([getPublicQrTable(qrToken), getPublicQrMenu(qrToken)])
       .then(([nextTable, nextCategories]) => {
         if (!active) return;
         setTable(nextTable);
         setCategories(nextCategories);
+        if (savedState) {
+          setGuestCount(savedState.guestCount ?? 2);
+          setCart(savedState.cart ?? []);
+          setSentOrderId(savedState.sentOrderId ?? null);
+          setOrderStatus(savedState.orderStatus ?? null);
+        }
+
+        if (savedState?.sentOrderId) {
+          setScreen(savedState.screen === "SUMMARY" ? "SUMMARY" : "SENT");
+        } else if (nextTable.status !== "FREE") {
+          setScreen("LOCKED");
+        } else if (savedState?.screen && savedState.screen !== "LOCKED" && savedState.screen !== "SENT") {
+          setScreen(savedState.screen);
+        }
       })
       .catch((exc) => {
         if (!active) return;
         setError(exc instanceof ApiError ? exc.message : "Nie udało się otworzyć menu.");
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setHydrated(true);
+          setLoading(false);
+        }
       });
     return () => {
       active = false;
     };
   }, [qrToken]);
+
+  useEffect(() => {
+    if (!hydrated || !qrToken) {
+      return;
+    }
+
+    writeGuestQrState(qrToken, {
+      screen,
+      guestCount,
+      sentOrderId,
+      orderStatus,
+      cart,
+    });
+  }, [cart, guestCount, hydrated, orderStatus, qrToken, screen, sentOrderId]);
 
   useEffect(() => {
     if (screen !== "SENT" || sentOrderId === null) {
@@ -213,8 +286,10 @@ export function GuestQrPage() {
     setSubmitting(true);
     setError("");
     try {
+      const activeOrderCode = getActivePublicOrderId(orderStatus, sentOrderId);
       const order = await createPublicQrOrder(qrToken, {
         guest_count: guestCount,
+        order_code: activeOrderCode ? String(activeOrderCode) : null,
         items: cart.map((item) => ({
           product_id: item.product.id,
           quantity: item.quantity,
@@ -230,6 +305,7 @@ export function GuestQrPage() {
         public_status: "PENDING_CONFIRMATION",
         progress_percent: 0,
         can_order_more: false,
+        items: [],
       });
       setCart([]);
       setScreen("SENT");
@@ -237,6 +313,29 @@ export function GuestQrPage() {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się wysłać zamówienia.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function unlockOrder() {
+    if (!orderCodeInput.trim()) return;
+    setUnlocking(true);
+    setError("");
+    try {
+      const nextStatus = await unlockPublicQrOrder(qrToken, {
+        order_code: orderCodeInput.trim(),
+      });
+      setSentOrderId(nextStatus.order_id);
+      setOrderStatus(nextStatus);
+      setCart([]);
+      setScreen("SENT");
+    } catch (exc) {
+      setError(
+        exc instanceof ApiError
+          ? exc.message
+          : "Nie znaleziono zamówienia dla tego stolika.",
+      );
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -283,6 +382,35 @@ export function GuestQrPage() {
           </div>
           <button type="button" className="guest-primary-button" onClick={() => setScreen("MENU")}>
             Przejdź do menu
+          </button>
+        </section>
+      )}
+
+      {screen === "LOCKED" && (
+        <section className="guest-count-screen guest-locked-screen">
+          <span className="eyebrow">Stolik zajęty</span>
+          <h1>Ten stolik ma już otwarty rachunek.</h1>
+          <p className="muted">
+            Wpisz numer zamówienia, aby wrócić do statusu i domówić kolejne pozycje.
+          </p>
+          <label className="guest-order-code-field">
+            Numer zamówienia
+            <input
+              value={orderCodeInput}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              onChange={(event) => setOrderCodeInput(event.target.value.replace(/\D/g, ""))}
+              placeholder="np. 12"
+            />
+          </label>
+          {error && <div className="error-box">{error}</div>}
+          <button
+            type="button"
+            className="guest-primary-button"
+            disabled={unlocking || !orderCodeInput.trim()}
+            onClick={() => void unlockOrder()}
+          >
+            {unlocking ? "Sprawdzanie..." : "Otwórz status zamówienia"}
           </button>
         </section>
       )}
@@ -591,6 +719,11 @@ function GuestOrderStatus({
   const publicStatus = status?.public_status ?? "PENDING_CONFIRMATION";
   const progress = Math.max(0, Math.min(100, status?.progress_percent ?? 0));
   const copy = getGuestStatusCopy(publicStatus);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const detailsTotal = (status?.items ?? []).reduce(
+    (sum, item) => sum + Number(item.total_price),
+    0,
+  );
 
   return (
     <main className="guest-qr-page">
@@ -612,6 +745,47 @@ function GuestOrderStatus({
             <span style={{ width: `${progress}%` }} />
           </div>
         </div>
+        <button
+          type="button"
+          className="guest-secondary-button"
+          onClick={() => setIsDetailsOpen((isOpen) => !isOpen)}
+        >
+          {isDetailsOpen ? "Ukryj szczegóły" : "Szczegóły zamówienia"}
+        </button>
+        {isDetailsOpen && (
+          <section className="guest-order-details-card">
+            <div>
+              <span>Zamówione pozycje</span>
+              <strong>{money.format(detailsTotal)}</strong>
+            </div>
+            {(status?.items ?? []).length > 0 ? (
+              <div className="guest-order-details-list">
+                {status?.items.map((item) => (
+                  <article key={item.id}>
+                    <div>
+                      <strong>{item.product_name}</strong>
+                      <small>
+                        Kurs {item.course_number} · {item.quantity} x {money.format(Number(item.unit_price))}
+                      </small>
+                      {item.modifiers.map((modifier) => (
+                        <small key={`${item.id}-${modifier.name}`}>
+                          + {modifier.name}
+                          {Number(modifier.price) > 0
+                            ? ` (${money.format(Number(modifier.price))})`
+                            : ""}
+                        </small>
+                      ))}
+                      {item.notes && <small>{item.notes}</small>}
+                    </div>
+                    <b>{money.format(Number(item.total_price))}</b>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Pozycje pojawią się po odświeżeniu statusu.</p>
+            )}
+          </section>
+        )}
         {status?.can_order_more && (
           <button type="button" className="guest-primary-button" onClick={onOrderMore}>
             Domów

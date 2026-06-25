@@ -704,6 +704,7 @@ def test_create_pending_qr_order_uses_active_order_as_qr_parent():
         order_service._ensure_table_accepts_qr_order(
             cast(AsyncSession, db),
             table_id=1,
+            order_code="1",
         )
     )
 

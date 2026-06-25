@@ -208,6 +208,7 @@ class OrderService:
         table_id: int,
         guest_count: int,
         items: list[OrderItemRequest],
+        order_code: str | None = None,
     ) -> Order:
         if guest_count <= 0:
             raise ValueError("Guest count must be greater than zero.")
@@ -215,7 +216,11 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
-        table, parent_order = await self._ensure_table_accepts_qr_order(db, table_id=table_id)
+        table, parent_order = await self._ensure_table_accepts_qr_order(
+            db,
+            table_id=table_id,
+            order_code=order_code,
+        )
 
         order = Order(
             table_id=table_id,
@@ -608,6 +613,7 @@ class OrderService:
         db: AsyncSession,
         *,
         table_id: int,
+        order_code: str | None = None,
     ) -> tuple[RestaurantTable, Order | None]:
         result = await db.execute(
             select(RestaurantTable)
@@ -644,6 +650,9 @@ class OrderService:
         )
         parent_order = active_order_result.scalar_one_or_none()
         if parent_order is not None:
+            normalized_code = (order_code or "").strip()
+            if normalized_code != str(parent_order.id):
+                raise ValueError("Order number is required for occupied table.")
             return table, parent_order
 
         if table.status != "FREE":
