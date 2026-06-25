@@ -32,6 +32,7 @@ export type Order = {
   discount_id: number | null;
   shift_id: number | null;
   split_parent_order_id: number | null;
+  qr_parent_order_id: number | null;
   split_sequence: number | null;
   guest_count: number | null;
   source: string;

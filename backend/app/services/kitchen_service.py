@@ -100,7 +100,7 @@ class KitchenService:
         task: KitchenTask,
     ) -> None:
         await websocket_manager.broadcast_many(
-            channels=["kitchen", "bar", "waiters"],
+            channels=["kitchen", "bar", "waiters", "public_qr"],
             event=event,
             data={
                 "task_id": task.id,
@@ -159,7 +159,7 @@ class KitchenService:
             await db.commit()
 
         await websocket_manager.broadcast_many(
-            channels=channels,
+            channels=list(dict.fromkeys([*channels, "public_qr"])),
             event=event,
             data={
                 "order_id": order.id,
@@ -167,6 +167,7 @@ class KitchenService:
                 "table_number": order.table.table_number if order.table else None,
                 "waiter_id": order.waiter_id,
                 "department": department,
+                "public_status": "READY",
             },
         )
         return True

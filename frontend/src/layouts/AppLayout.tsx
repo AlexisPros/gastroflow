@@ -50,6 +50,7 @@ export function AppLayout() {
     tableNumber: string;
     guestCount: number;
     totalAmount: string;
+    isAddition: boolean;
   } | null>(null);
   const [departmentReadyAlerts, setDepartmentReadyAlerts] = useState<DepartmentReadyAlert[]>([]);
   const availableItems = user
@@ -101,6 +102,7 @@ export function AppLayout() {
           waiter_id?: unknown;
           department?: unknown;
           departments?: unknown;
+          is_addition?: unknown;
         };
         const orderId = Number(data.order_id);
 
@@ -110,6 +112,7 @@ export function AppLayout() {
             tableNumber: String(data.table_number ?? data.order_id ?? ""),
             guestCount: Number(data.guest_count ?? 0),
             totalAmount: String(data.total_amount ?? "0"),
+            isAddition: data.is_addition === true,
           });
         }
 
@@ -253,7 +256,9 @@ export function AppLayout() {
               <div className="qr-order-alert-heading">
                 <span className="qr-order-alert-icon">QR</span>
                 <div>
-                  <span className="eyebrow">Nowe zamówienie</span>
+                  <span className="eyebrow">
+                    {qrOrderAlert.isAddition ? "Dodatkowe zamówienie" : "Nowe zamówienie"}
+                  </span>
                   <strong>Oczekuje na potwierdzenie</strong>
                 </div>
                 <button

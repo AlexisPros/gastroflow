@@ -587,17 +587,18 @@ def test_bar_ready_event_ignores_unfinished_kitchen_tasks(monkeypatch):
     assert db.commits == 1
     assert events == [
         {
-            "channels": ["waiters", "bar"],
-            "event": "bar_order_ready",
-            "data": {
-                "order_id": 10,
-                "table_id": 3,
-                "table_number": "11",
-                "waiter_id": 5,
-                "department": "BAR",
-            },
-        }
-    ]
+                "channels": ["waiters", "bar", "public_qr"],
+                "event": "bar_order_ready",
+                "data": {
+                    "order_id": 10,
+                    "table_id": 3,
+                    "table_number": "11",
+                    "waiter_id": 5,
+                    "department": "BAR",
+                    "public_status": "READY",
+                },
+            }
+        ]
 
 
 def test_bartender_completion_checks_bar_order_readiness(monkeypatch):
@@ -764,17 +765,18 @@ def test_kitchen_ready_event_does_not_wait_for_bar(monkeypatch):
     assert bar_item.status == "IN_PROGRESS"
     assert events == [
         {
-            "channels": ["waiters", "kitchen", "bar", "floor"],
-            "event": "kitchen_order_ready",
-            "data": {
-                "order_id": 10,
-                "table_id": 3,
-                "table_number": "11",
-                "waiter_id": 5,
-                "department": "KITCHEN",
-            },
-        }
-    ]
+                "channels": ["waiters", "kitchen", "bar", "floor", "public_qr"],
+                "event": "kitchen_order_ready",
+                "data": {
+                    "order_id": 10,
+                    "table_id": 3,
+                    "table_number": "11",
+                    "waiter_id": 5,
+                    "department": "KITCHEN",
+                    "public_status": "READY",
+                },
+            }
+        ]
 
 
 def test_payment_register_reaches_service(monkeypatch):

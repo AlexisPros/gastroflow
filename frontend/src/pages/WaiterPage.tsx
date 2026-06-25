@@ -2203,20 +2203,15 @@ export function WaiterPage() {
       if (action === "CONFIRM") {
         const updatedOrder = await confirmPendingQrOrder(token, order.id, pin);
         upsertOrder(updatedOrder);
-        updateLocalTable(updatedOrder.table_id, {
-          status: "OCCUPIED",
-          current_guests: updatedOrder.guest_count,
-        });
-        setOrderItems((items) => [
-          ...items.filter((item) => item.order_id !== updatedOrder.id),
-          ...previewQrOrderItems,
-        ]);
         setNotice(`Zamówienie QR #${order.id} zostało przyjęte.`);
       } else {
         const updatedOrder = await rejectPendingQrOrder(token, order.id, pin, reason);
-        updateLocalTable(updatedOrder.table_id, { status: "FREE", current_guests: null });
+        if (updatedOrder.qr_parent_order_id === null) {
+          updateLocalTable(updatedOrder.table_id, { status: "FREE", current_guests: null });
+        }
         setNotice(`Zamówienie QR #${order.id} zostało odrzucone.`);
       }
+      await loadLiveOrderData();
       setPendingQrOrders((items) => items.filter((item) => item.id !== order.id));
       setPreviewQrOrder(null);
       setPreviewQrOrderItems([]);

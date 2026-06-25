@@ -21,7 +21,7 @@ export type ApiErrorBody = {
   detail?: string | { msg?: string }[];
 };
 
-export type WebSocketChannel = "waiters" | "kitchen" | "bar" | "floor" | "managers";
+export type WebSocketChannel = "waiters" | "kitchen" | "bar" | "floor" | "managers" | "public_qr";
 
 export type WebSocketMessage<TData = unknown> = {
   event: string;

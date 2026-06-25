@@ -11,6 +11,7 @@ from app.crud import order as crud_order
 from app.crud import restaurant_table as crud_restaurant_table
 from app.models.product import Product
 from app.models.product_category import ProductCategory
+from app.models.kitchen_task import KitchenTask
 from app.models.order_item import OrderItem
 from app.models.order_item_modifier import OrderItemModifier
 from app.models.product_modifier import ProductModifier
@@ -93,6 +94,15 @@ class ConfirmQRPendingOrderRequest(BaseModel):
 class RejectQRPendingOrderRequest(BaseModel):
     pin: str = Field(min_length=4, max_length=12)
     reason: str | None = Field(default=None, max_length=255)
+
+
+class PublicQROrderStatusRead(BaseModel):
+    order_id: int
+    target_order_id: int | None = None
+    status: str
+    public_status: str
+    progress_percent: int
+    can_order_more: bool
 
 
 async def get_table_by_qr_token(qr_token: str, db: DbSession):
@@ -276,6 +286,62 @@ async def create_qr_pending_order(
         )
     except ValueError as exc:
         raise_bad_request(exc)
+
+
+@router.get("/qr/{qr_token}/orders/{order_id}/status", response_model=PublicQROrderStatusRead)
+async def get_public_qr_order_status(qr_token: str, order_id: int, db: DbSession):
+    table = await get_table_by_qr_token(qr_token, db)
+    order = await crud_order.get(db, order_id)
+    if order is None or order.source != "QR" or order.table_id != table.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="QR order not found.",
+        )
+
+    status_order = order
+    if order.qr_parent_order_id is not None and order.status == "MERGED":
+        parent_order = await crud_order.get(db, order.qr_parent_order_id)
+        if parent_order is not None:
+            status_order = parent_order
+
+    task_result = await db.execute(
+        select(KitchenTask.status)
+        .join(OrderItem, OrderItem.id == KitchenTask.order_item_id)
+        .where(OrderItem.order_id == status_order.id),
+    )
+    task_statuses = list(task_result.scalars().all())
+    completed_tasks = sum(1 for task_status in task_statuses if task_status == "COMPLETED")
+    progress_percent = (
+        round(completed_tasks / len(task_statuses) * 100)
+        if task_statuses
+        else 0
+    )
+
+    if order.status == "PENDING_CONFIRMATION":
+        public_status = "PENDING_CONFIRMATION"
+        progress_percent = 0
+    elif order.status in {"REJECTED", "CANCELLED"}:
+        public_status = "REJECTED"
+        progress_percent = 0
+    elif task_statuses and completed_tasks == len(task_statuses):
+        public_status = "READY"
+        progress_percent = 100
+    elif status_order.status in {"OPEN", "IN_PROGRESS"} or order.status == "MERGED":
+        public_status = "PREPARING"
+    elif status_order.status in {"CLOSED", "PAID"}:
+        public_status = "CLOSED"
+        progress_percent = 100
+    else:
+        public_status = status_order.status
+
+    return PublicQROrderStatusRead(
+        order_id=order.id,
+        target_order_id=order.qr_parent_order_id,
+        status=order.status,
+        public_status=public_status,
+        progress_percent=progress_percent,
+        can_order_more=public_status != "PENDING_CONFIRMATION",
+    )
 
 
 async def get_service_order_user_by_pin(pin: str, db: DbSession):

@@ -11,6 +11,7 @@ class OrderBase(OrmBaseModel):
     discount_id: int | None = None
     shift_id: int | None = None
     split_parent_order_id: int | None = None
+    qr_parent_order_id: int | None = None
     split_sequence: int | None = None
     guest_count: int | None = None
     source: str = "WAITER"
@@ -31,6 +32,7 @@ class OrderUpdate(OrmBaseModel):
     discount_id: int | None = None
     shift_id: int | None = None
     split_parent_order_id: int | None = None
+    qr_parent_order_id: int | None = None
     split_sequence: int | None = None
     guest_count: int | None = None
     source: str | None = None

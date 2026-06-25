@@ -323,7 +323,7 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
             table_number = table.table_number
 
     await websocket_manager.broadcast_many(
-        channels=["waiters", "kitchen", "bar", "floor"],
+        channels=["waiters", "kitchen", "bar", "floor", "public_qr"],
         event="kitchen_order_ready",
         data={
             "order_id": order.id,
@@ -331,6 +331,7 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
             "table_number": table_number,
             "waiter_id": order.waiter_id,
             "department": "KITCHEN",
+            "public_status": "READY",
         },
     )
     return {"success": True}

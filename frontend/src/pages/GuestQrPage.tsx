@@ -5,11 +5,14 @@ import { ApiError } from "../api/apiClient";
 import {
   createPublicQrOrder,
   getPublicQrMenu,
+  getPublicQrOrderStatus,
   getPublicQrTable,
   type PublicQrCategory,
+  type PublicQrOrderStatus,
   type PublicQrProduct,
   type PublicQrTable,
 } from "../api/qrApi";
+import { WS_BASE_URL } from "../shared/config";
 import { createClientId } from "../shared/id";
 
 type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT";
@@ -43,6 +46,7 @@ export function GuestQrPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [sentOrderId, setSentOrderId] = useState<number | null>(null);
+  const [orderStatus, setOrderStatus] = useState<PublicQrOrderStatus | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -63,6 +67,48 @@ export function GuestQrPage() {
       active = false;
     };
   }, [qrToken]);
+
+  useEffect(() => {
+    if (screen !== "SENT" || sentOrderId === null) {
+      return;
+    }
+
+    let active = true;
+    let refreshTimer: number | undefined;
+
+    const refreshStatus = async () => {
+      try {
+        const nextStatus = await getPublicQrOrderStatus(qrToken, sentOrderId);
+        if (active) {
+          setOrderStatus(nextStatus);
+        }
+      } catch {
+        if (active) {
+          refreshTimer = window.setTimeout(refreshStatus, 2500);
+        }
+      }
+    };
+
+    void refreshStatus();
+
+    const socket = new WebSocket(`${WS_BASE_URL}/ws/public_qr`);
+    socket.onmessage = () => {
+      void refreshStatus();
+    };
+    socket.onclose = () => {
+      if (active) {
+        refreshTimer = window.setTimeout(refreshStatus, 2500);
+      }
+    };
+
+    return () => {
+      active = false;
+      if (refreshTimer !== undefined) {
+        window.clearTimeout(refreshTimer);
+      }
+      socket.close();
+    };
+  }, [qrToken, screen, sentOrderId]);
 
   const childCategoriesByParent = useMemo(() => {
     const map = new Map<number, PublicQrCategory[]>();
@@ -177,6 +223,15 @@ export function GuestQrPage() {
         })),
       });
       setSentOrderId(order.id);
+      setOrderStatus({
+        order_id: order.id,
+        target_order_id: null,
+        status: order.status,
+        public_status: "PENDING_CONFIRMATION",
+        progress_percent: 0,
+        can_order_more: false,
+      });
+      setCart([]);
       setScreen("SENT");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się wysłać zamówienia.");
@@ -193,9 +248,12 @@ export function GuestQrPage() {
   }
   if (screen === "SENT") {
     return (
-      <GuestMessage
-        title="Zamówienie wysłane"
-        text={`Zamówienie #${sentOrderId} oczekuje na potwierdzenie przez obsługę.`}
+      <GuestOrderStatus
+        orderId={sentOrderId}
+        status={orderStatus}
+        onOrderMore={() => {
+          setScreen("MENU");
+        }}
       />
     );
   }
@@ -231,6 +289,15 @@ export function GuestQrPage() {
 
       {screen === "MENU" && (
         <>
+          {sentOrderId !== null && (
+            <button
+              type="button"
+              className="guest-status-return"
+              onClick={() => setScreen("SENT")}
+            >
+              Status zamówienia #{sentOrderId}
+            </button>
+          )}
           <nav className="guest-department-tabs">
             <button
               type="button"
@@ -510,4 +577,88 @@ function GuestMessage({ title, text }: { title: string; text?: string }) {
       </section>
     </main>
   );
+}
+
+function GuestOrderStatus({
+  orderId,
+  status,
+  onOrderMore,
+}: {
+  orderId: number | null;
+  status: PublicQrOrderStatus | null;
+  onOrderMore: () => void;
+}) {
+  const publicStatus = status?.public_status ?? "PENDING_CONFIRMATION";
+  const progress = Math.max(0, Math.min(100, status?.progress_percent ?? 0));
+  const copy = getGuestStatusCopy(publicStatus);
+
+  return (
+    <main className="guest-qr-page">
+      <section className="guest-qr-panel">
+        <img src="/logo.png" alt="GastroFlow" className="guest-qr-logo" />
+        <div className="guest-qr-message">
+          <span className={`guest-status-pill ${copy.kind}`}>{copy.badge}</span>
+          <h1>{copy.title}</h1>
+          <p className="muted">
+            Zamówienie #{orderId} {copy.text}
+          </p>
+        </div>
+        <div className="guest-progress-card">
+          <div>
+            <span>Przygotowanie</span>
+            <strong>{progress}%</strong>
+          </div>
+          <div className="guest-progress-track">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+        {status?.can_order_more && (
+          <button type="button" className="guest-primary-button" onClick={onOrderMore}>
+            Domów
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function getGuestStatusCopy(publicStatus: string) {
+  if (publicStatus === "REJECTED") {
+    return {
+      kind: "danger",
+      badge: "Odrzucone",
+      title: "Zamówienie odrzucone",
+      text: "zostało odrzucone przez obsługę.",
+    };
+  }
+  if (publicStatus === "READY") {
+    return {
+      kind: "success",
+      badge: "Gotowe",
+      title: "Zamówienie gotowe",
+      text: "jest gotowe do odbioru lub podania.",
+    };
+  }
+  if (publicStatus === "PREPARING") {
+    return {
+      kind: "success",
+      badge: "Przyjęte",
+      title: "Zamówienie przyjęte",
+      text: "zostało przyjęte i jest przygotowywane.",
+    };
+  }
+  if (publicStatus === "CLOSED") {
+    return {
+      kind: "success",
+      badge: "Zamknięte",
+      title: "Rachunek zamknięty",
+      text: "zostało już rozliczone.",
+    };
+  }
+  return {
+    kind: "pending",
+    badge: "Oczekuje",
+    title: "Zamówienie wysłane",
+    text: "oczekuje na potwierdzenie przez obsługę.",
+  };
 }

@@ -39,6 +39,15 @@ export type PublicQrOrder = {
   total_amount: string;
 };
 
+export type PublicQrOrderStatus = {
+  order_id: number;
+  target_order_id: number | null;
+  status: string;
+  public_status: "PENDING_CONFIRMATION" | "PREPARING" | "READY" | "REJECTED" | "CLOSED" | string;
+  progress_percent: number;
+  can_order_more: boolean;
+};
+
 export async function getPublicQrTable(qrToken: string): Promise<PublicQrTable> {
   return apiRequest<PublicQrTable>(`/qr/${encodeURIComponent(qrToken)}/table`);
 }
@@ -63,4 +72,13 @@ export async function createPublicQrOrder(
     method: "POST",
     body,
   });
+}
+
+export async function getPublicQrOrderStatus(
+  qrToken: string,
+  orderId: number,
+): Promise<PublicQrOrderStatus> {
+  return apiRequest<PublicQrOrderStatus>(
+    `/qr/${encodeURIComponent(qrToken)}/orders/${orderId}/status`,
+  );
 }
