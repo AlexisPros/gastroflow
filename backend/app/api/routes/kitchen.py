@@ -380,20 +380,46 @@ async def list_active_section_tasks(
     ).order_by(Order.created_at.asc(), OrderItem.position.asc())
 
     result = await db.execute(query)
-    tasks = result.scalars().all()
+    tasks = list(result.scalars().all())
+
+    all_tasks_by_item_id: dict[int, list[KitchenTask]] = {}
+    order_item_ids = {task.order_item_id for task in tasks}
+    if order_item_ids:
+        all_tasks_result = await db.execute(
+            select(KitchenTask)
+            .where(KitchenTask.order_item_id.in_(order_item_ids))
+            .options(selectinload(KitchenTask.product_kitchen_step))
+        )
+        for item_task in all_tasks_result.scalars().all():
+            all_tasks_by_item_id.setdefault(item_task.order_item_id, []).append(item_task)
 
     response = []
+    allow_new = bar_section_id is not None and target_section_id == bar_section_id
     for task in tasks:
         item = task.order_item
         order = item.order
         step_name = task.product_kitchen_step.name if task.product_kitchen_step else None
         step_description = task.product_kitchen_step.description if task.product_kitchen_step else None
+        step_sequence = task.product_kitchen_step.sequence if task.product_kitchen_step else None
+        depends_on_sequence = (
+            task.product_kitchen_step.depends_on_sequence
+            if task.product_kitchen_step
+            else None
+        )
+        can_start, blocked_by_step_name = kitchen_service.get_task_start_state(
+            task=task,
+            tasks=all_tasks_by_item_id.get(task.order_item_id, [task]),
+            allow_new=allow_new,
+        )
 
         response.append(
             KitchenSectionTaskRead(
                 id=task.id,
                 order_id=order.id,
                 order_item_id=item.id,
+                kitchen_section_id=task.kitchen_section_id,
+                order_created_at=order.created_at,
+                order_estimated_time=order.estimated_time,
                 table_number=order.table.table_number if order.table else None,
                 product_name=item.product.name,
                 quantity=item.quantity,
@@ -403,6 +429,10 @@ async def list_active_section_tasks(
                 estimated_time=task.estimated_time,
                 step_name=step_name,
                 step_description=step_description,
+                step_sequence=step_sequence,
+                depends_on_sequence=depends_on_sequence,
+                can_start=can_start,
+                blocked_by_step_name=blocked_by_step_name,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
             )

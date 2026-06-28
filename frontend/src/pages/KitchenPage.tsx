@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
   getActiveKitchenOrders,
@@ -15,6 +16,7 @@ import {
 } from "../api/kitchenApi";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { WebSocketMessage } from "../shared/types";
+import { getOrderTimingState } from "../shared/orderTiming";
 
 // Audio alert using Web Audio API for a nice double-tone chime
 const playAlertSound = () => {
@@ -301,6 +303,7 @@ export function KitchenPage() {
       })),
     );
   };
+  const sectionTaskOrders = groupSectionTasksByOrder(tasks);
 
   return (
     <section className="page-stack" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -421,6 +424,11 @@ export function KitchenPage() {
               );
               const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
               const isReady = totalTasks > 0 && completedTasks === totalTasks;
+              const timing = getOrderTimingState(
+                order.created_at,
+                order.estimated_time,
+                now,
+              );
 
               // Extract pending sections
               const pendingSections = new Set<string>();
@@ -436,7 +444,7 @@ export function KitchenPage() {
               return (
                 <div
                   key={order.id}
-                  className="kitchen-ticket"
+                  className={`kitchen-ticket ${isReady ? "on-time" : timing.tone}`}
                   onClick={() => setPreviewOrderId(order.id)}
                   role="button"
                   tabIndex={0}
@@ -459,6 +467,10 @@ export function KitchenPage() {
                     cursor: "pointer",
                     borderTop: isReady
                       ? "8px solid var(--brand-green)"
+                      : timing.tone === "critical"
+                      ? "8px solid #d83a32"
+                      : timing.tone === "warning"
+                      ? "8px solid #e98a24"
                       : hasNew
                       ? "8px dashed #3182ce"
                       : "8px solid #dd6b20",
@@ -545,6 +557,12 @@ export function KitchenPage() {
                       <span>Postęp: {completedTasks}/{totalTasks} ({Math.round(progress)}%)</span>
                     </div>
 
+                    {timing.tone !== "on-time" && !isReady && (
+                      <div className={`kitchen-order-delay ${timing.tone}`}>
+                        Opóźnienie: {timing.delayMinutes} min
+                      </div>
+                    )}
+
                     {!isReady && !hasNew && pendingSections.size > 0 && (
                       <div style={{ fontSize: "0.75rem", color: "#dd6b20", marginBottom: "8px", fontStyle: "italic" }}>
                         Sekcje w pracy: {Array.from(pendingSections).join(", ")}
@@ -615,8 +633,150 @@ export function KitchenPage() {
         </div>
       )}
 
-      {/* -------------------- SECTION COOK VIEW (PENDING vs IN_PROGRESS) -------------------- */}
+      {/* -------------------- SECTION COOK VIEW (GROUPED BY ORDER) -------------------- */}
       {isCook && (!isChef || chefTab === "MONITOR") && (
+        <div className="kitchen-order-board">
+          {sectionTaskOrders.map((orderGroup) => {
+            const inProgressCount = orderGroup.tasks.filter(
+              (task) => task.status === "IN_PROGRESS",
+            ).length;
+            const timing = getOrderTimingState(
+              orderGroup.createdAt,
+              orderGroup.estimatedTime,
+              now,
+            );
+
+            return (
+              <article
+                key={orderGroup.orderId}
+                className={`kitchen-order-group ${timing.tone}`}
+              >
+                <header className="kitchen-order-group-header">
+                  <div>
+                    <span className="eyebrow">Zamówienie #{orderGroup.orderId}</span>
+                    <h2>Stolik {orderGroup.tableNumber || "Bez stolika"}</h2>
+                  </div>
+                  <span
+                    className={
+                      timing.tone !== "on-time"
+                        ? timing.tone
+                        : inProgressCount > 0
+                          ? "active"
+                          : "waiting"
+                    }
+                  >
+                    {timing.tone !== "on-time"
+                      ? `Opóźnienie ${timing.delayMinutes} min`
+                      : inProgressCount > 0
+                      ? `W trakcie: ${inProgressCount}`
+                      : `Oczekuje: ${orderGroup.tasks.length}`}
+                  </span>
+                </header>
+
+                <div className="kitchen-order-task-list">
+                  {orderGroup.tasks.map((task) => {
+                    const isInProgress = task.status === "IN_PROGRESS";
+                    const isBlocked = !isInProgress && !task.can_start;
+                    const elapsedText = task.started_at
+                      ? getElapsedTimeText(task.started_at)
+                      : null;
+
+                    return (
+                      <section
+                        key={task.id}
+                        className={`kitchen-order-task ${
+                          isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
+                        }`}
+                      >
+                        <div className="kitchen-order-task-meta">
+                          <span>
+                            {task.quantity}x {task.product_name}
+                          </span>
+                          <span>Kurs {task.course_number}</span>
+                        </div>
+
+                        <div className="kitchen-order-task-title">
+                          <div>
+                            <h3>{task.step_name || "Przygotowanie"}</h3>
+                            {isChef && selectedSectionId === undefined && (
+                              <small>{getSectionName(task.kitchen_section_id)}</small>
+                            )}
+                          </div>
+                          {task.step_description && (
+                            <button
+                              type="button"
+                              className="kitchen-task-info-button"
+                              aria-label={`Informacje o kroku: ${task.step_name || "Przygotowanie"}`}
+                              onClick={() => setInfoTaskId(task.id)}
+                            >
+                              <Info aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+
+                        {task.notes && (
+                          <div className="kitchen-task-notes">UWAGA: {task.notes}</div>
+                        )}
+
+                        {isBlocked && task.blocked_by_step_name && (
+                          <div className="kitchen-task-dependency">
+                            <LockKeyhole aria-hidden="true" />
+                            <span>Czeka na: {task.blocked_by_step_name}</span>
+                          </div>
+                        )}
+
+                        <footer className="kitchen-order-task-footer">
+                          <span>
+                            <Clock3 aria-hidden="true" />
+                            {isInProgress && elapsedText
+                              ? `W toku ${elapsedText}`
+                              : task.estimated_time
+                                ? `${task.estimated_time} min`
+                                : "Bez czasu"}
+                          </span>
+                          {isInProgress ? (
+                            <button
+                              type="button"
+                              className="kitchen-task-action complete"
+                              onClick={() => void handleCompleteTask(task.id)}
+                            >
+                              <Check aria-hidden="true" />
+                              Zakończ
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="kitchen-task-action start"
+                              disabled={!task.can_start}
+                              onClick={() => void handleStartTask(task.id)}
+                            >
+                              {isBlocked ? (
+                                <LockKeyhole aria-hidden="true" />
+                              ) : (
+                                <Play aria-hidden="true" />
+                              )}
+                              {isBlocked ? "Zablokowane" : "Rozpocznij"}
+                            </button>
+                          )}
+                        </footer>
+                      </section>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })}
+
+          {sectionTaskOrders.length === 0 && (
+            <div className="empty-orders-state kitchen-order-board-empty">
+              Brak aktywnych zadań w tej sekcji.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Previous column view kept out of the render path while grouped tickets are active. */}
+      {false && isCook && (!isChef || chefTab === "MONITOR") && (
         <div
           style={{
             display: "flex",
@@ -1253,4 +1413,41 @@ export function KitchenPage() {
       `}</style>
     </section>
   );
+}
+
+type SectionTaskOrderGroup = {
+  orderId: number;
+  tableNumber: string | null;
+  createdAt: string;
+  estimatedTime: number | null;
+  tasks: KitchenSectionTask[];
+};
+
+function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrderGroup[] {
+  const groups = new Map<number, SectionTaskOrderGroup>();
+
+  for (const task of tasks) {
+    const group = groups.get(task.order_id) ?? {
+      orderId: task.order_id,
+      tableNumber: task.table_number,
+      createdAt: task.order_created_at,
+      estimatedTime: task.order_estimated_time,
+      tasks: [],
+    };
+    group.tasks.push(task);
+    groups.set(task.order_id, group);
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    tasks: [...group.tasks].sort((first, second) => {
+      if (first.course_number !== second.course_number) {
+        return first.course_number - second.course_number;
+      }
+      if (first.order_item_id !== second.order_item_id) {
+        return first.order_item_id - second.order_item_id;
+      }
+      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+    }),
+  }));
 }

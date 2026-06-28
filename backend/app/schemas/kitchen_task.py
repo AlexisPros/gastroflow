@@ -59,6 +59,9 @@ class KitchenSectionTaskRead(OrmBaseModel):
     id: int
     order_id: int
     order_item_id: int
+    kitchen_section_id: int
+    order_created_at: datetime
+    order_estimated_time: int | None = None
     table_number: str | None = None
     product_name: str
     quantity: int
@@ -68,5 +71,9 @@ class KitchenSectionTaskRead(OrmBaseModel):
     estimated_time: int | None = None
     step_name: str | None = None
     step_description: str | None = None
+    step_sequence: int | None = None
+    depends_on_sequence: int | None = None
+    can_start: bool = False
+    blocked_by_step_name: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None

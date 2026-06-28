@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
   getActiveSectionTasks,
@@ -9,6 +10,7 @@ import {
 } from "../api/kitchenApi";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { WebSocketMessage } from "../shared/types";
+import { getOrderTimingState } from "../shared/orderTiming";
 
 // Audio alert using Web Audio API for soft double chime
 const playBarAlertSound = () => {
@@ -178,6 +180,7 @@ export function BarPage() {
 
   const pendingTasks = tasks.filter((t) => t.status === "NEW" || t.status === "PENDING");
   const inProgressTasks = tasks.filter((t) => t.status === "IN_PROGRESS");
+  const barTaskOrders = groupBarTasksByOrder(tasks);
 
   return (
     <section className="page-stack" style={{ padding: "20px" }}>
@@ -213,7 +216,142 @@ export function BarPage() {
         </button>
       </div>
 
-      {/* Grid columns */}
+      {/* Bar tasks grouped by check */}
+      <div className="kitchen-order-board bar-order-board">
+        {barTaskOrders.map((orderGroup) => {
+          const inProgressCount = orderGroup.tasks.filter(
+            (task) => task.status === "IN_PROGRESS",
+          ).length;
+          const timing = getOrderTimingState(
+            orderGroup.createdAt,
+            orderGroup.estimatedTime,
+            now,
+          );
+
+          return (
+            <article
+              key={orderGroup.orderId}
+              className={`kitchen-order-group ${timing.tone}`}
+            >
+              <header className="kitchen-order-group-header">
+                <div>
+                  <span className="eyebrow">Zamówienie #{orderGroup.orderId}</span>
+                  <h2>Stolik {orderGroup.tableNumber || "Bez stolika"}</h2>
+                </div>
+                <span
+                  className={
+                    timing.tone !== "on-time"
+                      ? timing.tone
+                      : inProgressCount > 0
+                        ? "active"
+                        : "waiting"
+                  }
+                >
+                  {timing.tone !== "on-time"
+                    ? `Opóźnienie ${timing.delayMinutes} min`
+                    : inProgressCount > 0
+                    ? `W trakcie: ${inProgressCount}`
+                    : `Oczekuje: ${orderGroup.tasks.length}`}
+                </span>
+              </header>
+
+              <div className="kitchen-order-task-list">
+                {orderGroup.tasks.map((task) => {
+                  const isInProgress = task.status === "IN_PROGRESS";
+                  const isBlocked = !isInProgress && !task.can_start;
+
+                  return (
+                    <section
+                      key={task.id}
+                      className={`kitchen-order-task ${
+                        isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
+                      }`}
+                    >
+                      <div className="kitchen-order-task-meta">
+                        <span>{task.quantity}x {task.product_name}</span>
+                        <span>Kurs {task.course_number}</span>
+                      </div>
+
+                      <div className="kitchen-order-task-title">
+                        <h3>{task.step_name || "Przygotowanie"}</h3>
+                        {task.step_description && (
+                          <button
+                            type="button"
+                            className="kitchen-task-info-button"
+                            aria-label={`Informacje o kroku: ${task.step_name || "Przygotowanie"}`}
+                            onClick={() => setInfoTaskId(task.id)}
+                          >
+                            <Info aria-hidden="true" />
+                          </button>
+                        )}
+                      </div>
+
+                      {task.notes && (
+                        <div className="kitchen-task-notes">UWAGA: {task.notes}</div>
+                      )}
+
+                      {isBlocked && task.blocked_by_step_name && (
+                        <div className="kitchen-task-dependency">
+                          <LockKeyhole aria-hidden="true" />
+                          <span>Czeka na: {task.blocked_by_step_name}</span>
+                        </div>
+                      )}
+
+                      <footer className="kitchen-order-task-footer">
+                        <span>
+                          <Clock3 aria-hidden="true" />
+                          {isInProgress && task.started_at
+                            ? `W toku ${getWaitingTimeText(task.started_at)}`
+                            : task.estimated_time
+                              ? `${task.estimated_time} min`
+                              : "Bez czasu"}
+                        </span>
+                        {isInProgress ? (
+                          <button
+                            type="button"
+                            className="kitchen-task-action complete"
+                            onClick={() => void handleCompleteTask(task.id)}
+                          >
+                            <Check aria-hidden="true" />
+                            Zakończ
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className="kitchen-task-action start"
+                            disabled={!task.can_start}
+                            onClick={() => void handleStartTask(task.id)}
+                          >
+                            {isBlocked ? (
+                              <LockKeyhole aria-hidden="true" />
+                            ) : (
+                              <Play aria-hidden="true" />
+                            )}
+                            {isBlocked
+                              ? "Zablokowane"
+                              : task.status === "NEW"
+                                ? "Przyjmij i rozpocznij"
+                                : "Rozpocznij"}
+                          </button>
+                        )}
+                      </footer>
+                    </section>
+                  );
+                })}
+              </div>
+            </article>
+          );
+        })}
+
+        {barTaskOrders.length === 0 && (
+          <div className="empty-orders-state kitchen-order-board-empty">
+            Brak aktywnych zamówień barowych.
+          </div>
+        )}
+      </div>
+
+      {/* Previous column view kept out of the render path while grouped checks are active. */}
+      {false && (
       <div
         style={{
           display: "flex",
@@ -349,14 +487,31 @@ export function BarPage() {
                   </div>
                 )}
 
+                {!task.can_start && task.blocked_by_step_name && (
+                  <div className="kitchen-task-dependency">
+                    Czeka na: {task.blocked_by_step_name}
+                  </div>
+                )}
+
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
                   <button
                     type="button"
                     className="primary-button"
+                    disabled={!task.can_start}
                     onClick={() => handleStartTask(task.id)}
-                    style={{ padding: "6px 16px", background: "var(--brand-navy)", fontSize: "0.85rem" }}
+                    style={{
+                      padding: "6px 16px",
+                      background: "var(--brand-navy)",
+                      fontSize: "0.85rem",
+                      opacity: task.can_start ? 1 : 0.48,
+                      cursor: task.can_start ? "pointer" : "not-allowed",
+                    }}
                   >
-                    {task.status === "NEW" ? "Przyjmij i rozpocznij" : "Rozpocznij"}
+                    {!task.can_start
+                      ? "Zablokowane"
+                      : task.status === "NEW"
+                        ? "Przyjmij i rozpocznij"
+                        : "Rozpocznij"}
                   </button>
                 </div>
               </div>
@@ -518,6 +673,7 @@ export function BarPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Step Info Modal */}
       {infoTaskId && (() => {
@@ -627,4 +783,41 @@ export function BarPage() {
       `}</style>
     </section>
   );
+}
+
+type BarTaskOrderGroup = {
+  orderId: number;
+  tableNumber: string | null;
+  createdAt: string;
+  estimatedTime: number | null;
+  tasks: KitchenSectionTask[];
+};
+
+function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] {
+  const groups = new Map<number, BarTaskOrderGroup>();
+
+  for (const task of tasks) {
+    const group = groups.get(task.order_id) ?? {
+      orderId: task.order_id,
+      tableNumber: task.table_number,
+      createdAt: task.order_created_at,
+      estimatedTime: task.order_estimated_time,
+      tasks: [],
+    };
+    group.tasks.push(task);
+    groups.set(task.order_id, group);
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    tasks: [...group.tasks].sort((first, second) => {
+      if (first.course_number !== second.course_number) {
+        return first.course_number - second.course_number;
+      }
+      if (first.order_item_id !== second.order_item_id) {
+        return first.order_item_id - second.order_item_id;
+      }
+      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+    }),
+  }));
 }

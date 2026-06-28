@@ -345,6 +345,36 @@ def test_kitchen_task_start_starts_parallel_steps(monkeypatch):
     ]
 
 
+def test_kitchen_task_start_state_blocks_dependent_step():
+    parent_step = make_product_step(id=1, sequence=1)
+    child_step = make_product_step(id=2, sequence=2, depends_on_sequence=1)
+    parent_task = make_task_for_step(id=1, step=parent_step, status="IN_PROGRESS")
+    child_task = make_task_for_step(id=2, step=child_step)
+
+    can_start, blocked_by = kitchen_service.get_task_start_state(
+        task=child_task,
+        tasks=[parent_task, child_task],
+    )
+
+    assert can_start is False
+    assert blocked_by == "Step 1"
+
+
+def test_kitchen_task_start_state_unlocks_after_dependency_completion():
+    parent_step = make_product_step(id=1, sequence=1)
+    child_step = make_product_step(id=2, sequence=2, depends_on_sequence=1)
+    parent_task = make_task_for_step(id=1, step=parent_step, status="COMPLETED")
+    child_task = make_task_for_step(id=2, step=child_step)
+
+    can_start, blocked_by = kitchen_service.get_task_start_state(
+        task=child_task,
+        tasks=[parent_task, child_task],
+    )
+
+    assert can_start is True
+    assert blocked_by is None
+
+
 def test_bartender_can_start_new_bar_task_without_starting_kitchen_task(monkeypatch):
     bar_step = make_product_step(id=1, sequence=1)
     kitchen_step = make_product_step(id=2, sequence=1)

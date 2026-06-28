@@ -40,6 +40,9 @@ export type KitchenSectionTask = {
   id: number;
   order_id: number;
   order_item_id: number;
+  kitchen_section_id: number;
+  order_created_at: string;
+  order_estimated_time: number | null;
   table_number: string | null;
   product_name: string;
   quantity: number;
@@ -49,6 +52,10 @@ export type KitchenSectionTask = {
   estimated_time: number | null;
   step_name: string | null;
   step_description: string | null;
+  step_sequence: number | null;
+  depends_on_sequence: number | null;
+  can_start: boolean;
+  blocked_by_step_name: string | null;
   started_at: string | null;
   completed_at: string | null;
 };
