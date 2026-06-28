@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from decimal import Decimal
@@ -125,6 +126,7 @@ class PublicQROrderStatusRead(BaseModel):
     status: str
     public_status: str
     progress_percent: int
+    estimated_ready_at: datetime | None = None
     can_order_more: bool
     items: list[PublicQROrderDetailItemRead] = Field(default_factory=list)
 
@@ -210,12 +212,23 @@ async def build_public_qr_order_status(
         for item in item_result.scalars().all()
     ]
 
+    estimated_ready_at = None
+    if (
+        public_status == "PREPARING"
+        and status_order.estimated_time is not None
+        and status_order.estimated_time > 0
+    ):
+        estimated_ready_at = status_order.created_at + timedelta(
+            minutes=status_order.estimated_time,
+        )
+
     return PublicQROrderStatusRead(
         order_id=order.id,
         target_order_id=order.qr_parent_order_id,
         status=order.status,
         public_status=public_status,
         progress_percent=progress_percent,
+        estimated_ready_at=estimated_ready_at,
         can_order_more=(
             public_status in {"PREPARING", "READY"}
             and status_order.status in {"OPEN", "IN_PROGRESS"}

@@ -45,6 +45,7 @@ export type PublicQrOrderStatus = {
   status: string;
   public_status: "PENDING_CONFIRMATION" | "PREPARING" | "READY" | "REJECTED" | "CLOSED" | string;
   progress_percent: number;
+  estimated_ready_at: string | null;
   can_order_more: boolean;
   items: PublicQrOrderDetailItem[];
 };

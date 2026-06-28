@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   ChevronRight,
+  Clock3,
   Minus,
   Pencil,
   Plus,
@@ -74,6 +75,14 @@ function writeGuestQrState(qrToken: string, state: GuestQrStorage) {
   }
 }
 
+function clearGuestQrState(qrToken: string) {
+  try {
+    window.localStorage.removeItem(getGuestQrStorageKey(qrToken));
+  } catch {
+    // The fresh QR flow can still start when browser storage is unavailable.
+  }
+}
+
 function getActivePublicOrderId(
   status: PublicQrOrderStatus | null,
   sentOrderId: number | null,
@@ -112,6 +121,22 @@ export function GuestQrPage() {
   const [unlocking, setUnlocking] = useState(false);
   const [hydrated, setHydrated] = useState(false);
 
+  const resetGuestFlow = useCallback((nextScreen: Screen = "GUESTS") => {
+    clearGuestQrState(qrToken);
+    setScreen(nextScreen);
+    setGuestCount(2);
+    setDepartment("KITCHEN");
+    setActiveCategoryId("ALL");
+    setActiveSubcategoryId(null);
+    setSelectedProduct(null);
+    setEditingItemId(null);
+    setCart([]);
+    setError("");
+    setSentOrderId(null);
+    setOrderStatus(null);
+    setOrderCodeInput("");
+  }, [qrToken]);
+
   useEffect(() => {
     let active = true;
     const savedState = readGuestQrState(qrToken);
@@ -120,19 +145,32 @@ export function GuestQrPage() {
         if (!active) return;
         setTable(nextTable);
         setCategories(nextCategories);
-        if (savedState) {
+        const savedOrderIsClosed =
+          savedState?.orderStatus?.public_status === "CLOSED" ||
+          ["CLOSED", "PAID"].includes(savedState?.orderStatus?.status ?? "");
+        const freeTableHasOldOrder =
+          nextTable.status === "FREE" && savedState?.sentOrderId != null;
+
+        if (savedOrderIsClosed || freeTableHasOldOrder) {
+          resetGuestFlow(nextTable.status === "FREE" ? "GUESTS" : "LOCKED");
+        } else if (savedState) {
           setGuestCount(savedState.guestCount ?? 2);
           setCart(savedState.cart ?? []);
           setSentOrderId(savedState.sentOrderId ?? null);
           setOrderStatus(savedState.orderStatus ?? null);
-        }
-
-        if (savedState?.sentOrderId) {
-          setScreen(savedState.screen === "SUMMARY" ? "SUMMARY" : "SENT");
+          if (savedState.sentOrderId) {
+            setScreen(savedState.screen === "SUMMARY" ? "SUMMARY" : "SENT");
+          } else if (nextTable.status !== "FREE") {
+            setScreen("LOCKED");
+          } else if (
+            savedState.screen &&
+            savedState.screen !== "LOCKED" &&
+            savedState.screen !== "SENT"
+          ) {
+            setScreen(savedState.screen);
+          }
         } else if (nextTable.status !== "FREE") {
           setScreen("LOCKED");
-        } else if (savedState?.screen && savedState.screen !== "LOCKED" && savedState.screen !== "SENT") {
-          setScreen(savedState.screen);
         }
       })
       .catch((exc) => {
@@ -148,7 +186,7 @@ export function GuestQrPage() {
     return () => {
       active = false;
     };
-  }, [qrToken]);
+  }, [qrToken, resetGuestFlow]);
 
   useEffect(() => {
     if (!hydrated || !qrToken) {
@@ -176,7 +214,14 @@ export function GuestQrPage() {
       try {
         const nextStatus = await getPublicQrOrderStatus(qrToken, sentOrderId);
         if (active) {
-          setOrderStatus(nextStatus);
+          if (
+            nextStatus.public_status === "CLOSED" ||
+            ["CLOSED", "PAID"].includes(nextStatus.status)
+          ) {
+            resetGuestFlow();
+          } else {
+            setOrderStatus(nextStatus);
+          }
         }
       } catch {
         if (active) {
@@ -204,7 +249,7 @@ export function GuestQrPage() {
       }
       socket.close();
     };
-  }, [qrToken, screen, sentOrderId]);
+  }, [qrToken, resetGuestFlow, screen, sentOrderId]);
 
   const childCategoriesByParent = useMemo(() => {
     const map = new Map<number, PublicQrCategory[]>();
@@ -319,6 +364,7 @@ export function GuestQrPage() {
         status: order.status,
         public_status: "PENDING_CONFIRMATION",
         progress_percent: 0,
+        estimated_ready_at: null,
         can_order_more: false,
         items: [],
       });
@@ -834,10 +880,21 @@ function GuestOrderStatus({
   const progress = Math.max(0, Math.min(100, status?.progress_percent ?? 0));
   const copy = getGuestStatusCopy(publicStatus);
   const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [now, setNow] = useState(Date.now());
   const detailsTotal = (status?.items ?? []).reduce(
     (sum, item) => sum + Number(item.total_price),
     0,
   );
+  const waitEstimate = getGuestWaitEstimate(
+    publicStatus,
+    status?.estimated_ready_at ?? null,
+    now,
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   return (
     <main className="guest-qr-page">
@@ -859,6 +916,15 @@ function GuestOrderStatus({
             <span style={{ width: `${progress}%` }} />
           </div>
         </div>
+        {waitEstimate && (
+          <div className={`guest-wait-estimate ${waitEstimate.kind}`}>
+            <Clock3 aria-hidden="true" />
+            <div>
+              <span>Przewidywany czas oczekiwania</span>
+              <strong>{waitEstimate.text}</strong>
+            </div>
+          </div>
+        )}
         <button
           type="button"
           className="guest-secondary-button"
@@ -948,5 +1014,38 @@ function getGuestStatusCopy(publicStatus: string) {
     badge: "Oczekuje",
     title: "Zamówienie wysłane",
     text: "oczekuje na potwierdzenie przez obsługę.",
+  };
+}
+
+function getGuestWaitEstimate(
+  publicStatus: string,
+  estimatedReadyAt: string | null,
+  now: number,
+): { kind: "pending" | "active" | "delayed" | "ready"; text: string } | null {
+  if (publicStatus === "PENDING_CONFIRMATION") {
+    return {
+      kind: "pending",
+      text: "Po potwierdzeniu przez obsługę",
+    };
+  }
+  if (publicStatus === "READY") {
+    return { kind: "ready", text: "Zamówienie jest gotowe" };
+  }
+  if (publicStatus !== "PREPARING" || !estimatedReadyAt) {
+    return null;
+  }
+
+  const remainingMs = new Date(estimatedReadyAt).getTime() - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return {
+      kind: "delayed",
+      text: "Nieco dłużej niż przewidywano",
+    };
+  }
+
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return {
+    kind: "active",
+    text: `Około ${remainingMinutes} ${remainingMinutes === 1 ? "minuty" : "minut"}`,
   };
 }
