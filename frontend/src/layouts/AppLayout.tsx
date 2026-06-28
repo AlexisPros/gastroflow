@@ -26,6 +26,7 @@ type DepartmentReadyAlert = {
   orderId: number;
   tableNumber: string;
   department: ReadyDepartment;
+  courseNumber?: number;
 };
 
 const navItems: NavItem[] = [
@@ -102,6 +103,7 @@ export function AppLayout() {
           waiter_id?: unknown;
           department?: unknown;
           departments?: unknown;
+          course_number?: unknown;
           is_addition?: unknown;
         };
         const orderId = Number(data.order_id);
@@ -146,7 +148,11 @@ export function AppLayout() {
         }
 
         if (
-          (message.event === "kitchen_order_ready" || message.event === "bar_order_ready")
+          (
+            message.event === "kitchen_order_ready"
+            || message.event === "kitchen_course_ready"
+            || message.event === "bar_order_ready"
+          )
           && Number.isFinite(orderId)
         ) {
           const waiterId = Number(data.waiter_id);
@@ -160,11 +166,15 @@ export function AppLayout() {
 
           const department: ReadyDepartment =
             message.event === "bar_order_ready" ? "BAR" : "KITCHEN";
+          const courseNumber = Number(data.course_number);
+          const hasCourseNumber =
+            message.event === "kitchen_course_ready" && Number.isFinite(courseNumber);
           const alert: DepartmentReadyAlert = {
-            key: `${department}-${orderId}`,
+            key: `${department}-${orderId}${hasCourseNumber ? `-course-${courseNumber}` : ""}`,
             orderId,
             tableNumber: String(data.table_number ?? "Bez stolika"),
             department,
+            courseNumber: hasCourseNumber ? courseNumber : undefined,
           };
 
           playReadyChime();
@@ -308,7 +318,9 @@ export function AppLayout() {
                     <strong>
                       {isBar
                         ? "Wszystkie napoje są gotowe"
-                        : "Wszystkie dania są gotowe"}
+                        : alert.courseNumber !== undefined
+                          ? `Kurs ${alert.courseNumber} gotowy do wydania`
+                          : "Wszystkie dania są gotowe"}
                     </strong>
                   </div>
                   <button

@@ -809,6 +809,85 @@ def test_kitchen_ready_event_does_not_wait_for_bar(monkeypatch):
         ]
 
 
+def test_kitchen_course_issue_only_releases_selected_course(monkeypatch):
+    first_task = make_kitchen_task()
+    first_task.id = 1
+    first_task.order_item_id = 1
+    first_task.kitchen_section_id = 2
+    first_task.status = "COMPLETED"
+
+    second_task = make_kitchen_task()
+    second_task.id = 2
+    second_task.order_item_id = 2
+    second_task.kitchen_section_id = 2
+    second_task.status = "COMPLETED"
+
+    first_item = SimpleNamespace(
+        status="PENDING",
+        course_number=1,
+        kitchen_tasks=[first_task],
+    )
+    second_item = SimpleNamespace(
+        status="PENDING",
+        course_number=2,
+        kitchen_tasks=[second_task],
+    )
+    order = SimpleNamespace(
+        id=10,
+        table_id=3,
+        waiter_id=5,
+        status="OPEN",
+        items=[first_item, second_item],
+    )
+
+    class FakeCourseSession(FakeReadySession):
+        async def execute(self, _statement: Any) -> FakeRouteResult:
+            return FakeRouteResult(scalar=order)
+
+    events: list[dict[str, Any]] = []
+
+    async def get_bar_section_id(_db):
+        return 7
+
+    async def get_table(_db, id: int):
+        assert id == 3
+        return SimpleNamespace(table_number="11")
+
+    async def broadcast_many(*, channels, event, data):
+        events.append({"channels": channels, "event": event, "data": data})
+
+    monkeypatch.setattr(kitchen_routes, "_get_bar_section_id", get_bar_section_id)
+    monkeypatch.setattr(crud_restaurant_table, "get", get_table)
+    monkeypatch.setattr(websocket_manager, "broadcast_many", broadcast_many)
+
+    response = asyncio.run(
+        kitchen_routes.complete_kitchen_course(
+            10,
+            1,
+            cast(Any, FakeCourseSession()),
+            make_user("WYDAWKA"),
+        )
+    )
+
+    assert response == {"success": True, "course_number": 1}
+    assert first_item.status == "READY"
+    assert second_item.status == "PENDING"
+    assert events == [
+        {
+            "channels": ["waiters", "kitchen"],
+            "event": "kitchen_course_ready",
+            "data": {
+                "order_id": 10,
+                "table_id": 3,
+                "table_number": "11",
+                "waiter_id": 5,
+                "department": "KITCHEN",
+                "course_number": 1,
+            },
+        }
+    ]
+
+
 def test_payment_register_reaches_service(monkeypatch):
     async def get(_db, id: int):
         assert id == 1

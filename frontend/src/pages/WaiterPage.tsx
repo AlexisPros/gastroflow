@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
 import {
@@ -2367,6 +2367,7 @@ export function WaiterPage() {
       setOrders((items) => items.filter((order) => order.id !== selectedMergeCandidateId));
       setIsMergeModalOpen(false);
       setNotice("Rachunki zostały połączone!");
+      void loadWaiterData();
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         setError(`Błąd: ${err.message}`);
@@ -3219,23 +3220,32 @@ function CartList({
 }) {
   return (
     <div className="cart-list">
-      {existingItems.map((item) => {
+      {existingItems.map((item, itemIndex) => {
         const product = productsById.get(item.product_id);
+        const previousItem = existingItems[itemIndex - 1];
+        const startsCourse =
+          itemIndex === 0 || previousItem.course_number !== item.course_number;
+
         return (
-          <button
-            key={item.id}
-            type="button"
-            className={`cart-row locked ${
-              selectedTicketLine?.type === "existing" && selectedTicketLine.id === item.id
-                ? "selected"
-                : ""
-            }`}
-            onClick={() => onSelectExisting(item.id)}
-          >
+          <Fragment key={item.id}>
+            {startsCourse && (
+              <div className="course-group-divider ticket-course-divider">
+                <span>Kurs {item.course_number}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              className={`cart-row locked ${
+                selectedTicketLine?.type === "existing" && selectedTicketLine.id === item.id
+                  ? "selected"
+                  : ""
+              }`}
+              onClick={() => onSelectExisting(item.id)}
+            >
             <div>
               <strong>* {product?.name ?? `Product #${item.product_id}`}</strong>
               <span>
-                Kurs {item.course_number} · {item.quantity} x {formatMoney(Number(item.unit_price))}
+                {item.quantity} x {formatMoney(Number(item.unit_price))}
               </span>
               {item.modifiers?.map((modifier) => (
                 <small key={`${item.id}-${modifier.name}`}>
@@ -3262,7 +3272,8 @@ function CartList({
               )}
             </div>
             <b>{formatMoney(Number(item.total_price))}</b>
-          </button>
+            </button>
+          </Fragment>
         );
       })}
       {cart.map((entry) =>

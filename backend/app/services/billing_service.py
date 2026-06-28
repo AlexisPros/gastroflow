@@ -3,6 +3,7 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.websocket_manager import websocket_manager
 from app.models.bill_segment import BillSegment
 from app.models.invoice import Invoice
 from app.models.kitchen_task import KitchenTask
@@ -73,7 +74,7 @@ class BillingService:
         user_id: int,
     ) -> Order:
         from app.services.order_service import OrderService
-        
+
         if target_order.id == source_order.id:
             raise ValueError("Target and source orders must be different.")
 
@@ -111,7 +112,10 @@ class BillingService:
             item.order_id = target_order.id
             db.add(item)
 
+        source_table_id = source_order.table_id
         source_order.status = "MERGED"
+        if source_order.source == "QR":
+            source_order.qr_parent_order_id = target_order.id
         source_order.total_amount = Decimal("0.00")
         source_order.subtotal_amount = Decimal("0.00")
         source_order.discount_amount = Decimal("0.00")
@@ -141,7 +145,24 @@ class BillingService:
         await db.flush()
 
         order_service = OrderService()
-        return await order_service.recalculate_total(db, order=target_order)
+        await order_service._release_table_if_no_active_orders(
+            db,
+            order=source_order,
+            table_id=source_table_id,
+        )
+        merged_order = await order_service.recalculate_total(db, order=target_order)
+
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor"],
+            event="orders_merged",
+            data={
+                "target_order_id": target_order.id,
+                "source_order_id": source_order.id,
+                "target_table_id": target_order.table_id,
+                "source_table_id": source_table_id,
+            },
+        )
+        return merged_order
 
     async def split_item_quantity(
         self,

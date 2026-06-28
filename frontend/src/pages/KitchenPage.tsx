@@ -1,10 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
   getActiveKitchenOrders,
   acceptKitchenOrder,
-  completeKitchenOrder,
+  completeKitchenCourse,
   getActiveSectionTasks,
   startKitchenTask,
   completeKitchenTask,
@@ -151,6 +151,7 @@ export function KitchenPage() {
           "kitchen_order_accepted",
           "order_cancelled",
           "kitchen_order_ready",
+          "kitchen_course_ready",
         ];
 
         if (refreshEvents.includes(message.event)) {
@@ -205,14 +206,14 @@ export function KitchenPage() {
     }
   };
 
-  const handleCompleteOrder = async (orderId: number) => {
+  const handleCompleteCourse = async (orderId: number, courseNumber: number) => {
     if (!token) return;
     setLoading(true);
     try {
-      await completeKitchenOrder(token, orderId);
+      await completeKitchenCourse(token, orderId, courseNumber);
       loadData();
     } catch (err: any) {
-      alert("Błąd wydania: " + err.message);
+      alert("Błąd wydania kursu: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -423,7 +424,18 @@ export function KitchenPage() {
                 0
               );
               const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-              const isReady = totalTasks > 0 && completedTasks === totalTasks;
+              const courseNumbers = [...new Set(order.items.map((item) => item.course_number))]
+                .sort((first, second) => first - second);
+              const currentCourseNumber = courseNumbers[0];
+              const currentCourseItems = order.items.filter(
+                (item) => item.course_number === currentCourseNumber,
+              );
+              const currentCourseTasks = currentCourseItems.flatMap(
+                (item) => item.kitchen_tasks,
+              );
+              const isCurrentCourseReady =
+                currentCourseTasks.length > 0
+                && currentCourseTasks.every((task) => task.status === "COMPLETED");
               const timing = getOrderTimingState(
                 order.created_at,
                 order.estimated_time,
@@ -444,7 +456,7 @@ export function KitchenPage() {
               return (
                 <div
                   key={order.id}
-                  className={`kitchen-ticket ${isReady ? "on-time" : timing.tone}`}
+                  className={`kitchen-ticket ${isCurrentCourseReady ? "on-time" : timing.tone}`}
                   onClick={() => setPreviewOrderId(order.id)}
                   role="button"
                   tabIndex={0}
@@ -465,7 +477,7 @@ export function KitchenPage() {
                     position: "relative",
                     overflow: "hidden",
                     cursor: "pointer",
-                    borderTop: isReady
+                    borderTop: isCurrentCourseReady
                       ? "8px solid var(--brand-green)"
                       : timing.tone === "critical"
                       ? "8px solid #d83a32"
@@ -496,9 +508,19 @@ export function KitchenPage() {
 
                   {/* Items listing (Always visible without click) */}
                   <div style={{ padding: "12px 16px", flexGrow: 1, display: "flex", flexDirection: "column", gap: "14px" }}>
-                    {order.items.map((item) => {
+                    {order.items.map((item, itemIndex) => {
+                      const previousItem = order.items[itemIndex - 1];
+                      const startsCourse =
+                        itemIndex === 0 || previousItem.course_number !== item.course_number;
+
                       return (
-                        <div key={item.id} style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
+                        <Fragment key={item.id}>
+                          {startsCourse && (
+                            <div className="course-group-divider kitchen-ticket-course-divider">
+                              <span>Kurs {item.course_number}</span>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                             <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "#1a202c" }}>
                               {item.quantity}x {item.product_name}
@@ -546,7 +568,8 @@ export function KitchenPage() {
                               UWAGA: {item.notes}
                             </span>
                           )}
-                        </div>
+                          </div>
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -557,13 +580,13 @@ export function KitchenPage() {
                       <span>Postęp: {completedTasks}/{totalTasks} ({Math.round(progress)}%)</span>
                     </div>
 
-                    {timing.tone !== "on-time" && !isReady && (
+                    {timing.tone !== "on-time" && !isCurrentCourseReady && (
                       <div className={`kitchen-order-delay ${timing.tone}`}>
                         Opóźnienie: {timing.delayMinutes} min
                       </div>
                     )}
 
-                    {!isReady && !hasNew && pendingSections.size > 0 && (
+                    {!isCurrentCourseReady && !hasNew && pendingSections.size > 0 && (
                       <div style={{ fontSize: "0.75rem", color: "#dd6b20", marginBottom: "8px", fontStyle: "italic" }}>
                         Sekcje w pracy: {Array.from(pendingSections).join(", ")}
                       </div>
@@ -582,13 +605,13 @@ export function KitchenPage() {
                       >
                         Przyjmij zamówienie
                       </button>
-                    ) : isReady ? (
+                    ) : isCurrentCourseReady && currentCourseNumber !== undefined ? (
                       <button
                         type="button"
                         className="primary-button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          handleCompleteOrder(order.id);
+                          handleCompleteCourse(order.id, currentCourseNumber);
                         }}
                         disabled={loading}
                         style={{
@@ -599,7 +622,7 @@ export function KitchenPage() {
                           fontSize: "0.85rem",
                         }}
                       >
-                        Wydaj kelnerowi
+                        Wydaj kurs {currentCourseNumber}
                       </button>
                     ) : (
                       <button
@@ -674,20 +697,28 @@ export function KitchenPage() {
                 </header>
 
                 <div className="kitchen-order-task-list">
-                  {orderGroup.tasks.map((task) => {
+                  {orderGroup.tasks.map((task, taskIndex) => {
                     const isInProgress = task.status === "IN_PROGRESS";
                     const isBlocked = !isInProgress && !task.can_start;
                     const elapsedText = task.started_at
                       ? getElapsedTimeText(task.started_at)
                       : null;
+                    const previousTask = orderGroup.tasks[taskIndex - 1];
+                    const startsCourse =
+                      taskIndex === 0 || previousTask.course_number !== task.course_number;
 
                     return (
-                      <section
-                        key={task.id}
-                        className={`kitchen-order-task ${
-                          isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
-                        }`}
-                      >
+                      <Fragment key={task.id}>
+                        {startsCourse && (
+                          <div className="course-group-divider kitchen-task-course-divider">
+                            <span>Kurs {task.course_number}</span>
+                          </div>
+                        )}
+                        <section
+                          className={`kitchen-order-task ${
+                            isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
+                          }`}
+                        >
                         <div className="kitchen-order-task-meta">
                           <span>
                             {task.quantity}x {task.product_name}
@@ -759,7 +790,8 @@ export function KitchenPage() {
                             </button>
                           )}
                         </footer>
-                      </section>
+                        </section>
+                      </Fragment>
                     );
                   })}
                 </div>

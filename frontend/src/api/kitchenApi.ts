@@ -78,6 +78,20 @@ export async function completeKitchenOrder(token: string, orderId: number): Prom
   });
 }
 
+export async function completeKitchenCourse(
+  token: string,
+  orderId: number,
+  courseNumber: number,
+): Promise<{ success: boolean; course_number: number }> {
+  return apiRequest<{ success: boolean; course_number: number }>(
+    `/kitchen/orders/${orderId}/courses/${courseNumber}/complete`,
+    {
+      method: "POST",
+      token,
+    },
+  );
+}
+
 export async function getActiveSectionTasks(
   token: string,
   sectionId?: number,
