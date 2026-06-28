@@ -1,5 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, Minus, Pencil, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Minus,
+  Pencil,
+  Plus,
+  ShoppingBag,
+  Trash2,
+  Users,
+  UtensilsCrossed,
+  Wine,
+  X,
+} from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { ApiError } from "../api/apiClient";
@@ -364,7 +376,7 @@ export function GuestQrPage() {
     <main className="guest-order-page">
       <header className="guest-mobile-header">
         <img src="/logo.png" alt="GastroFlow" />
-        <div>
+        <div className="guest-table-badge">
           <span>Stolik</span>
           <strong>{table.table_number}</strong>
         </div>
@@ -372,15 +384,28 @@ export function GuestQrPage() {
 
       {screen === "GUESTS" && (
         <section className="guest-count-screen">
-          <span className="eyebrow">Witamy</span>
-          <h1>Ile osób jest przy stoliku?</h1>
+          <span className="guest-count-icon" aria-hidden="true">
+            <Users />
+          </span>
+          <div className="guest-count-heading">
+            <span className="eyebrow">Witamy</span>
+            <h1>Ile osób jest przy stoliku?</h1>
+          </div>
           <div className="guest-count-control">
-            <button type="button" onClick={() => setGuestCount((value) => Math.max(1, value - 1))}>
-              −
+            <button
+              type="button"
+              aria-label="Zmniejsz liczbę gości"
+              onClick={() => setGuestCount((value) => Math.max(1, value - 1))}
+            >
+              <Minus aria-hidden="true" />
             </button>
             <strong>{guestCount}</strong>
-            <button type="button" onClick={() => setGuestCount((value) => Math.min(30, value + 1))}>
-              +
+            <button
+              type="button"
+              aria-label="Zwiększ liczbę gości"
+              onClick={() => setGuestCount((value) => Math.min(30, value + 1))}
+            >
+              <Plus aria-hidden="true" />
             </button>
           </div>
           <button type="button" className="guest-primary-button" onClick={() => setScreen("MENU")}>
@@ -420,98 +445,127 @@ export function GuestQrPage() {
 
       {screen === "MENU" && (
         <>
-          {sentOrderId !== null && (
-            <button
-              type="button"
-              className="guest-status-return"
-              onClick={() => setScreen("SENT")}
-            >
-              Status zamówienia #{sentOrderId}
-            </button>
-          )}
-          <nav className="guest-department-tabs">
-            <button
-              type="button"
-              className={department === "KITCHEN" ? "active" : ""}
-              onClick={() => switchDepartment("KITCHEN")}
-            >
-              Dania
-            </button>
-            <button
-              type="button"
-              className={department === "BAR" ? "active" : ""}
-              onClick={() => switchDepartment("BAR")}
-            >
-              Napoje
-            </button>
-          </nav>
-          <nav className="guest-category-tabs">
-            <button
-              type="button"
-              className={activeCategoryId === "ALL" ? "active" : ""}
-              onClick={() => {
-                setActiveCategoryId("ALL");
-                setActiveSubcategoryId(null);
-              }}
-            >
-              Wszystko
-            </button>
-            {rootCategories.map((category) => (
+          <div className="guest-menu-navigation">
+            {sentOrderId !== null && (
               <button
-                key={category.id}
                 type="button"
-                className={activeCategoryId === category.id ? "active" : ""}
+                className="guest-status-return"
+                onClick={() => setScreen("SENT")}
+              >
+                <span>Status zamówienia #{sentOrderId}</span>
+                <ChevronRight aria-hidden="true" />
+              </button>
+            )}
+            <nav className="guest-department-tabs" aria-label="Rodzaj menu">
+              <button
+                type="button"
+                className={department === "KITCHEN" ? "active" : ""}
+                onClick={() => switchDepartment("KITCHEN")}
+              >
+                <UtensilsCrossed aria-hidden="true" />
+                Dania
+              </button>
+              <button
+                type="button"
+                className={department === "BAR" ? "active" : ""}
+                onClick={() => switchDepartment("BAR")}
+              >
+                <Wine aria-hidden="true" />
+                Napoje
+              </button>
+            </nav>
+            <nav className="guest-category-tabs" aria-label="Kategorie">
+              <button
+                type="button"
+                className={activeCategoryId === "ALL" ? "active" : ""}
                 onClick={() => {
-                  setActiveCategoryId(category.id);
+                  setActiveCategoryId("ALL");
                   setActiveSubcategoryId(null);
                 }}
               >
-                {category.name}
+                Wszystko
               </button>
-            ))}
-          </nav>
-          {activeSubcategories.length > 0 && (
-            <nav className="guest-subcategory-tabs">
-              <button
-                type="button"
-                className={activeSubcategoryId === null ? "active" : ""}
-                onClick={() => setActiveSubcategoryId(null)}
-              >
-                Wszystkie
-              </button>
-              {activeSubcategories.map((subcategory) => (
+              {rootCategories.map((category) => (
                 <button
-                  key={subcategory.id}
+                  key={category.id}
                   type="button"
-                  className={activeSubcategoryId === subcategory.id ? "active" : ""}
-                  onClick={() => setActiveSubcategoryId(subcategory.id)}
+                  className={activeCategoryId === category.id ? "active" : ""}
+                  onClick={() => {
+                    setActiveCategoryId(category.id);
+                    setActiveSubcategoryId(null);
+                  }}
                 >
-                  {subcategory.name}
+                  {category.name}
                 </button>
               ))}
             </nav>
-          )}
+            {activeSubcategories.length > 0 && (
+              <nav className="guest-subcategory-tabs" aria-label="Podkategorie">
+                <button
+                  type="button"
+                  className={activeSubcategoryId === null ? "active" : ""}
+                  onClick={() => setActiveSubcategoryId(null)}
+                >
+                  Wszystkie
+                </button>
+                {activeSubcategories.map((subcategory) => (
+                  <button
+                    key={subcategory.id}
+                    type="button"
+                    className={activeSubcategoryId === subcategory.id ? "active" : ""}
+                    onClick={() => setActiveSubcategoryId(subcategory.id)}
+                  >
+                    {subcategory.name}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+          <header className="guest-menu-heading">
+            <div>
+              <span className="eyebrow">
+                {department === "KITCHEN" ? "Karta dań" : "Karta napojów"}
+              </span>
+              <h1>Menu</h1>
+            </div>
+            <span>{visibleProducts.length} pozycji</span>
+          </header>
           <section className="guest-menu-list">
             {visibleProducts.map((product) => (
               <article key={product.id} className="guest-product-row">
                 <button type="button" className="guest-product-main" onClick={() => openProduct(product)}>
-                  <div>
+                  <div className="guest-product-copy">
                     <h2>{product.name}</h2>
-                    <p>{product.description || product.ingredients.join(", ")}</p>
+                    {product.description && <p>{product.description}</p>}
                     <strong>{money.format(Number(product.price))}</strong>
                   </div>
                   <ProductImage product={product} />
                 </button>
-                <button type="button" className="guest-add-button" onClick={() => openProduct(product)}>
-                  +
+                <button
+                  type="button"
+                  className="guest-add-button"
+                  aria-label={`Dodaj do zamówienia: ${product.name}`}
+                  onClick={() => openProduct(product)}
+                >
+                  <Plus aria-hidden="true" />
                 </button>
               </article>
             ))}
+            {visibleProducts.length === 0 && (
+              <p className="guest-menu-empty">Brak dostępnych pozycji w tej kategorii.</p>
+            )}
           </section>
           {cartCount > 0 && (
             <button type="button" className="guest-cart-dock" onClick={() => setScreen("SUMMARY")}>
-              <span>Zobacz zamówienie · {cartCount}</span>
+              <span className="guest-cart-dock-copy">
+                <ShoppingBag aria-hidden="true" />
+                <span>
+                  <small>Twoje zamówienie</small>
+                  <b>{cartCount} {cartCount === 1 ? "pozycja" : "pozycji"}</b>
+                </span>
+              </span>
               <strong>{money.format(cartTotal)}</strong>
+              <ChevronRight aria-hidden="true" />
             </button>
           )}
         </>
@@ -680,17 +734,38 @@ function GuestProductModal({
   const [notes, setNotes] = useState(existing?.notes ?? "");
   return (
     <div className="guest-modal-backdrop">
-      <section className="guest-product-modal">
-        <ProductImage product={product} />
+      <section className="guest-product-modal" role="dialog" aria-modal="true" aria-label={product.name}>
+        <div className="guest-product-modal-media">
+          <ProductImage product={product} />
+          <button
+            type="button"
+            className="guest-product-close"
+            aria-label="Zamknij"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
         <div className="guest-product-modal-body">
-          <h1>{product.name}</h1>
-          <p>{product.description}</p>
-          <strong>{money.format(Number(product.price))}</strong>
+          <header className="guest-product-modal-heading">
+            <div>
+              <span className="eyebrow">Szczegóły pozycji</span>
+              <h1>{product.name}</h1>
+            </div>
+            <strong>{money.format(Number(product.price))}</strong>
+          </header>
+          {product.description && <p>{product.description}</p>}
           {product.modifiers.length > 0 && (
             <div className="guest-modifier-list">
-              <h2>Dodatki</h2>
+              <div className="guest-option-heading">
+                <h2>Dodatki</h2>
+                <span>Opcjonalnie</span>
+              </div>
               {product.modifiers.map((modifier) => (
-                <label key={modifier.product_modifier_id}>
+                <label
+                  key={modifier.product_modifier_id}
+                  className={modifierIds.includes(modifier.product_modifier_id) ? "selected" : ""}
+                >
                   <input
                     type="checkbox"
                     checked={modifierIds.includes(modifier.product_modifier_id)}
@@ -711,12 +786,18 @@ function GuestProductModal({
             </div>
           )}
           <label className="guest-notes-field">
-            Uwagi
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} />
+            <span>Uwagi do pozycji</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              maxLength={500}
+              placeholder="Np. bez cebuli"
+            />
           </label>
           <div className="guest-modal-actions">
             <button type="button" onClick={onClose}>Anuluj</button>
             <button type="button" className="confirm" onClick={() => onSave({ modifierIds, notes })}>
+              <Plus aria-hidden="true" />
               {existing ? "Zapisz zmiany" : "Dodaj do zamówienia"}
             </button>
           </div>
