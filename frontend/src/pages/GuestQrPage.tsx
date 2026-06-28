@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Minus, Pencil, Plus, ShoppingBag, Trash2 } from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { ApiError } from "../api/apiClient";
@@ -66,6 +67,16 @@ function getActivePublicOrderId(
   sentOrderId: number | null,
 ) {
   return status?.target_order_id ?? status?.order_id ?? sentOrderId;
+}
+
+function getGuestCartItemTotal(item: GuestCartItem) {
+  const modifierTotal = item.modifierIds.reduce((sum, modifierId) => {
+    const modifier = item.product.modifiers.find(
+      (candidate) => candidate.product_modifier_id === modifierId,
+    );
+    return sum + Number(modifier?.price ?? 0);
+  }, 0);
+  return (Number(item.product.price) + modifierTotal) * item.quantity;
 }
 
 export function GuestQrPage() {
@@ -234,15 +245,7 @@ export function GuestQrPage() {
     departmentCategories,
   ]);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
-  const cartTotal = cart.reduce((total, item) => {
-    const modifiers = item.modifierIds.reduce((sum, modifierId) => {
-      const modifier = item.product.modifiers.find(
-        (candidate) => candidate.product_modifier_id === modifierId,
-      );
-      return sum + Number(modifier?.price ?? 0);
-    }, 0);
-    return total + (Number(item.product.price) + modifiers) * item.quantity;
-  }, 0);
+  const cartTotal = cart.reduce((total, item) => total + getGuestCartItemTotal(item), 0);
 
   function openProduct(product: PublicQrProduct, itemId?: string) {
     setSelectedProduct(product);
@@ -516,14 +519,31 @@ export function GuestQrPage() {
 
       {screen === "SUMMARY" && (
         <section className="guest-summary">
-          <button type="button" className="guest-back-button" onClick={() => setScreen("MENU")}>
-            ← Wróć do menu
-          </button>
-          <h1>Podsumowanie</h1>
+          <header className="guest-summary-header">
+            <button
+              type="button"
+              className="guest-summary-icon-button"
+              aria-label="Wróć do menu"
+              onClick={() => setScreen("MENU")}
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+            <div>
+              <span className="eyebrow">Twoje zamówienie</span>
+              <h1>Podsumowanie</h1>
+            </div>
+            <span className="guest-summary-bag" aria-hidden="true">
+              <ShoppingBag />
+              <b>{cartCount}</b>
+            </span>
+          </header>
           <div className="guest-summary-list">
             {cart.map((item) => (
               <article key={item.id} className="guest-summary-item">
-                <div>
+                <div className="guest-summary-image">
+                  <ProductImage product={item.product} />
+                </div>
+                <div className="guest-summary-item-copy">
                   <strong>{item.product.name}</strong>
                   {item.modifierIds.map((modifierId) => (
                     <small key={modifierId}>
@@ -535,13 +555,23 @@ export function GuestQrPage() {
                     </small>
                   ))}
                   {item.notes && <small>{item.notes}</small>}
-                  <button type="button" onClick={() => openProduct(item.product, item.id)}>
+                  <button
+                    type="button"
+                    className="guest-summary-edit"
+                    onClick={() => openProduct(item.product, item.id)}
+                  >
+                    <Pencil size={15} aria-hidden="true" />
                     Edytuj
                   </button>
                 </div>
                 <div className="guest-item-actions">
+                  <strong className="guest-summary-line-total">
+                    {money.format(getGuestCartItemTotal(item))}
+                  </strong>
+                  <div className="guest-quantity-stepper">
                   <button
                     type="button"
+                    aria-label={`Zmniejsz liczbę: ${item.product.name}`}
                     onClick={() =>
                       setCart((items) =>
                         items
@@ -554,11 +584,12 @@ export function GuestQrPage() {
                       )
                     }
                   >
-                    −
+                    <Minus aria-hidden="true" />
                   </button>
                   <strong>{item.quantity}</strong>
                   <button
                     type="button"
+                    aria-label={`Zwiększ liczbę: ${item.product.name}`}
                     onClick={() =>
                       setCart((items) =>
                         items.map((candidate) =>
@@ -569,14 +600,16 @@ export function GuestQrPage() {
                       )
                     }
                   >
-                    +
+                    <Plus aria-hidden="true" />
                   </button>
+                  </div>
                   <button
                     type="button"
                     className="remove"
+                    aria-label={`Usuń z zamówienia: ${item.product.name}`}
                     onClick={() => setCart((items) => items.filter((candidate) => candidate.id !== item.id))}
                   >
-                    Usuń
+                    <Trash2 aria-hidden="true" />
                   </button>
                 </div>
               </article>
