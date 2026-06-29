@@ -6281,6 +6281,16 @@ body.touch-keyboard-open .modal-backdrop:has(.product-options-modal) .product-op
   background: #fff0ee;
 }
 
+.kitchen-ticket-item.warning {
+  border-color: #efbd80 !important;
+  box-shadow: inset 3px 0 0 #e98a24;
+}
+
+.kitchen-ticket-item.critical {
+  border-color: #eeaaa5 !important;
+  box-shadow: inset 3px 0 0 #d83a32;
+}
+
 .kitchen-order-task-list {
   display: grid;
   gap: 10px;
@@ -6323,6 +6333,18 @@ body.touch-keyboard-open .modal-backdrop:has(.product-options-modal) .product-op
 .kitchen-order-task.in-progress {
   border-left-color: var(--brand-green);
   background: #fbfefc;
+}
+
+.kitchen-order-task.warning:not(.blocked) {
+  border-color: #efbd80;
+  border-left-color: #e98a24;
+  background: #fffaf3;
+}
+
+.kitchen-order-task.critical:not(.blocked) {
+  border-color: #eeaaa5;
+  border-left-color: #d83a32;
+  background: #fff4f2;
 }
 
 .kitchen-order-task.blocked {

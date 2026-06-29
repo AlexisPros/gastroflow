@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, RefreshCw, Pencil, Trash2, ShieldCheck, X } from "lucide-react";
+import { Plus, RefreshCw, Pencil, Trash2, ShieldCheck } from "lucide-react";
 
 import {
   createAdminCategory,
@@ -74,6 +74,9 @@ export function AdminMenuPage() {
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<number>>(() => new Set());
   const [activeSection, setActiveSection] = useState<"menu" | "ingredients" | "modifiers" | "discounts">("menu");
   const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
+  const [productSearch, setProductSearch] = useState("");
+  const [productCategoryFilter, setProductCategoryFilter] = useState<number | "ALL">("ALL");
+  const [productStatusFilter, setProductStatusFilter] = useState<"ALL" | "ACTIVE" | "INACTIVE">("ALL");
   const [discountForm, setDiscountForm] = useState({
     id: null as number | null,
     name: "",
@@ -105,6 +108,29 @@ export function AdminMenuPage() {
     () => menu.categories.filter((category) => category.is_active),
     [menu.categories],
   );
+
+  const filteredProducts = useMemo(() => {
+    return menu.products.filter((product) => {
+      if (productSearch.trim()) {
+        const query = productSearch.toLowerCase();
+        const matchesName = product.name.toLowerCase().includes(query);
+        const matchesDesc = (product.description ?? "").toLowerCase().includes(query);
+        if (!matchesName && !matchesDesc) return false;
+      }
+      if (productCategoryFilter !== "ALL") {
+        const isSelectedOrChild = (catId: number): boolean => {
+          if (product.category_id === catId) return true;
+          const cat = menu.categories.find((c) => c.id === product.category_id);
+          if (cat && cat.parent_category_id === catId) return true;
+          return false;
+        };
+        if (!isSelectedOrChild(productCategoryFilter)) return false;
+      }
+      if (productStatusFilter === "ACTIVE" && !product.is_active) return false;
+      if (productStatusFilter === "INACTIVE" && product.is_active) return false;
+      return true;
+    });
+  }, [menu.products, menu.categories, productSearch, productCategoryFilter, productStatusFilter]);
   const activeKitchenSections = useMemo(
     () => menu.kitchen_sections.filter((section) => section.is_active),
     [menu.kitchen_sections],
@@ -500,24 +526,60 @@ export function AdminMenuPage() {
               </button>
             </div>
 
-            <div className="admin-product-list">
-              {menu.products.map((product) => {
-                const category = menu.categories.find((item) => item.id === product.category_id);
-                return (
-                  <button
-                    key={product.id}
-                    type="button"
-                    className={`${selectedProductId === product.id ? "active" : ""} ${!product.is_active ? "inactive" : ""}`}
-                    onClick={() => openExistingProduct(product)}
-                  >
-                    {product.image_url ? <img src={product.image_url} alt="" /> : <span />}
-                    <div>
-                      <strong>{product.name}</strong>
-                      <small>{category?.name ?? "Bez kategorii"} · {money.format(Number(product.price))}</small>
-                    </div>
-                  </button>
-                );
-              })}
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px", minHeight: 0 }}>
+              <div style={{ display: "flex", gap: "10px", padding: "12px", background: "#f8fafc", borderRadius: "8px", border: "1px solid #cbd5e0", flexWrap: "wrap", alignItems: "center" }}>
+                <input
+                  type="text"
+                  placeholder="Wyszukaj produkt..."
+                  value={productSearch}
+                  onChange={(e) => setProductSearch(e.target.value)}
+                  style={{ flex: 2, minWidth: "150px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0", fontSize: "0.9rem" }}
+                />
+                <select
+                  value={productCategoryFilter}
+                  onChange={(e) => setProductCategoryFilter(e.target.value === "ALL" ? "ALL" : Number(e.target.value))}
+                  style={{ flex: 1, minWidth: "140px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0", fontSize: "0.9rem", height: "38px" }}
+                >
+                  <option value="ALL">Wszystkie kategorie</option>
+                  {menu.categories.map((cat) => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+                <select
+                  value={productStatusFilter}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    if (value === "ALL" || value === "ACTIVE" || value === "INACTIVE") {
+                      setProductStatusFilter(value);
+                    }
+                  }}
+                  style={{ minWidth: "120px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0", fontSize: "0.9rem", height: "38px" }}
+                >
+                  <option value="ALL">Status: Wszystkie</option>
+                  <option value="ACTIVE">Aktywne</option>
+                  <option value="INACTIVE">Nieaktywne</option>
+                </select>
+              </div>
+
+              <div className="admin-product-list" style={{ flex: 1, minHeight: 0, alignContent: "start" }}>
+                {filteredProducts.map((product) => {
+                  const category = menu.categories.find((item) => item.id === product.category_id);
+                  return (
+                    <button
+                      key={product.id}
+                      type="button"
+                      className={`${selectedProductId === product.id ? "active" : ""} ${!product.is_active ? "inactive" : ""}`}
+                      onClick={() => openExistingProduct(product)}
+                    >
+                      {product.image_url ? <img src={product.image_url} alt="" /> : <span />}
+                      <div>
+                        <strong>{product.name}</strong>
+                        <small>{category?.name ?? "Bez kategorii"} · {money.format(Number(product.price))}</small>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </main>
         </div>
@@ -1335,6 +1397,7 @@ function ReferenceEditor({
   const { confirm } = usePrompt();
   const [newName, setNewName] = useState("");
   const [newUnit, setNewUnit] = useState("g");
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function submit() {
     if (!newName.trim() || !newUnit.trim()) return;
@@ -1343,10 +1406,25 @@ function ReferenceEditor({
     setNewUnit("g");
   }
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) =>
+      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [items, searchQuery]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
       <div className="warehouse-section-heading">
         <h2>{title}</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Wyszukaj składnik..."
+          style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
+        />
       </div>
 
       <div style={{ display: "flex", gap: "10px", alignItems: "center", background: "#f7fafc", padding: "12px", borderRadius: "8px", border: "1px dashed #cbd5e0" }}>
@@ -1373,7 +1451,7 @@ function ReferenceEditor({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto", flex: 1, paddingRight: "4px" }}>
-        {items.map((item) => (
+        {filteredItems.map((item) => (
           <div 
             key={item.id} 
             className={!item.is_active ? "inactive" : ""}
@@ -1412,8 +1490,8 @@ function ReferenceEditor({
             </button>
           </div>
         ))}
-        {items.length === 0 && (
-          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak składników w słowniku.</p>
+        {filteredItems.length === 0 && (
+          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak pasujących składników.</p>
         )}
       </div>
     </div>
@@ -1436,6 +1514,7 @@ function ModifierEditor({
   const { confirm } = usePrompt();
   const [newName, setNewName] = useState("");
   const [newPrice, setNewPrice] = useState("0.00");
+  const [searchQuery, setSearchQuery] = useState("");
 
   async function submit() {
     if (!newName.trim() || !newPrice.trim()) return;
@@ -1444,10 +1523,25 @@ function ModifierEditor({
     setNewPrice("0.00");
   }
 
+  const filteredItems = useMemo(() => {
+    return items.filter((item) =>
+      item.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [items, searchQuery]);
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
       <div className="warehouse-section-heading">
         <h2>{title}</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+        <input
+          value={searchQuery}
+          onChange={(event) => setSearchQuery(event.target.value)}
+          placeholder="Wyszukaj modyfikator..."
+          style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
+        />
       </div>
 
       <div style={{ display: "flex", gap: "10px", alignItems: "center", background: "#f7fafc", padding: "12px", borderRadius: "8px", border: "1px dashed #cbd5e0" }}>
@@ -1476,7 +1570,7 @@ function ModifierEditor({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto", flex: 1, paddingRight: "4px" }}>
-        {items.map((item) => (
+        {filteredItems.map((item) => (
           <div 
             key={item.id} 
             className={!item.is_active ? "inactive" : ""}
@@ -1517,8 +1611,8 @@ function ModifierEditor({
             </button>
           </div>
         ))}
-        {items.length === 0 && (
-          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak modyfikatorów.</p>
+        {filteredItems.length === 0 && (
+          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak pasujących modyfikatorów.</p>
         )}
       </div>
     </div>

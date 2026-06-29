@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   ArrowRightLeft,
   ClipboardMinus,
@@ -568,14 +568,14 @@ export function WarehousePage() {
               <>
                 <h2>{editingItem === null ? "Dodaj towar" : "Edytuj towar"}</h2>
                 {editingItem === null ? (
-                  <label>
+                  <label style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                     Składnik
-                    <select value={newIngredientId ?? ""} onChange={(event) => setNewIngredientId(Number(event.target.value) || null)}>
-                      <option value="">Wybierz składnik</option>
-                      {availableIngredients
-                        .filter((ingredient) => !items.some((item) => item.ingredient_id === ingredient.id))
-                        .map((ingredient) => <option key={ingredient.id} value={ingredient.id}>{ingredient.name} ({ingredient.unit})</option>)}
-                    </select>
+                    <SearchableSelect
+                      value={newIngredientId}
+                      options={availableIngredients.filter((ingredient) => !items.some((item) => item.ingredient_id === ingredient.id))}
+                      placeholder="Wybierz składnik"
+                      onChange={setNewIngredientId}
+                    />
                   </label>
                 ) : (
                   <>
@@ -766,13 +766,12 @@ function DocumentLines({
         const ingredient = ingredients.find((item) => item.id === line.ingredient_id);
         return (
           <div key={line.key} className="warehouse-document-line">
-            <select
-              value={line.ingredient_id ?? ""}
-              onChange={(event) => updateLine(lines, index, { ...line, ingredient_id: Number(event.target.value) || null }, onChange)}
-            >
-              <option value="">Wybierz towar</option>
-              {ingredients.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.unit})</option>)}
-            </select>
+            <SearchableSelect
+              value={line.ingredient_id}
+              options={ingredients}
+              placeholder="Wybierz towar"
+              onChange={(val) => updateLine(lines, index, { ...line, ingredient_id: val }, onChange)}
+            />
             <label>
               <input type="number" min="0.001" step="0.001" value={line.quantity} onChange={(event) => updateLine(lines, index, { ...line, quantity: event.target.value }, onChange)} placeholder="Ilość" />
               <small>{ingredient?.unit ?? "jedn."}</small>
@@ -823,4 +822,124 @@ function modalTitle(kind: "PZ" | "MM" | "RW"): string {
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof ApiError || error instanceof Error) return error.message;
   return fallback;
+}
+
+function SearchableSelect({
+  value,
+  options,
+  placeholder,
+  onChange,
+}: {
+  value: number | null;
+  options: { id: number; name: string; unit: string }[];
+  placeholder: string;
+  onChange: (id: number | null) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedOption = options.find((opt) => opt.id === value);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredOptions = options.filter((opt) =>
+    opt.name.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div ref={containerRef} className="searchable-select-container" style={{ position: "relative", width: "100%" }}>
+      <div
+        className="searchable-select-trigger"
+        onClick={() => {
+          setIsOpen(!isOpen);
+          setSearch("");
+        }}
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "8px 12px",
+          border: "1px solid #cbd5e0",
+          borderRadius: "6px",
+          background: "#fff",
+          cursor: "pointer",
+          userSelect: "none",
+          minHeight: "38px"
+        }}
+      >
+        <span>{selectedOption ? `${selectedOption.name} (${selectedOption.unit})` : placeholder}</span>
+        <span style={{ fontSize: "0.8rem", color: "#718096" }}>▼</span>
+      </div>
+
+      {isOpen && (
+        <div
+          className="searchable-select-dropdown"
+          style={{
+            position: "absolute",
+            top: "105%",
+            left: 0,
+            right: 0,
+            zIndex: 100,
+            background: "#fff",
+            border: "1px solid #cbd5e0",
+            borderRadius: "6px",
+            boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1)",
+            maxHeight: "240px",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden"
+          }}
+        >
+          <input
+            autoFocus
+            type="text"
+            placeholder="Szukaj..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{
+              width: "100%",
+              padding: "8px 12px",
+              border: "none",
+              borderBottom: "1px solid #e2e8f0",
+              outline: "none"
+            }}
+          />
+          <div style={{ overflowY: "auto", flex: 1 }}>
+            {filteredOptions.length > 0 ? (
+              filteredOptions.map((opt) => (
+                <div
+                  key={opt.id}
+                  onClick={() => {
+                    onChange(opt.id);
+                    setIsOpen(false);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    background: opt.id === value ? "#edf2f7" : "#fff",
+                    fontWeight: opt.id === value ? "bold" : "normal"
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f7fafc")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = opt.id === value ? "#edf2f7" : "#fff")}
+                >
+                  {opt.name} ({opt.unit})
+                </div>
+              ))
+            ) : (
+              <div style={{ padding: "8px 12px", color: "#a0aec0", textAlign: "center" }}>Brak wyników</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }

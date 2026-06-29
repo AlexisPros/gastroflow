@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
@@ -16,12 +16,21 @@ import {
 } from "../api/kitchenApi";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { WebSocketMessage } from "../shared/types";
-import { getOrderTimingState } from "../shared/orderTiming";
+import {
+  getKitchenTaskTimingState,
+  getOrderTimingState,
+  getWorstTimingState,
+} from "../shared/orderTiming";
 
 // Audio alert using Web Audio API for a nice double-tone chime
 const playAlertSound = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioWindow = window as Window & {
+      webkitAudioContext?: typeof AudioContext;
+    };
+    const AudioContextConstructor = window.AudioContext ?? audioWindow.webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const audioCtx = new AudioContextConstructor();
     const osc1 = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     
@@ -96,7 +105,7 @@ export function KitchenPage() {
   }, [token, user]);
 
   // Fetch data
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     const loaded = {
       activeOrders: [] as KitchenOrder[],
       activeTasks: [] as KitchenSectionTask[],
@@ -121,7 +130,7 @@ export function KitchenPage() {
       console.error("Error loading kitchen data:", err);
     }
     return loaded;
-  };
+  }, [isChef, isCook, isWydawka, selectedSectionId, token, user?.kitchen_section_id]);
 
   // Poll time for tickers
   useEffect(() => {
@@ -131,8 +140,8 @@ export function KitchenPage() {
 
   // Fetch on token/section/tab change
   useEffect(() => {
-    loadData();
-  }, [token, selectedSectionId, chefTab]);
+    void loadData();
+  }, [chefTab, loadData]);
 
   // WebSocket Live Updates
   useEffect(() => {
@@ -163,7 +172,7 @@ export function KitchenPage() {
               message.event === "qr_order_confirmed" ||
               message.event === "order_items_added"
             ) {
-              const data = message.data as any;
+              const data = message.data as LiveOrderEventData;
               const orderId = Number(data.order_id);
               if (!loaded.activeOrders.some((order) => order.id === orderId)) {
                 return;
@@ -189,7 +198,7 @@ export function KitchenPage() {
     });
 
     return cleanup;
-  }, [token, selectedSectionId, chefTab]);
+  }, [token, loadData]);
 
   // Actions
   const handleAcceptOrder = async (orderId: number) => {
@@ -199,8 +208,8 @@ export function KitchenPage() {
       await acceptKitchenOrder(token, orderId);
       setPreviewOrderId(null);
       loadData();
-    } catch (err: any) {
-      alert("Błąd akceptacji: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd akceptacji: " + getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -212,8 +221,8 @@ export function KitchenPage() {
     try {
       await completeKitchenCourse(token, orderId, courseNumber);
       loadData();
-    } catch (err: any) {
-      alert("Błąd wydania kursu: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd wydania kursu: " + getErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -224,8 +233,8 @@ export function KitchenPage() {
     try {
       await startKitchenTask(token, taskId);
       loadData();
-    } catch (err: any) {
-      alert("Błąd rozpoczęcia: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd rozpoczęcia: " + getErrorMessage(err));
     }
   };
 
@@ -234,8 +243,8 @@ export function KitchenPage() {
     try {
       await completeKitchenTask(token, taskId);
       loadData();
-    } catch (err: any) {
-      alert("Błąd zakończenia: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd zakończenia: " + getErrorMessage(err));
     }
   };
 
@@ -305,6 +314,7 @@ export function KitchenPage() {
     );
   };
   const sectionTaskOrders = groupSectionTasksByOrder(tasks);
+  const showLegacyColumns = false;
 
   return (
     <section className="page-stack" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -524,6 +534,11 @@ export function KitchenPage() {
                       const previousItem = order.items[itemIndex - 1];
                       const startsCourse =
                         itemIndex === 0 || previousItem.course_number !== item.course_number;
+                      const itemTiming = getOrderTimingState(
+                        item.created_at,
+                        order.estimated_time,
+                        now,
+                      );
 
                       return (
                         <Fragment key={item.id}>
@@ -532,13 +547,13 @@ export function KitchenPage() {
                               <span>Kurs {item.course_number}</span>
                             </div>
                           )}
-                          <div style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
+                          <div className={`kitchen-ticket-item ${itemTiming.tone}`} style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                             <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "#1a202c" }}>
                               {item.quantity}x {item.product_name}
                             </span>
                             <span style={{ fontSize: "0.75rem", color: "#718096", fontWeight: 600 }}>
-                              Danie {item.course_number}
+                              Danie {item.course_number} · {getElapsedTimeText(item.created_at)}
                             </span>
                           </div>
 
@@ -675,11 +690,13 @@ export function KitchenPage() {
             const inProgressCount = orderGroup.tasks.filter(
               (task) => task.status === "IN_PROGRESS",
             ).length;
-            const timing = getOrderTimingState(
-              orderGroup.createdAt,
-              orderGroup.estimatedTime,
-              now,
+            const taskTimings = orderGroup.tasks.map((task) =>
+              getKitchenTaskTimingState(task, now),
             );
+            const timing = getWorstTimingState(taskTimings);
+            const delayedTaskCount = taskTimings.filter(
+              (taskTiming) => taskTiming.tone !== "on-time",
+            ).length;
 
             return (
               <article
@@ -701,7 +718,7 @@ export function KitchenPage() {
                     }
                   >
                     {timing.tone !== "on-time"
-                      ? `Opóźnienie ${timing.delayMinutes} min`
+                      ? `Opóźnione: ${delayedTaskCount} · maks. ${timing.delayMinutes} min`
                       : inProgressCount > 0
                       ? `W trakcie: ${inProgressCount}`
                       : `Oczekuje: ${orderGroup.tasks.length}`}
@@ -712,9 +729,11 @@ export function KitchenPage() {
                   {orderGroup.tasks.map((task, taskIndex) => {
                     const isInProgress = task.status === "IN_PROGRESS";
                     const isBlocked = !isInProgress && !task.can_start;
+                    const taskTiming = getKitchenTaskTimingState(task, now);
                     const elapsedText = task.started_at
                       ? getElapsedTimeText(task.started_at)
                       : null;
+                    const waitingText = getElapsedTimeText(task.item_created_at);
                     const previousTask = orderGroup.tasks[taskIndex - 1];
                     const startsCourse =
                       taskIndex === 0 || previousTask.course_number !== task.course_number;
@@ -729,7 +748,7 @@ export function KitchenPage() {
                         <section
                           className={`kitchen-order-task ${
                             isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
-                          }`}
+                          } ${taskTiming.tone}`}
                         >
                         <div className="kitchen-order-task-meta">
                           <span>
@@ -773,9 +792,11 @@ export function KitchenPage() {
                             <Clock3 aria-hidden="true" />
                             {isInProgress && elapsedText
                               ? `W toku ${elapsedText}`
+                              : isBlocked
+                                ? "Oczekuje na poprzedni krok"
                               : task.estimated_time
-                                ? `${task.estimated_time} min`
-                                : "Bez czasu"}
+                                ? `Oczekuje ${waitingText} · ${task.estimated_time} min`
+                                : `Oczekuje ${waitingText}`}
                           </span>
                           {isInProgress ? (
                             <button
@@ -820,7 +841,7 @@ export function KitchenPage() {
       )}
 
       {/* Previous column view kept out of the render path while grouped tickets are active. */}
-      {false && isCook && (!isChef || chefTab === "MONITOR") && (
+      {showLegacyColumns && isCook && (!isChef || chefTab === "MONITOR") && (
         <div
           style={{
             display: "flex",
@@ -1462,10 +1483,17 @@ export function KitchenPage() {
 type SectionTaskOrderGroup = {
   orderId: number;
   tableNumber: string | null;
-  createdAt: string;
-  estimatedTime: number | null;
   tasks: KitchenSectionTask[];
 };
+
+type LiveOrderEventData = {
+  order_id?: number | string;
+  table_number?: string | null;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrderGroup[] {
   const groups = new Map<number, SectionTaskOrderGroup>();
@@ -1474,27 +1502,14 @@ function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrder
     const group = groups.get(task.order_id) ?? {
       orderId: task.order_id,
       tableNumber: task.table_number,
-      createdAt: task.item_created_at || task.order_created_at,
-      estimatedTime: task.order_estimated_time,
       tasks: [],
     };
     group.tasks.push(task);
     groups.set(task.order_id, group);
   }
 
-  return Array.from(groups.values()).map((group) => {
-    const activeTasks = group.tasks.filter((t) => t.status !== "COMPLETED");
-    const oldestItemCreatedAt = activeTasks.length > 0
-      ? activeTasks.reduce((oldest, t) => {
-          const tTime = new Date(t.item_created_at || t.order_created_at).getTime();
-          const oldestTime = new Date(oldest).getTime();
-          return tTime < oldestTime ? (t.item_created_at || t.order_created_at) : oldest;
-        }, activeTasks[0].item_created_at || activeTasks[0].order_created_at)
-      : group.createdAt;
-
-    return {
+  return Array.from(groups.values()).map((group) => ({
       ...group,
-      createdAt: oldestItemCreatedAt,
       tasks: [...group.tasks].sort((first, second) => {
         if (first.course_number !== second.course_number) {
           return first.course_number - second.course_number;
@@ -1504,6 +1519,5 @@ function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrder
         }
         return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
       }),
-    };
-  });
+    }));
 }

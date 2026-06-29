@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
+from importlib import import_module
 from typing import Any, cast
 
 from fastapi.testclient import TestClient
@@ -477,6 +478,7 @@ def test_confirm_pending_qr_order_records_action_log(monkeypatch):
         discount_amount=Decimal("0.00"),
         tip_amount=Decimal("0.00"),
     )
+    old_production_time = datetime(2020, 1, 1, tzinfo=timezone.utc)
     order_item = OrderItem(
         id=1,
         order_id=1,
@@ -486,6 +488,7 @@ def test_confirm_pending_qr_order_records_action_log(monkeypatch):
         total_price=Decimal("28.00"),
         status="NEW",
         notes=None,
+        created_at=old_production_time,
     )
 
     async def create_kitchen_task_for_item(_db, *, order_item):
@@ -528,7 +531,81 @@ def test_confirm_pending_qr_order_records_action_log(monkeypatch):
     assert len(action_logs) == 1
     assert action_logs[0].action_type == "QR_ORDER_CONFIRMED"
     assert action_logs[0].user_id == 7
+    assert order_item.created_at > old_production_time
     assert db.committed is True
+
+
+def test_added_order_items_get_a_fresh_production_timer(monkeypatch):
+    class FakeResult:
+        def __init__(self, values: list[Any]):
+            self.values = values
+
+        def scalars(self):
+            return self
+
+        def all(self):
+            return self.values
+
+    class FakeDb:
+        def __init__(self):
+            self.results = [FakeResult(["KITCHEN"]), FakeResult([])]
+
+        async def execute(self, _statement):
+            return self.results.pop(0)
+
+        def add(self, _obj: Any):
+            return None
+
+        async def commit(self):
+            return None
+
+        async def refresh(self, _obj: Any):
+            return None
+
+    old_production_time = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    added_item = OrderItem(
+        id=8,
+        order_id=1,
+        product_id=3,
+        quantity=1,
+        position=0,
+        course_number=1,
+        unit_price=Decimal("25.00"),
+        total_price=Decimal("25.00"),
+        status="NEW",
+        created_at=old_production_time,
+    )
+    order = make_order()
+
+    async def create_order_item(_db, *, order_id: int, item_request):
+        assert order_id == order.id
+        return added_item, Decimal("25.00")
+
+    async def create_task(_db, *, order_item):
+        assert order_item is added_item
+        return 12
+
+    async def table_number(_db, *, order):
+        return "11"
+
+    async def broadcast_many(**_kwargs):
+        return None
+
+    monkeypatch.setattr(order_service, "_create_order_item", create_order_item)
+    monkeypatch.setattr(order_service, "_create_kitchen_task_for_item", create_task)
+    monkeypatch.setattr(order_service, "_get_order_table_number", table_number)
+    order_service_module = import_module("app.services.order_service")
+    monkeypatch.setattr(order_service_module.websocket_manager, "broadcast_many", broadcast_many)
+
+    asyncio.run(
+        order_service.add_items_to_order(
+            cast(AsyncSession, FakeDb()),
+            order=order,
+            items=[OrderItemRequest(product_id=3)],
+        ),
+    )
+
+    assert added_item.created_at > old_production_time
 
 
 def test_reject_pending_qr_order_records_action_log():

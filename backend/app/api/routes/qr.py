@@ -190,6 +190,7 @@ async def build_public_qr_order_status(
         )
         .order_by(OrderItem.position, OrderItem.id),
     )
+    order_items = list(item_result.scalars().all())
     items = [
         PublicQROrderDetailItemRead(
             id=item.id,
@@ -209,7 +210,7 @@ async def build_public_qr_order_status(
                 for modifier in item.modifiers
             ],
         )
-        for item in item_result.scalars().all()
+        for item in order_items
     ]
 
     estimated_ready_at = None
@@ -218,7 +219,11 @@ async def build_public_qr_order_status(
         and status_order.estimated_time is not None
         and status_order.estimated_time > 0
     ):
-        estimated_ready_at = status_order.created_at + timedelta(
+        production_started_at = max(
+            (item.created_at for item in order_items),
+            default=status_order.created_at,
+        )
+        estimated_ready_at = production_started_at + timedelta(
             minutes=status_order.estimated_time,
         )
 

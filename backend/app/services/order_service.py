@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -91,6 +92,7 @@ class OrderService:
 
         total_amount = Decimal("0.00")
         item_estimates: list[int] = []
+        production_started_at = datetime.now(timezone.utc)
 
         for item_request in items:
             order_item, item_total = await self._create_order_item(
@@ -98,6 +100,8 @@ class OrderService:
                 order_id=order.id,
                 item_request=item_request,
             )
+            order_item.created_at = production_started_at
+            db.add(order_item)
             total_amount += item_total
             item_estimated_time = await self._create_kitchen_task_for_item(
                 db,
@@ -396,6 +400,7 @@ class OrderService:
         )
 
         item_estimates: list[int] = []
+        production_started_at = datetime.now(timezone.utc)
         for index, item_request in enumerate(items):
             item_request.position = next_position + index
             order_item, item_total = await self._create_order_item(
@@ -403,6 +408,8 @@ class OrderService:
                 order_id=order.id,
                 item_request=item_request,
             )
+            order_item.created_at = production_started_at
+            db.add(order_item)
             order.subtotal_amount += item_total
             order.total_amount += item_total
             item_estimated_time = await self._create_kitchen_task_for_item(
@@ -756,7 +763,10 @@ class OrderService:
             raise ValueError("QR order must contain at least one item.")
 
         item_estimates: list[int] = []
+        production_started_at = datetime.now(timezone.utc)
         for order_item in order_items:
+            order_item.created_at = production_started_at
+            db.add(order_item)
             item_estimated_time = await self._create_kitchen_task_for_item(
                 db,
                 order_item=order_item,
@@ -839,10 +849,12 @@ class OrderService:
 
         item_estimates: list[int] = []
         added_total = Decimal("0.00")
+        production_started_at = datetime.now(timezone.utc)
         for index, order_item in enumerate(order_items):
             order_item.order_id = target_order.id
             order_item.position = next_position + index
             order_item.status = "NEW"
+            order_item.created_at = production_started_at
             added_total += order_item.total_price
             db.add(order_item)
             item_estimated_time = await self._create_kitchen_task_for_item(
