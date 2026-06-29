@@ -6,6 +6,7 @@ class StockItemBase(OrmBaseModel):
     ingredient_id: int
     quantity: Decimal
     minimum_quantity: Decimal | None = None
+    is_active: bool = True
 
 
 class StockItemCreate(StockItemBase):
@@ -17,6 +18,7 @@ class StockItemUpdate(OrmBaseModel):
     ingredient_id: int | None = None
     quantity: Decimal | None = None
     minimum_quantity: Decimal | None = None
+    is_active: bool | None = None
 
 
 class StockItemRead(StockItemBase):

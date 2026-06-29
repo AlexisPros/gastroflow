@@ -706,6 +706,7 @@ export function AdminMenuPage() {
           <ProductModifiersForm
             modifiers={form.modifiers}
             catalog={menu.modifiers}
+            ingredients={menu.ingredients}
             onChange={(modifiers) => setForm({ ...form, modifiers })}
           />
 
@@ -884,10 +885,12 @@ function ProductIngredientsForm({
 function ProductModifiersForm({
   modifiers,
   catalog,
+  ingredients,
   onChange,
 }: {
   modifiers: AdminProductModifier[];
   catalog: AdminModifier[];
+  ingredients: AdminIngredient[];
   onChange: (modifiers: AdminProductModifier[]) => void;
 }) {
   return (
@@ -899,7 +902,7 @@ function ProductModifiersForm({
         </button>
       </div>
       {modifiers.map((item, index) => (
-        <div key={index} className="admin-nested-row">
+        <div key={index} className="admin-nested-row modifier-stock-row">
           <select
             value={item.modifier_id ?? ""}
             onChange={(event) => {
@@ -938,6 +941,54 @@ function ProductModifiersForm({
             value={item.price_override ?? ""}
             onChange={(event) => updateArray(modifiers, index, { ...item, price_override: event.target.value || null }, onChange)}
           />
+          <select
+            value={item.stock_ingredient_id ?? ""}
+            onChange={(event) => {
+              const selected = ingredients.find((ingredient) => ingredient.id === Number(event.target.value));
+              updateArray(modifiers, index, {
+                ...item,
+                stock_ingredient_id: selected?.id ?? null,
+                stock_ingredient_name: selected?.name ?? null,
+                stock_ingredient_unit: selected?.unit ?? null,
+                stock_quantity: selected ? item.stock_quantity ?? "1.000" : null,
+                replaces_ingredient_id: selected ? item.replaces_ingredient_id : null,
+              }, onChange);
+            }}
+          >
+            <option value="">Bez wpływu na magazyn</option>
+            {ingredients.filter((ingredient) => ingredient.is_active).map((ingredient) => (
+              <option key={ingredient.id} value={ingredient.id}>
+                Rozchód: {ingredient.name} ({ingredient.unit})
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min="0.001"
+            step="0.001"
+            disabled={!item.stock_ingredient_id}
+            placeholder={`Ilość${item.stock_ingredient_unit ? ` (${item.stock_ingredient_unit})` : ""}`}
+            value={item.stock_quantity ?? ""}
+            onChange={(event) => updateArray(modifiers, index, {
+              ...item,
+              stock_quantity: event.target.value || null,
+            }, onChange)}
+          />
+          <select
+            value={item.replaces_ingredient_id ?? ""}
+            disabled={!item.stock_ingredient_id}
+            onChange={(event) => updateArray(modifiers, index, {
+              ...item,
+              replaces_ingredient_id: event.target.value ? Number(event.target.value) : null,
+            }, onChange)}
+          >
+            <option value="">Nic nie zastępuje</option>
+            {ingredients.filter((ingredient) => ingredient.is_active).map((ingredient) => (
+              <option key={ingredient.id} value={ingredient.id}>
+                Zamiast: {ingredient.name}
+              </option>
+            ))}
+          </select>
           <label className="switch-row compact">
             <input
               type="checkbox"
@@ -1331,6 +1382,12 @@ function productToForm(product: AdminProduct): ProductFormState {
       modifier_name: item.modifier_name,
       modifier_price: item.modifier_price,
       price_override: item.price_override,
+      stock_ingredient_id: item.stock_ingredient_id,
+      stock_ingredient_name: item.stock_ingredient_name,
+      stock_ingredient_unit: item.stock_ingredient_unit,
+      stock_quantity: item.stock_quantity,
+      replaces_ingredient_id: item.replaces_ingredient_id,
+      replaces_ingredient_name: item.replaces_ingredient_name,
       is_active: item.is_active,
     })),
     kitchen_steps: product.kitchen_steps.map((item) => ({
@@ -1379,6 +1436,12 @@ function emptyModifier(): AdminProductModifier {
     modifier_name: "",
     modifier_price: "0.00",
     price_override: null,
+    stock_ingredient_id: null,
+    stock_ingredient_name: null,
+    stock_ingredient_unit: null,
+    stock_quantity: null,
+    replaces_ingredient_id: null,
+    replaces_ingredient_name: null,
     is_active: true,
   };
 }

@@ -2,6 +2,7 @@ import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { useCallback, useEffect, useState } from "react";
 
 import { ApiError } from "../api/apiClient";
+import { getWarehouses } from "../api/warehouseApi";
 import {
   closeCurrentShift,
   getCurrentShift,
@@ -35,9 +36,14 @@ const navItems: NavItem[] = [
   { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"] },
   { label: "Bar", path: routes.bar, roles: ["ADMIN", "MANAGER", "BARTENDER"] },
   { label: "Raporty", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
+  { label: "Magazyn", path: routes.warehouse, roles: ["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"] },
   { label: "Menu", path: routes.adminMenu, roles: ["ADMIN"] },
   { label: "Pracownicy", path: routes.adminUsers, roles: ["ADMIN"] },
 ];
+
+export type AppOutletContext = {
+  hasWarehouseAccess: boolean;
+};
 
 export function AppLayout() {
   const { token, user, logout } = useAuth();
@@ -46,6 +52,7 @@ export function AppLayout() {
   const [shiftError, setShiftError] = useState<string | null>(null);
   const [isShiftChanging, setIsShiftChanging] = useState(false);
   const [isNavigationOpen, setIsNavigationOpen] = useState(false);
+  const [hasWarehouseAccess, setHasWarehouseAccess] = useState(user?.role === "ADMIN");
   const [qrOrderAlert, setQrOrderAlert] = useState<{
     orderId: number;
     tableNumber: string;
@@ -55,7 +62,10 @@ export function AppLayout() {
   } | null>(null);
   const [departmentReadyAlerts, setDepartmentReadyAlerts] = useState<DepartmentReadyAlert[]>([]);
   const availableItems = user
-    ? navItems.filter((item) => item.roles.includes(user.role))
+    ? navItems.filter(
+        (item) => item.roles.includes(user.role)
+          && (item.path !== routes.warehouse || hasWarehouseAccess),
+      )
     : [];
   const canUseShift = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "WAITER";
 
@@ -71,6 +81,29 @@ export function AppLayout() {
       setShiftError(exc instanceof ApiError ? exc.message : "Nie udało się załadować zmiany.");
     }
   }, [token]);
+
+  useEffect(() => {
+    if (!token || !user) {
+      setHasWarehouseAccess(false);
+      return;
+    }
+    if (user.role === "ADMIN") {
+      setHasWarehouseAccess(true);
+      return;
+    }
+
+    let cancelled = false;
+    void getWarehouses(token)
+      .then((warehouses) => {
+        if (!cancelled) setHasWarehouseAccess(warehouses.length > 0);
+      })
+      .catch(() => {
+        if (!cancelled) setHasWarehouseAccess(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, user]);
 
   useEffect(() => {
     if (!token || !canUseShift) {
@@ -255,7 +288,7 @@ export function AppLayout() {
         </header>
 
         <main className="page-surface">
-          <Outlet />
+          <Outlet context={{ hasWarehouseAccess } satisfies AppOutletContext} />
         </main>
       </div>
 
@@ -391,7 +424,12 @@ function formatAlertMoney(value: string): string {
 
 const playReadyChime = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioWindow = window as Window & {
+      webkitAudioContext?: typeof AudioContext;
+    };
+    const AudioContextConstructor = window.AudioContext ?? audioWindow.webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const audioCtx = new AudioContextConstructor();
     const osc = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     

@@ -15,7 +15,7 @@ from app.schemas import (
     KitchenOrderItemRead,
     KitchenSectionTaskRead,
 )
-from app.services import kitchen_service
+from app.services import kitchen_service, stock_service
 
 router = APIRouter(
     tags=["Kitchen"],
@@ -246,6 +246,8 @@ async def accept_kitchen_order(order_id: int, db: DbSession, current_user: Curre
         if result_tasks_for_item.scalars().first():
             item.status = "PENDING"
             db.add(item)
+
+    await stock_service.consume_order_stock(db, order_id=order_id)
 
     await db.commit()
 
@@ -572,12 +574,18 @@ async def start_kitchen_task(task_id: int, db: DbSession, current_user: CurrentU
     try:
         if current_user.role == "BARTENDER":
             bar_section_id = await _get_bar_section_id(db)
-            return await kitchen_service.start_task(
+            started_task = await kitchen_service.start_task(
                 db,
                 task=task,
                 allow_new=True,
                 start_section_id=bar_section_id,
             )
+            await stock_service.consume_order_item_stock(
+                db,
+                order_item_id=task.order_item_id,
+            )
+            await db.commit()
+            return started_task
         return await kitchen_service.start_task(db, task=task)
     except ValueError as exc:
         raise_bad_request(exc)

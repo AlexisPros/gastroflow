@@ -1,8 +1,9 @@
-import { Link } from "react-router-dom";
+import { Link, useOutletContext } from "react-router-dom";
 
 import { useAuth } from "../auth/useAuth";
 import type { UserRole } from "../shared/types";
 import { routes } from "../routes/routePaths";
+import type { AppOutletContext } from "../layouts/AppLayout";
 
 type DashboardAction = {
   title: string;
@@ -43,6 +44,12 @@ const actions: DashboardAction[] = [
     roles: ["ADMIN", "MANAGER"],
   },
   {
+    title: "Magazyn",
+    description: "Kontroluj stany, dokumenty PZ, MM i RW oraz alerty niskiego stanu.",
+    path: routes.warehouse,
+    roles: ["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"],
+  },
+  {
     title: "Menu",
     description: "Zarządzaj kategoriami, produktami, składnikami i rabatami.",
     path: routes.adminMenu,
@@ -58,8 +65,12 @@ const actions: DashboardAction[] = [
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const { hasWarehouseAccess } = useOutletContext<AppOutletContext>();
   const availableActions = user
-    ? actions.filter((action) => action.roles.includes(user.role))
+    ? actions.filter(
+        (action) => action.roles.includes(user.role)
+          && (action.path !== routes.warehouse || hasWarehouseAccess),
+      )
     : [];
 
   return (
