@@ -1,18 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  ChevronRight,
+  Clock3,
+  Minus,
+  Pencil,
+  Plus,
+  ShoppingBag,
+  Trash2,
+  Users,
+  UtensilsCrossed,
+  Wine,
+  X,
+} from "lucide-react";
 import { useParams } from "react-router-dom";
 
 import { ApiError } from "../api/apiClient";
 import {
   createPublicQrOrder,
   getPublicQrMenu,
+  getPublicQrOrderStatus,
   getPublicQrTable,
+  unlockPublicQrOrder,
   type PublicQrCategory,
+  type PublicQrOrderStatus,
   type PublicQrProduct,
   type PublicQrTable,
 } from "../api/qrApi";
+import { WS_BASE_URL } from "../shared/config";
 import { createClientId } from "../shared/id";
 
-type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT";
+type Screen = "GUESTS" | "MENU" | "SUMMARY" | "SENT" | "LOCKED";
 type MenuDepartment = "KITCHEN" | "BAR";
 type GuestCartItem = {
   id: string;
@@ -21,11 +39,66 @@ type GuestCartItem = {
   modifierIds: number[];
   notes: string;
 };
+type GuestQrStorage = {
+  screen?: Screen;
+  guestCount?: number;
+  sentOrderId?: number | null;
+  orderStatus?: PublicQrOrderStatus | null;
+  cart?: GuestCartItem[];
+};
+
+const QR_STORAGE_PREFIX = "gastroflow:qr:";
 
 const money = new Intl.NumberFormat("pl-PL", {
   style: "currency",
   currency: "PLN",
 });
+
+function getGuestQrStorageKey(qrToken: string) {
+  return `${QR_STORAGE_PREFIX}${qrToken}`;
+}
+
+function readGuestQrState(qrToken: string): GuestQrStorage | null {
+  try {
+    const raw = window.localStorage.getItem(getGuestQrStorageKey(qrToken));
+    return raw ? (JSON.parse(raw) as GuestQrStorage) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeGuestQrState(qrToken: string, state: GuestQrStorage) {
+  try {
+    window.localStorage.setItem(getGuestQrStorageKey(qrToken), JSON.stringify(state));
+  } catch {
+    // Browsers can block storage in private mode; QR flow still works for the active tab.
+  }
+}
+
+function clearGuestQrState(qrToken: string) {
+  try {
+    window.localStorage.removeItem(getGuestQrStorageKey(qrToken));
+  } catch {
+    // The fresh QR flow can still start when browser storage is unavailable.
+  }
+}
+
+function getActivePublicOrderId(
+  status: PublicQrOrderStatus | null,
+  sentOrderId: number | null,
+) {
+  return status?.target_order_id ?? status?.order_id ?? sentOrderId;
+}
+
+function getGuestCartItemTotal(item: GuestCartItem) {
+  const modifierTotal = item.modifierIds.reduce((sum, modifierId) => {
+    const modifier = item.product.modifiers.find(
+      (candidate) => candidate.product_modifier_id === modifierId,
+    );
+    return sum + Number(modifier?.price ?? 0);
+  }, 0);
+  return (Number(item.product.price) + modifierTotal) * item.quantity;
+}
 
 export function GuestQrPage() {
   const { qrToken = "" } = useParams();
@@ -43,26 +116,140 @@ export function GuestQrPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [sentOrderId, setSentOrderId] = useState<number | null>(null);
+  const [orderStatus, setOrderStatus] = useState<PublicQrOrderStatus | null>(null);
+  const [orderCodeInput, setOrderCodeInput] = useState("");
+  const [unlocking, setUnlocking] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+
+  const resetGuestFlow = useCallback((nextScreen: Screen = "GUESTS") => {
+    clearGuestQrState(qrToken);
+    setScreen(nextScreen);
+    setGuestCount(2);
+    setDepartment("KITCHEN");
+    setActiveCategoryId("ALL");
+    setActiveSubcategoryId(null);
+    setSelectedProduct(null);
+    setEditingItemId(null);
+    setCart([]);
+    setError("");
+    setSentOrderId(null);
+    setOrderStatus(null);
+    setOrderCodeInput("");
+  }, [qrToken]);
 
   useEffect(() => {
     let active = true;
+    const savedState = readGuestQrState(qrToken);
     Promise.all([getPublicQrTable(qrToken), getPublicQrMenu(qrToken)])
       .then(([nextTable, nextCategories]) => {
         if (!active) return;
         setTable(nextTable);
         setCategories(nextCategories);
+        const savedOrderIsClosed =
+          savedState?.orderStatus?.public_status === "CLOSED" ||
+          ["CLOSED", "PAID"].includes(savedState?.orderStatus?.status ?? "");
+        const freeTableHasOldOrder =
+          nextTable.status === "FREE" && savedState?.sentOrderId != null;
+
+        if (savedOrderIsClosed || freeTableHasOldOrder) {
+          resetGuestFlow(nextTable.status === "FREE" ? "GUESTS" : "LOCKED");
+        } else if (savedState) {
+          setGuestCount(savedState.guestCount ?? 2);
+          setCart(savedState.cart ?? []);
+          setSentOrderId(savedState.sentOrderId ?? null);
+          setOrderStatus(savedState.orderStatus ?? null);
+          if (savedState.sentOrderId) {
+            setScreen(savedState.screen === "SUMMARY" ? "SUMMARY" : "SENT");
+          } else if (nextTable.status !== "FREE") {
+            setScreen("LOCKED");
+          } else if (
+            savedState.screen &&
+            savedState.screen !== "LOCKED" &&
+            savedState.screen !== "SENT"
+          ) {
+            setScreen(savedState.screen);
+          }
+        } else if (nextTable.status !== "FREE") {
+          setScreen("LOCKED");
+        }
       })
       .catch((exc) => {
         if (!active) return;
         setError(exc instanceof ApiError ? exc.message : "Nie udało się otworzyć menu.");
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active) {
+          setHydrated(true);
+          setLoading(false);
+        }
       });
     return () => {
       active = false;
     };
-  }, [qrToken]);
+  }, [qrToken, resetGuestFlow]);
+
+  useEffect(() => {
+    if (!hydrated || !qrToken) {
+      return;
+    }
+
+    writeGuestQrState(qrToken, {
+      screen,
+      guestCount,
+      sentOrderId,
+      orderStatus,
+      cart,
+    });
+  }, [cart, guestCount, hydrated, orderStatus, qrToken, screen, sentOrderId]);
+
+  useEffect(() => {
+    if (screen !== "SENT" || sentOrderId === null) {
+      return;
+    }
+
+    let active = true;
+    let refreshTimer: number | undefined;
+
+    const refreshStatus = async () => {
+      try {
+        const nextStatus = await getPublicQrOrderStatus(qrToken, sentOrderId);
+        if (active) {
+          if (
+            nextStatus.public_status === "CLOSED" ||
+            ["CLOSED", "PAID"].includes(nextStatus.status)
+          ) {
+            resetGuestFlow();
+          } else {
+            setOrderStatus(nextStatus);
+          }
+        }
+      } catch {
+        if (active) {
+          refreshTimer = window.setTimeout(refreshStatus, 2500);
+        }
+      }
+    };
+
+    void refreshStatus();
+
+    const socket = new WebSocket(`${WS_BASE_URL}/ws/public_qr`);
+    socket.onmessage = () => {
+      void refreshStatus();
+    };
+    socket.onclose = () => {
+      if (active) {
+        refreshTimer = window.setTimeout(refreshStatus, 2500);
+      }
+    };
+
+    return () => {
+      active = false;
+      if (refreshTimer !== undefined) {
+        window.clearTimeout(refreshTimer);
+      }
+      socket.close();
+    };
+  }, [qrToken, resetGuestFlow, screen, sentOrderId]);
 
   const childCategoriesByParent = useMemo(() => {
     const map = new Map<number, PublicQrCategory[]>();
@@ -115,15 +302,7 @@ export function GuestQrPage() {
     departmentCategories,
   ]);
   const cartCount = cart.reduce((total, item) => total + item.quantity, 0);
-  const cartTotal = cart.reduce((total, item) => {
-    const modifiers = item.modifierIds.reduce((sum, modifierId) => {
-      const modifier = item.product.modifiers.find(
-        (candidate) => candidate.product_modifier_id === modifierId,
-      );
-      return sum + Number(modifier?.price ?? 0);
-    }, 0);
-    return total + (Number(item.product.price) + modifiers) * item.quantity;
-  }, 0);
+  const cartTotal = cart.reduce((total, item) => total + getGuestCartItemTotal(item), 0);
 
   function openProduct(product: PublicQrProduct, itemId?: string) {
     setSelectedProduct(product);
@@ -167,8 +346,10 @@ export function GuestQrPage() {
     setSubmitting(true);
     setError("");
     try {
+      const activeOrderCode = getActivePublicOrderId(orderStatus, sentOrderId);
       const order = await createPublicQrOrder(qrToken, {
         guest_count: guestCount,
+        order_code: activeOrderCode ? String(activeOrderCode) : null,
         items: cart.map((item) => ({
           product_id: item.product.id,
           quantity: item.quantity,
@@ -177,11 +358,45 @@ export function GuestQrPage() {
         })),
       });
       setSentOrderId(order.id);
+      setOrderStatus({
+        order_id: order.id,
+        target_order_id: null,
+        status: order.status,
+        public_status: "PENDING_CONFIRMATION",
+        progress_percent: 0,
+        estimated_ready_at: null,
+        can_order_more: false,
+        items: [],
+      });
+      setCart([]);
       setScreen("SENT");
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się wysłać zamówienia.");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function unlockOrder() {
+    if (!orderCodeInput.trim()) return;
+    setUnlocking(true);
+    setError("");
+    try {
+      const nextStatus = await unlockPublicQrOrder(qrToken, {
+        order_code: orderCodeInput.trim(),
+      });
+      setSentOrderId(nextStatus.order_id);
+      setOrderStatus(nextStatus);
+      setCart([]);
+      setScreen("SENT");
+    } catch (exc) {
+      setError(
+        exc instanceof ApiError
+          ? exc.message
+          : "Nie znaleziono zamówienia dla tego stolika.",
+      );
+    } finally {
+      setUnlocking(false);
     }
   }
 
@@ -193,9 +408,12 @@ export function GuestQrPage() {
   }
   if (screen === "SENT") {
     return (
-      <GuestMessage
-        title="Zamówienie wysłane"
-        text={`Zamówienie #${sentOrderId} oczekuje na potwierdzenie przez obsługę.`}
+      <GuestOrderStatus
+        orderId={sentOrderId}
+        status={orderStatus}
+        onOrderMore={() => {
+          setScreen("MENU");
+        }}
       />
     );
   }
@@ -204,7 +422,7 @@ export function GuestQrPage() {
     <main className="guest-order-page">
       <header className="guest-mobile-header">
         <img src="/logo.png" alt="GastroFlow" />
-        <div>
+        <div className="guest-table-badge">
           <span>Stolik</span>
           <strong>{table.table_number}</strong>
         </div>
@@ -212,15 +430,28 @@ export function GuestQrPage() {
 
       {screen === "GUESTS" && (
         <section className="guest-count-screen">
-          <span className="eyebrow">Witamy</span>
-          <h1>Ile osób jest przy stoliku?</h1>
+          <span className="guest-count-icon" aria-hidden="true">
+            <Users />
+          </span>
+          <div className="guest-count-heading">
+            <span className="eyebrow">Witamy</span>
+            <h1>Ile osób jest przy stoliku?</h1>
+          </div>
           <div className="guest-count-control">
-            <button type="button" onClick={() => setGuestCount((value) => Math.max(1, value - 1))}>
-              −
+            <button
+              type="button"
+              aria-label="Zmniejsz liczbę gości"
+              onClick={() => setGuestCount((value) => Math.max(1, value - 1))}
+            >
+              <Minus aria-hidden="true" />
             </button>
             <strong>{guestCount}</strong>
-            <button type="button" onClick={() => setGuestCount((value) => Math.min(30, value + 1))}>
-              +
+            <button
+              type="button"
+              aria-label="Zwiększ liczbę gości"
+              onClick={() => setGuestCount((value) => Math.min(30, value + 1))}
+            >
+              <Plus aria-hidden="true" />
             </button>
           </div>
           <button type="button" className="guest-primary-button" onClick={() => setScreen("MENU")}>
@@ -229,91 +460,158 @@ export function GuestQrPage() {
         </section>
       )}
 
+      {screen === "LOCKED" && (
+        <section className="guest-count-screen guest-locked-screen">
+          <span className="eyebrow">Stolik zajęty</span>
+          <h1>Ten stolik ma już otwarty rachunek.</h1>
+          <p className="muted">
+            Wpisz numer zamówienia, aby wrócić do statusu i domówić kolejne pozycje.
+          </p>
+          <label className="guest-order-code-field">
+            Numer zamówienia
+            <input
+              value={orderCodeInput}
+              inputMode="numeric"
+              pattern="[0-9]*"
+              onChange={(event) => setOrderCodeInput(event.target.value.replace(/\D/g, ""))}
+              placeholder="np. 12"
+            />
+          </label>
+          {error && <div className="error-box">{error}</div>}
+          <button
+            type="button"
+            className="guest-primary-button"
+            disabled={unlocking || !orderCodeInput.trim()}
+            onClick={() => void unlockOrder()}
+          >
+            {unlocking ? "Sprawdzanie..." : "Otwórz status zamówienia"}
+          </button>
+        </section>
+      )}
+
       {screen === "MENU" && (
         <>
-          <nav className="guest-department-tabs">
-            <button
-              type="button"
-              className={department === "KITCHEN" ? "active" : ""}
-              onClick={() => switchDepartment("KITCHEN")}
-            >
-              Dania
-            </button>
-            <button
-              type="button"
-              className={department === "BAR" ? "active" : ""}
-              onClick={() => switchDepartment("BAR")}
-            >
-              Napoje
-            </button>
-          </nav>
-          <nav className="guest-category-tabs">
-            <button
-              type="button"
-              className={activeCategoryId === "ALL" ? "active" : ""}
-              onClick={() => {
-                setActiveCategoryId("ALL");
-                setActiveSubcategoryId(null);
-              }}
-            >
-              Wszystko
-            </button>
-            {rootCategories.map((category) => (
+          <div className="guest-menu-navigation">
+            {sentOrderId !== null && (
               <button
-                key={category.id}
                 type="button"
-                className={activeCategoryId === category.id ? "active" : ""}
+                className="guest-status-return"
+                onClick={() => setScreen("SENT")}
+              >
+                <span>Status zamówienia #{sentOrderId}</span>
+                <ChevronRight aria-hidden="true" />
+              </button>
+            )}
+            <nav className="guest-department-tabs" aria-label="Rodzaj menu">
+              <button
+                type="button"
+                className={department === "KITCHEN" ? "active" : ""}
+                onClick={() => switchDepartment("KITCHEN")}
+              >
+                <UtensilsCrossed aria-hidden="true" />
+                Dania
+              </button>
+              <button
+                type="button"
+                className={department === "BAR" ? "active" : ""}
+                onClick={() => switchDepartment("BAR")}
+              >
+                <Wine aria-hidden="true" />
+                Napoje
+              </button>
+            </nav>
+            <nav className="guest-category-tabs" aria-label="Kategorie">
+              <button
+                type="button"
+                className={activeCategoryId === "ALL" ? "active" : ""}
                 onClick={() => {
-                  setActiveCategoryId(category.id);
+                  setActiveCategoryId("ALL");
                   setActiveSubcategoryId(null);
                 }}
               >
-                {category.name}
+                Wszystko
               </button>
-            ))}
-          </nav>
-          {activeSubcategories.length > 0 && (
-            <nav className="guest-subcategory-tabs">
-              <button
-                type="button"
-                className={activeSubcategoryId === null ? "active" : ""}
-                onClick={() => setActiveSubcategoryId(null)}
-              >
-                Wszystkie
-              </button>
-              {activeSubcategories.map((subcategory) => (
+              {rootCategories.map((category) => (
                 <button
-                  key={subcategory.id}
+                  key={category.id}
                   type="button"
-                  className={activeSubcategoryId === subcategory.id ? "active" : ""}
-                  onClick={() => setActiveSubcategoryId(subcategory.id)}
+                  className={activeCategoryId === category.id ? "active" : ""}
+                  onClick={() => {
+                    setActiveCategoryId(category.id);
+                    setActiveSubcategoryId(null);
+                  }}
                 >
-                  {subcategory.name}
+                  {category.name}
                 </button>
               ))}
             </nav>
-          )}
+            {activeSubcategories.length > 0 && (
+              <nav className="guest-subcategory-tabs" aria-label="Podkategorie">
+                <button
+                  type="button"
+                  className={activeSubcategoryId === null ? "active" : ""}
+                  onClick={() => setActiveSubcategoryId(null)}
+                >
+                  Wszystkie
+                </button>
+                {activeSubcategories.map((subcategory) => (
+                  <button
+                    key={subcategory.id}
+                    type="button"
+                    className={activeSubcategoryId === subcategory.id ? "active" : ""}
+                    onClick={() => setActiveSubcategoryId(subcategory.id)}
+                  >
+                    {subcategory.name}
+                  </button>
+                ))}
+              </nav>
+            )}
+          </div>
+          <header className="guest-menu-heading">
+            <div>
+              <span className="eyebrow">
+                {department === "KITCHEN" ? "Karta dań" : "Karta napojów"}
+              </span>
+              <h1>Menu</h1>
+            </div>
+            <span>{visibleProducts.length} pozycji</span>
+          </header>
           <section className="guest-menu-list">
             {visibleProducts.map((product) => (
               <article key={product.id} className="guest-product-row">
                 <button type="button" className="guest-product-main" onClick={() => openProduct(product)}>
-                  <div>
+                  <div className="guest-product-copy">
                     <h2>{product.name}</h2>
-                    <p>{product.description || product.ingredients.join(", ")}</p>
+                    {product.description && <p>{product.description}</p>}
                     <strong>{money.format(Number(product.price))}</strong>
                   </div>
                   <ProductImage product={product} />
                 </button>
-                <button type="button" className="guest-add-button" onClick={() => openProduct(product)}>
-                  +
+                <button
+                  type="button"
+                  className="guest-add-button"
+                  aria-label={`Dodaj do zamówienia: ${product.name}`}
+                  onClick={() => openProduct(product)}
+                >
+                  <Plus aria-hidden="true" />
                 </button>
               </article>
             ))}
+            {visibleProducts.length === 0 && (
+              <p className="guest-menu-empty">Brak dostępnych pozycji w tej kategorii.</p>
+            )}
           </section>
           {cartCount > 0 && (
             <button type="button" className="guest-cart-dock" onClick={() => setScreen("SUMMARY")}>
-              <span>Zobacz zamówienie · {cartCount}</span>
+              <span className="guest-cart-dock-copy">
+                <ShoppingBag aria-hidden="true" />
+                <span>
+                  <small>Twoje zamówienie</small>
+                  <b>{cartCount} {cartCount === 1 ? "pozycja" : "pozycji"}</b>
+                </span>
+              </span>
               <strong>{money.format(cartTotal)}</strong>
+              <ChevronRight aria-hidden="true" />
             </button>
           )}
         </>
@@ -321,14 +619,31 @@ export function GuestQrPage() {
 
       {screen === "SUMMARY" && (
         <section className="guest-summary">
-          <button type="button" className="guest-back-button" onClick={() => setScreen("MENU")}>
-            ← Wróć do menu
-          </button>
-          <h1>Podsumowanie</h1>
+          <header className="guest-summary-header">
+            <button
+              type="button"
+              className="guest-summary-icon-button"
+              aria-label="Wróć do menu"
+              onClick={() => setScreen("MENU")}
+            >
+              <ArrowLeft aria-hidden="true" />
+            </button>
+            <div>
+              <span className="eyebrow">Twoje zamówienie</span>
+              <h1>Podsumowanie</h1>
+            </div>
+            <span className="guest-summary-bag" aria-hidden="true">
+              <ShoppingBag />
+              <b>{cartCount}</b>
+            </span>
+          </header>
           <div className="guest-summary-list">
             {cart.map((item) => (
               <article key={item.id} className="guest-summary-item">
-                <div>
+                <div className="guest-summary-image">
+                  <ProductImage product={item.product} />
+                </div>
+                <div className="guest-summary-item-copy">
                   <strong>{item.product.name}</strong>
                   {item.modifierIds.map((modifierId) => (
                     <small key={modifierId}>
@@ -340,13 +655,23 @@ export function GuestQrPage() {
                     </small>
                   ))}
                   {item.notes && <small>{item.notes}</small>}
-                  <button type="button" onClick={() => openProduct(item.product, item.id)}>
+                  <button
+                    type="button"
+                    className="guest-summary-edit"
+                    onClick={() => openProduct(item.product, item.id)}
+                  >
+                    <Pencil size={15} aria-hidden="true" />
                     Edytuj
                   </button>
                 </div>
                 <div className="guest-item-actions">
+                  <strong className="guest-summary-line-total">
+                    {money.format(getGuestCartItemTotal(item))}
+                  </strong>
+                  <div className="guest-quantity-stepper">
                   <button
                     type="button"
+                    aria-label={`Zmniejsz liczbę: ${item.product.name}`}
                     onClick={() =>
                       setCart((items) =>
                         items
@@ -359,11 +684,12 @@ export function GuestQrPage() {
                       )
                     }
                   >
-                    −
+                    <Minus aria-hidden="true" />
                   </button>
                   <strong>{item.quantity}</strong>
                   <button
                     type="button"
+                    aria-label={`Zwiększ liczbę: ${item.product.name}`}
                     onClick={() =>
                       setCart((items) =>
                         items.map((candidate) =>
@@ -374,14 +700,16 @@ export function GuestQrPage() {
                       )
                     }
                   >
-                    +
+                    <Plus aria-hidden="true" />
                   </button>
+                  </div>
                   <button
                     type="button"
                     className="remove"
+                    aria-label={`Usuń z zamówienia: ${item.product.name}`}
                     onClick={() => setCart((items) => items.filter((candidate) => candidate.id !== item.id))}
                   >
-                    Usuń
+                    <Trash2 aria-hidden="true" />
                   </button>
                 </div>
               </article>
@@ -452,17 +780,38 @@ function GuestProductModal({
   const [notes, setNotes] = useState(existing?.notes ?? "");
   return (
     <div className="guest-modal-backdrop">
-      <section className="guest-product-modal">
-        <ProductImage product={product} />
+      <section className="guest-product-modal" role="dialog" aria-modal="true" aria-label={product.name}>
+        <div className="guest-product-modal-media">
+          <ProductImage product={product} />
+          <button
+            type="button"
+            className="guest-product-close"
+            aria-label="Zamknij"
+            onClick={onClose}
+          >
+            <X aria-hidden="true" />
+          </button>
+        </div>
         <div className="guest-product-modal-body">
-          <h1>{product.name}</h1>
-          <p>{product.description}</p>
-          <strong>{money.format(Number(product.price))}</strong>
+          <header className="guest-product-modal-heading">
+            <div>
+              <span className="eyebrow">Szczegóły pozycji</span>
+              <h1>{product.name}</h1>
+            </div>
+            <strong>{money.format(Number(product.price))}</strong>
+          </header>
+          {product.description && <p>{product.description}</p>}
           {product.modifiers.length > 0 && (
             <div className="guest-modifier-list">
-              <h2>Dodatki</h2>
+              <div className="guest-option-heading">
+                <h2>Dodatki</h2>
+                <span>Opcjonalnie</span>
+              </div>
               {product.modifiers.map((modifier) => (
-                <label key={modifier.product_modifier_id}>
+                <label
+                  key={modifier.product_modifier_id}
+                  className={modifierIds.includes(modifier.product_modifier_id) ? "selected" : ""}
+                >
                   <input
                     type="checkbox"
                     checked={modifierIds.includes(modifier.product_modifier_id)}
@@ -483,12 +832,18 @@ function GuestProductModal({
             </div>
           )}
           <label className="guest-notes-field">
-            Uwagi
-            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={500} />
+            <span>Uwagi do pozycji</span>
+            <textarea
+              value={notes}
+              onChange={(event) => setNotes(event.target.value)}
+              maxLength={500}
+              placeholder="Np. bez cebuli"
+            />
           </label>
           <div className="guest-modal-actions">
             <button type="button" onClick={onClose}>Anuluj</button>
             <button type="button" className="confirm" onClick={() => onSave({ modifierIds, notes })}>
+              <Plus aria-hidden="true" />
               {existing ? "Zapisz zmiany" : "Dodaj do zamówienia"}
             </button>
           </div>
@@ -510,4 +865,187 @@ function GuestMessage({ title, text }: { title: string; text?: string }) {
       </section>
     </main>
   );
+}
+
+function GuestOrderStatus({
+  orderId,
+  status,
+  onOrderMore,
+}: {
+  orderId: number | null;
+  status: PublicQrOrderStatus | null;
+  onOrderMore: () => void;
+}) {
+  const publicStatus = status?.public_status ?? "PENDING_CONFIRMATION";
+  const progress = Math.max(0, Math.min(100, status?.progress_percent ?? 0));
+  const copy = getGuestStatusCopy(publicStatus);
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const detailsTotal = (status?.items ?? []).reduce(
+    (sum, item) => sum + Number(item.total_price),
+    0,
+  );
+  const waitEstimate = getGuestWaitEstimate(
+    publicStatus,
+    status?.estimated_ready_at ?? null,
+    now,
+  );
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <main className="guest-qr-page">
+      <section className="guest-qr-panel">
+        <img src="/logo.png" alt="GastroFlow" className="guest-qr-logo" />
+        <div className="guest-qr-message">
+          <span className={`guest-status-pill ${copy.kind}`}>{copy.badge}</span>
+          <h1>{copy.title}</h1>
+          <p className="muted">
+            Zamówienie #{orderId} {copy.text}
+          </p>
+        </div>
+        <div className="guest-progress-card">
+          <div>
+            <span>Przygotowanie</span>
+            <strong>{progress}%</strong>
+          </div>
+          <div className="guest-progress-track">
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+        {waitEstimate && (
+          <div className={`guest-wait-estimate ${waitEstimate.kind}`}>
+            <Clock3 aria-hidden="true" />
+            <div>
+              <span>Przewidywany czas oczekiwania</span>
+              <strong>{waitEstimate.text}</strong>
+            </div>
+          </div>
+        )}
+        <button
+          type="button"
+          className="guest-secondary-button"
+          onClick={() => setIsDetailsOpen((isOpen) => !isOpen)}
+        >
+          {isDetailsOpen ? "Ukryj szczegóły" : "Szczegóły zamówienia"}
+        </button>
+        {isDetailsOpen && (
+          <section className="guest-order-details-card">
+            <div>
+              <span>Zamówione pozycje</span>
+              <strong>{money.format(detailsTotal)}</strong>
+            </div>
+            {(status?.items ?? []).length > 0 ? (
+              <div className="guest-order-details-list">
+                {status?.items.map((item) => (
+                  <article key={item.id}>
+                    <div>
+                      <strong>{item.product_name}</strong>
+                      <small>
+                        Kurs {item.course_number} · {item.quantity} x {money.format(Number(item.unit_price))}
+                      </small>
+                      {item.modifiers.map((modifier) => (
+                        <small key={`${item.id}-${modifier.name}`}>
+                          + {modifier.name}
+                          {Number(modifier.price) > 0
+                            ? ` (${money.format(Number(modifier.price))})`
+                            : ""}
+                        </small>
+                      ))}
+                      {item.notes && <small>{item.notes}</small>}
+                    </div>
+                    <b>{money.format(Number(item.total_price))}</b>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Pozycje pojawią się po odświeżeniu statusu.</p>
+            )}
+          </section>
+        )}
+        {status?.can_order_more && (
+          <button type="button" className="guest-primary-button" onClick={onOrderMore}>
+            Domów
+          </button>
+        )}
+      </section>
+    </main>
+  );
+}
+
+function getGuestStatusCopy(publicStatus: string) {
+  if (publicStatus === "REJECTED") {
+    return {
+      kind: "danger",
+      badge: "Odrzucone",
+      title: "Zamówienie odrzucone",
+      text: "zostało odrzucone przez obsługę.",
+    };
+  }
+  if (publicStatus === "READY") {
+    return {
+      kind: "success",
+      badge: "Gotowe",
+      title: "Zamówienie gotowe",
+      text: "jest gotowe do odbioru lub podania.",
+    };
+  }
+  if (publicStatus === "PREPARING") {
+    return {
+      kind: "success",
+      badge: "Przyjęte",
+      title: "Zamówienie przyjęte",
+      text: "zostało przyjęte i jest przygotowywane.",
+    };
+  }
+  if (publicStatus === "CLOSED") {
+    return {
+      kind: "success",
+      badge: "Zamknięte",
+      title: "Rachunek zamknięty",
+      text: "zostało już rozliczone.",
+    };
+  }
+  return {
+    kind: "pending",
+    badge: "Oczekuje",
+    title: "Zamówienie wysłane",
+    text: "oczekuje na potwierdzenie przez obsługę.",
+  };
+}
+
+function getGuestWaitEstimate(
+  publicStatus: string,
+  estimatedReadyAt: string | null,
+  now: number,
+): { kind: "pending" | "active" | "delayed" | "ready"; text: string } | null {
+  if (publicStatus === "PENDING_CONFIRMATION") {
+    return {
+      kind: "pending",
+      text: "Po potwierdzeniu przez obsługę",
+    };
+  }
+  if (publicStatus === "READY") {
+    return { kind: "ready", text: "Zamówienie jest gotowe" };
+  }
+  if (publicStatus !== "PREPARING" || !estimatedReadyAt) {
+    return null;
+  }
+
+  const remainingMs = new Date(estimatedReadyAt).getTime() - now;
+  if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+    return {
+      kind: "delayed",
+      text: "Nieco dłużej niż przewidywano",
+    };
+  }
+
+  const remainingMinutes = Math.max(1, Math.ceil(remainingMs / 60_000));
+  return {
+    kind: "active",
+    text: `Około ${remainingMinutes} ${remainingMinutes === 1 ? "minuty" : "minut"}`,
+  };
 }

@@ -70,6 +70,12 @@ class Order(Base):
         index=True,
     )
 
+    qr_parent_order_id: Mapped[int | None] = mapped_column(
+        ForeignKey("orders.id"),
+        nullable=True,
+        index=True,
+    )
+
     split_sequence: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
@@ -156,6 +162,13 @@ class Order(Base):
     split_parent_order: Mapped[Order | None] = relationship(
         "Order",
         remote_side=[id],
+        foreign_keys=[split_parent_order_id],
+    )
+
+    qr_parent_order: Mapped[Order | None] = relationship(
+        "Order",
+        remote_side=[id],
+        foreign_keys=[qr_parent_order_id],
     )
 
     items: Mapped[list[OrderItem]] = relationship(

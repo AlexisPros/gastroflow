@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
+import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
   getActiveKitchenOrders,
   acceptKitchenOrder,
-  completeKitchenOrder,
+  completeKitchenCourse,
   getActiveSectionTasks,
   startKitchenTask,
   completeKitchenTask,
@@ -15,6 +16,7 @@ import {
 } from "../api/kitchenApi";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { WebSocketMessage } from "../shared/types";
+import { getOrderTimingState } from "../shared/orderTiming";
 
 // Audio alert using Web Audio API for a nice double-tone chime
 const playAlertSound = () => {
@@ -149,6 +151,7 @@ export function KitchenPage() {
           "kitchen_order_accepted",
           "order_cancelled",
           "kitchen_order_ready",
+          "kitchen_course_ready",
         ];
 
         if (refreshEvents.includes(message.event)) {
@@ -203,14 +206,14 @@ export function KitchenPage() {
     }
   };
 
-  const handleCompleteOrder = async (orderId: number) => {
+  const handleCompleteCourse = async (orderId: number, courseNumber: number) => {
     if (!token) return;
     setLoading(true);
     try {
-      await completeKitchenOrder(token, orderId);
+      await completeKitchenCourse(token, orderId, courseNumber);
       loadData();
     } catch (err: any) {
-      alert("Błąd wydania: " + err.message);
+      alert("Błąd wydania kursu: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -301,6 +304,7 @@ export function KitchenPage() {
       })),
     );
   };
+  const sectionTaskOrders = groupSectionTasksByOrder(tasks);
 
   return (
     <section className="page-stack" style={{ padding: "20px", display: "flex", flexDirection: "column", gap: "24px" }}>
@@ -420,7 +424,23 @@ export function KitchenPage() {
                 0
               );
               const progress = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
-              const isReady = totalTasks > 0 && completedTasks === totalTasks;
+              const courseNumbers = [...new Set(order.items.map((item) => item.course_number))]
+                .sort((first, second) => first - second);
+              const currentCourseNumber = courseNumbers[0];
+              const currentCourseItems = order.items.filter(
+                (item) => item.course_number === currentCourseNumber,
+              );
+              const currentCourseTasks = currentCourseItems.flatMap(
+                (item) => item.kitchen_tasks,
+              );
+              const isCurrentCourseReady =
+                currentCourseTasks.length > 0
+                && currentCourseTasks.every((task) => task.status === "COMPLETED");
+              const timing = getOrderTimingState(
+                order.created_at,
+                order.estimated_time,
+                now,
+              );
 
               // Extract pending sections
               const pendingSections = new Set<string>();
@@ -436,7 +456,7 @@ export function KitchenPage() {
               return (
                 <div
                   key={order.id}
-                  className="kitchen-ticket"
+                  className={`kitchen-ticket ${isCurrentCourseReady ? "on-time" : timing.tone}`}
                   onClick={() => setPreviewOrderId(order.id)}
                   role="button"
                   tabIndex={0}
@@ -457,8 +477,12 @@ export function KitchenPage() {
                     position: "relative",
                     overflow: "hidden",
                     cursor: "pointer",
-                    borderTop: isReady
+                    borderTop: isCurrentCourseReady
                       ? "8px solid var(--brand-green)"
+                      : timing.tone === "critical"
+                      ? "8px solid #d83a32"
+                      : timing.tone === "warning"
+                      ? "8px solid #e98a24"
                       : hasNew
                       ? "8px dashed #3182ce"
                       : "8px solid #dd6b20",
@@ -484,9 +508,19 @@ export function KitchenPage() {
 
                   {/* Items listing (Always visible without click) */}
                   <div style={{ padding: "12px 16px", flexGrow: 1, display: "flex", flexDirection: "column", gap: "14px" }}>
-                    {order.items.map((item) => {
+                    {order.items.map((item, itemIndex) => {
+                      const previousItem = order.items[itemIndex - 1];
+                      const startsCourse =
+                        itemIndex === 0 || previousItem.course_number !== item.course_number;
+
                       return (
-                        <div key={item.id} style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
+                        <Fragment key={item.id}>
+                          {startsCourse && (
+                            <div className="course-group-divider kitchen-ticket-course-divider">
+                              <span>Kurs {item.course_number}</span>
+                            </div>
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "6px", background: "rgba(0,0,0,0.02)", padding: "10px", borderRadius: "8px", border: "1px solid rgba(0,0,0,0.04)" }}>
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
                             <span style={{ fontSize: "0.95rem", fontWeight: 800, color: "#1a202c" }}>
                               {item.quantity}x {item.product_name}
@@ -534,7 +568,8 @@ export function KitchenPage() {
                               UWAGA: {item.notes}
                             </span>
                           )}
-                        </div>
+                          </div>
+                        </Fragment>
                       );
                     })}
                   </div>
@@ -545,7 +580,13 @@ export function KitchenPage() {
                       <span>Postęp: {completedTasks}/{totalTasks} ({Math.round(progress)}%)</span>
                     </div>
 
-                    {!isReady && !hasNew && pendingSections.size > 0 && (
+                    {timing.tone !== "on-time" && !isCurrentCourseReady && (
+                      <div className={`kitchen-order-delay ${timing.tone}`}>
+                        Opóźnienie: {timing.delayMinutes} min
+                      </div>
+                    )}
+
+                    {!isCurrentCourseReady && !hasNew && pendingSections.size > 0 && (
                       <div style={{ fontSize: "0.75rem", color: "#dd6b20", marginBottom: "8px", fontStyle: "italic" }}>
                         Sekcje w pracy: {Array.from(pendingSections).join(", ")}
                       </div>
@@ -564,13 +605,13 @@ export function KitchenPage() {
                       >
                         Przyjmij zamówienie
                       </button>
-                    ) : isReady ? (
+                    ) : isCurrentCourseReady && currentCourseNumber !== undefined ? (
                       <button
                         type="button"
                         className="primary-button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          handleCompleteOrder(order.id);
+                          handleCompleteCourse(order.id, currentCourseNumber);
                         }}
                         disabled={loading}
                         style={{
@@ -581,7 +622,7 @@ export function KitchenPage() {
                           fontSize: "0.85rem",
                         }}
                       >
-                        Wydaj kelnerowi
+                        Wydaj kurs {currentCourseNumber}
                       </button>
                     ) : (
                       <button
@@ -615,8 +656,159 @@ export function KitchenPage() {
         </div>
       )}
 
-      {/* -------------------- SECTION COOK VIEW (PENDING vs IN_PROGRESS) -------------------- */}
+      {/* -------------------- SECTION COOK VIEW (GROUPED BY ORDER) -------------------- */}
       {isCook && (!isChef || chefTab === "MONITOR") && (
+        <div className="kitchen-order-board">
+          {sectionTaskOrders.map((orderGroup) => {
+            const inProgressCount = orderGroup.tasks.filter(
+              (task) => task.status === "IN_PROGRESS",
+            ).length;
+            const timing = getOrderTimingState(
+              orderGroup.createdAt,
+              orderGroup.estimatedTime,
+              now,
+            );
+
+            return (
+              <article
+                key={orderGroup.orderId}
+                className={`kitchen-order-group ${timing.tone}`}
+              >
+                <header className="kitchen-order-group-header">
+                  <div>
+                    <span className="eyebrow">Zamówienie #{orderGroup.orderId}</span>
+                    <h2>Stolik {orderGroup.tableNumber || "Bez stolika"}</h2>
+                  </div>
+                  <span
+                    className={
+                      timing.tone !== "on-time"
+                        ? timing.tone
+                        : inProgressCount > 0
+                          ? "active"
+                          : "waiting"
+                    }
+                  >
+                    {timing.tone !== "on-time"
+                      ? `Opóźnienie ${timing.delayMinutes} min`
+                      : inProgressCount > 0
+                      ? `W trakcie: ${inProgressCount}`
+                      : `Oczekuje: ${orderGroup.tasks.length}`}
+                  </span>
+                </header>
+
+                <div className="kitchen-order-task-list">
+                  {orderGroup.tasks.map((task, taskIndex) => {
+                    const isInProgress = task.status === "IN_PROGRESS";
+                    const isBlocked = !isInProgress && !task.can_start;
+                    const elapsedText = task.started_at
+                      ? getElapsedTimeText(task.started_at)
+                      : null;
+                    const previousTask = orderGroup.tasks[taskIndex - 1];
+                    const startsCourse =
+                      taskIndex === 0 || previousTask.course_number !== task.course_number;
+
+                    return (
+                      <Fragment key={task.id}>
+                        {startsCourse && (
+                          <div className="course-group-divider kitchen-task-course-divider">
+                            <span>Kurs {task.course_number}</span>
+                          </div>
+                        )}
+                        <section
+                          className={`kitchen-order-task ${
+                            isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
+                          }`}
+                        >
+                        <div className="kitchen-order-task-meta">
+                          <span>
+                            {task.quantity}x {task.product_name}
+                          </span>
+                          <span>Kurs {task.course_number}</span>
+                        </div>
+
+                        <div className="kitchen-order-task-title">
+                          <div>
+                            <h3>{task.step_name || "Przygotowanie"}</h3>
+                            {isChef && selectedSectionId === undefined && (
+                              <small>{getSectionName(task.kitchen_section_id)}</small>
+                            )}
+                          </div>
+                          {task.step_description && (
+                            <button
+                              type="button"
+                              className="kitchen-task-info-button"
+                              aria-label={`Informacje o kroku: ${task.step_name || "Przygotowanie"}`}
+                              onClick={() => setInfoTaskId(task.id)}
+                            >
+                              <Info aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
+
+                        {task.notes && (
+                          <div className="kitchen-task-notes">UWAGA: {task.notes}</div>
+                        )}
+
+                        {isBlocked && task.blocked_by_step_name && (
+                          <div className="kitchen-task-dependency">
+                            <LockKeyhole aria-hidden="true" />
+                            <span>Czeka na: {task.blocked_by_step_name}</span>
+                          </div>
+                        )}
+
+                        <footer className="kitchen-order-task-footer">
+                          <span>
+                            <Clock3 aria-hidden="true" />
+                            {isInProgress && elapsedText
+                              ? `W toku ${elapsedText}`
+                              : task.estimated_time
+                                ? `${task.estimated_time} min`
+                                : "Bez czasu"}
+                          </span>
+                          {isInProgress ? (
+                            <button
+                              type="button"
+                              className="kitchen-task-action complete"
+                              onClick={() => void handleCompleteTask(task.id)}
+                            >
+                              <Check aria-hidden="true" />
+                              Zakończ
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              className="kitchen-task-action start"
+                              disabled={!task.can_start}
+                              onClick={() => void handleStartTask(task.id)}
+                            >
+                              {isBlocked ? (
+                                <LockKeyhole aria-hidden="true" />
+                              ) : (
+                                <Play aria-hidden="true" />
+                              )}
+                              {isBlocked ? "Zablokowane" : "Rozpocznij"}
+                            </button>
+                          )}
+                        </footer>
+                        </section>
+                      </Fragment>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })}
+
+          {sectionTaskOrders.length === 0 && (
+            <div className="empty-orders-state kitchen-order-board-empty">
+              Brak aktywnych zadań w tej sekcji.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Previous column view kept out of the render path while grouped tickets are active. */}
+      {false && isCook && (!isChef || chefTab === "MONITOR") && (
         <div
           style={{
             display: "flex",
@@ -1253,4 +1445,41 @@ export function KitchenPage() {
       `}</style>
     </section>
   );
+}
+
+type SectionTaskOrderGroup = {
+  orderId: number;
+  tableNumber: string | null;
+  createdAt: string;
+  estimatedTime: number | null;
+  tasks: KitchenSectionTask[];
+};
+
+function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrderGroup[] {
+  const groups = new Map<number, SectionTaskOrderGroup>();
+
+  for (const task of tasks) {
+    const group = groups.get(task.order_id) ?? {
+      orderId: task.order_id,
+      tableNumber: task.table_number,
+      createdAt: task.order_created_at,
+      estimatedTime: task.order_estimated_time,
+      tasks: [],
+    };
+    group.tasks.push(task);
+    groups.set(task.order_id, group);
+  }
+
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    tasks: [...group.tasks].sort((first, second) => {
+      if (first.course_number !== second.course_number) {
+        return first.course_number - second.course_number;
+      }
+      if (first.order_item_id !== second.order_item_id) {
+        return first.order_item_id - second.order_item_id;
+      }
+      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+    }),
+  }));
 }

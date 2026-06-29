@@ -323,7 +323,7 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
             table_number = table.table_number
 
     await websocket_manager.broadcast_many(
-        channels=["waiters", "kitchen", "bar", "floor"],
+        channels=["waiters", "kitchen", "bar", "floor", "public_qr"],
         event="kitchen_order_ready",
         data={
             "order_id": order.id,
@@ -331,9 +331,120 @@ async def complete_kitchen_order(order_id: int, db: DbSession, current_user: Cur
             "table_number": table_number,
             "waiter_id": order.waiter_id,
             "department": "KITCHEN",
+            "public_status": "READY",
         },
     )
     return {"success": True}
+
+
+@router.post("/kitchen/orders/{order_id}/courses/{course_number}/complete")
+async def complete_kitchen_course(
+    order_id: int,
+    course_number: int,
+    db: DbSession,
+    current_user: CurrentUser,
+):
+    _require_order_queue_access(current_user)
+    if course_number <= 0:
+        raise_bad_request(ValueError("Course number must be greater than zero."))
+
+    bar_section_id = await _get_bar_section_id(db)
+    result = await db.execute(
+        select(Order)
+        .options(selectinload(Order.items).selectinload(OrderItem.kitchen_tasks))
+        .where(Order.id == order_id)
+    )
+    order = result.scalar_one_or_none()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.status != "OPEN":
+        raise_bad_request(ValueError("Only an open order can have a course issued."))
+
+    kitchen_items: list[tuple[OrderItem, list[KitchenTask]]] = []
+    for item in order.items:
+        item_kitchen_tasks = [
+            task
+            for task in item.kitchen_tasks
+            if bar_section_id is None or task.kitchen_section_id != bar_section_id
+        ]
+        if item_kitchen_tasks:
+            kitchen_items.append((item, item_kitchen_tasks))
+
+    ready_statuses = {"KITCHEN_READY", "READY", "COMPLETED"}
+    pending_courses = sorted(
+        {
+            item.course_number
+            for item, _tasks in kitchen_items
+            if item.status not in ready_statuses
+        }
+    )
+    if not pending_courses:
+        return {"success": True, "course_number": course_number}
+    if course_number != pending_courses[0]:
+        raise_bad_request(
+            ValueError(f"Course {pending_courses[0]} must be issued first."),
+        )
+
+    course_items = [
+        (item, tasks)
+        for item, tasks in kitchen_items
+        if item.course_number == course_number
+    ]
+    if not course_items:
+        raise_bad_request(ValueError("Order has no kitchen items in this course."))
+    if any(
+        task.status != "COMPLETED"
+        for _item, tasks in course_items
+        for task in tasks
+    ):
+        raise_bad_request(
+            ValueError("All kitchen tasks in this course must be completed before issuing it."),
+        )
+
+    for item, _tasks in course_items:
+        item.status = (
+            "READY"
+            if all(task.status == "COMPLETED" for task in item.kitchen_tasks)
+            else "KITCHEN_READY"
+        )
+        db.add(item)
+
+    await db.commit()
+
+    table_number = None
+    if order.table_id:
+        from app.crud import restaurant_table as crud_table
+
+        table = await crud_table.get(db, order.table_id)
+        if table:
+            table_number = table.table_number
+
+    event_data = {
+        "order_id": order.id,
+        "table_id": order.table_id,
+        "table_number": table_number,
+        "waiter_id": order.waiter_id,
+        "department": "KITCHEN",
+        "course_number": course_number,
+    }
+    await websocket_manager.broadcast_many(
+        channels=["waiters", "kitchen"],
+        event="kitchen_course_ready",
+        data=event_data,
+    )
+
+    all_kitchen_courses_issued = all(
+        item.status in ready_statuses
+        for item, _tasks in kitchen_items
+    )
+    if all_kitchen_courses_issued:
+        await websocket_manager.broadcast_many(
+            channels=["public_qr"],
+            event="kitchen_order_ready",
+            data={**event_data, "public_status": "READY"},
+        )
+
+    return {"success": True, "course_number": course_number}
 
 
 @router.get("/kitchen/tasks/active", response_model=list[KitchenSectionTaskRead])
@@ -379,20 +490,46 @@ async def list_active_section_tasks(
     ).order_by(Order.created_at.asc(), OrderItem.position.asc())
 
     result = await db.execute(query)
-    tasks = result.scalars().all()
+    tasks = list(result.scalars().all())
+
+    all_tasks_by_item_id: dict[int, list[KitchenTask]] = {}
+    order_item_ids = {task.order_item_id for task in tasks}
+    if order_item_ids:
+        all_tasks_result = await db.execute(
+            select(KitchenTask)
+            .where(KitchenTask.order_item_id.in_(order_item_ids))
+            .options(selectinload(KitchenTask.product_kitchen_step))
+        )
+        for item_task in all_tasks_result.scalars().all():
+            all_tasks_by_item_id.setdefault(item_task.order_item_id, []).append(item_task)
 
     response = []
+    allow_new = bar_section_id is not None and target_section_id == bar_section_id
     for task in tasks:
         item = task.order_item
         order = item.order
         step_name = task.product_kitchen_step.name if task.product_kitchen_step else None
         step_description = task.product_kitchen_step.description if task.product_kitchen_step else None
+        step_sequence = task.product_kitchen_step.sequence if task.product_kitchen_step else None
+        depends_on_sequence = (
+            task.product_kitchen_step.depends_on_sequence
+            if task.product_kitchen_step
+            else None
+        )
+        can_start, blocked_by_step_name = kitchen_service.get_task_start_state(
+            task=task,
+            tasks=all_tasks_by_item_id.get(task.order_item_id, [task]),
+            allow_new=allow_new,
+        )
 
         response.append(
             KitchenSectionTaskRead(
                 id=task.id,
                 order_id=order.id,
                 order_item_id=item.id,
+                kitchen_section_id=task.kitchen_section_id,
+                order_created_at=order.created_at,
+                order_estimated_time=order.estimated_time,
                 table_number=order.table.table_number if order.table else None,
                 product_name=item.product.name,
                 quantity=item.quantity,
@@ -402,6 +539,10 @@ async def list_active_section_tasks(
                 estimated_time=task.estimated_time,
                 step_name=step_name,
                 step_description=step_description,
+                step_sequence=step_sequence,
+                depends_on_sequence=depends_on_sequence,
+                can_start=can_start,
+                blocked_by_step_name=blocked_by_step_name,
                 started_at=task.started_at,
                 completed_at=task.completed_at,
             )

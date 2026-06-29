@@ -616,20 +616,24 @@ def test_create_pending_qr_order_rejects_occupied_table():
 
     class FakeDb:
         def __init__(self):
+            self.execute_count = 0
             self.added: list[Any] = []
 
         async def execute(self, _statement):
-            return FakeResult(
-                RestaurantTable(
-                    id=1,
-                    table_number="A1",
-                    current_guests=2,
-                    status="OCCUPIED",
-                    qr_code_url="http://localhost:3000/qr/a1-token",
-                    qr_token="a1-token",
-                    is_active=True,
-                ),
-            )
+            self.execute_count += 1
+            if self.execute_count == 1:
+                return FakeResult(
+                    RestaurantTable(
+                        id=1,
+                        table_number="A1",
+                        current_guests=2,
+                        status="OCCUPIED",
+                        qr_code_url="http://localhost:3000/qr/a1-token",
+                        qr_token="a1-token",
+                        is_active=True,
+                    ),
+                )
+            return FakeResult(None)
 
         def add(self, obj: Any):
             self.added.append(obj)
@@ -658,7 +662,7 @@ def test_create_pending_qr_order_rejects_occupied_table():
     assert db.added == []
 
 
-def test_create_pending_qr_order_rejects_table_with_active_order():
+def test_create_pending_qr_order_uses_active_order_as_qr_parent():
     class FakeResult:
         def __init__(self, value: Any):
             self.value = value
@@ -686,6 +690,9 @@ def test_create_pending_qr_order_rejects_table_with_active_order():
                     ),
                 )
 
+            if self.execute_count == 2:
+                return FakeResult(None)
+
             return FakeResult(make_order())
 
         def add(self, obj: Any):
@@ -693,25 +700,17 @@ def test_create_pending_qr_order_rejects_table_with_active_order():
 
     db = FakeDb()
 
-    try:
-        asyncio.run(
-            order_service.create_pending_qr_order(
-                cast(AsyncSession, db),
-                table_id=1,
-                guest_count=2,
-                items=[
-                    OrderItemRequest(
-                        product_id=1,
-                        quantity=1,
-                    ),
-                ],
-            ),
+    table, parent_order = asyncio.run(
+        order_service._ensure_table_accepts_qr_order(
+            cast(AsyncSession, db),
+            table_id=1,
+            order_code="1",
         )
-    except ValueError as exc:
-        assert str(exc) == "Restaurant table already has an active order."
-    else:
-        raise AssertionError("Expected active table order to reject QR order.")
+    )
 
+    assert table.id == 1
+    assert parent_order is not None
+    assert parent_order.status == "OPEN"
     assert db.added == []
 
 

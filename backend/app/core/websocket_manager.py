@@ -5,7 +5,7 @@ from starlette.websockets import WebSocketState
 
 
 class WebSocketManager:
-    allowed_channels = {"waiters", "kitchen", "bar", "floor", "managers"}
+    allowed_channels = {"waiters", "kitchen", "bar", "floor", "managers", "public_qr"}
 
     def __init__(self) -> None:
         self._connections: dict[str, set[WebSocket]] = {

@@ -93,6 +93,48 @@ class KitchenService:
             )
         ]
 
+    def get_task_start_state(
+        self,
+        *,
+        task: KitchenTask,
+        tasks: list[KitchenTask],
+        allow_new: bool = False,
+    ) -> tuple[bool, str | None]:
+        startable_statuses = {"PENDING"}
+        if allow_new:
+            startable_statuses.add("NEW")
+        if task.status not in startable_statuses:
+            return False, None
+
+        depends_on_sequence = self._depends_on_sequence(task)
+        if depends_on_sequence is None:
+            return True, None
+
+        dependency_tasks = [
+            dependency
+            for dependency in tasks
+            if self._step_sequence(dependency) == depends_on_sequence
+        ]
+        if dependency_tasks and all(
+            dependency.status == "COMPLETED" for dependency in dependency_tasks
+        ):
+            return True, None
+
+        blocking_step = next(
+            (
+                dependency.product_kitchen_step
+                for dependency in dependency_tasks
+                if dependency.product_kitchen_step is not None
+            ),
+            None,
+        )
+        blocking_name = (
+            blocking_step.name
+            if blocking_step is not None
+            else f"Krok {depends_on_sequence}"
+        )
+        return False, blocking_name
+
     async def _broadcast_task_event(
         self,
         *,
@@ -100,7 +142,7 @@ class KitchenService:
         task: KitchenTask,
     ) -> None:
         await websocket_manager.broadcast_many(
-            channels=["kitchen", "bar", "waiters"],
+            channels=["kitchen", "bar", "waiters", "public_qr"],
             event=event,
             data={
                 "task_id": task.id,
@@ -159,7 +201,7 @@ class KitchenService:
             await db.commit()
 
         await websocket_manager.broadcast_many(
-            channels=channels,
+            channels=list(dict.fromkeys([*channels, "public_qr"])),
             event=event,
             data={
                 "order_id": order.id,
@@ -167,6 +209,7 @@ class KitchenService:
                 "table_number": order.table.table_number if order.table else None,
                 "waiter_id": order.waiter_id,
                 "department": department,
+                "public_status": "READY",
             },
         )
         return True

@@ -29,6 +29,23 @@ async def websocket_endpoint(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 
+    if channel == "public_qr":
+        await websocket_manager.connect(channel=channel, websocket=websocket)
+        await websocket.send_json(
+            {
+                "event": "connected",
+                "data": {
+                    "channel": channel,
+                },
+            },
+        )
+        try:
+            while True:
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            websocket_manager.disconnect(channel=channel, websocket=websocket)
+        return
+
     if token is None:
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return

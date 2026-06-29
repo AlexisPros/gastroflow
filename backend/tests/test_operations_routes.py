@@ -345,6 +345,36 @@ def test_kitchen_task_start_starts_parallel_steps(monkeypatch):
     ]
 
 
+def test_kitchen_task_start_state_blocks_dependent_step():
+    parent_step = make_product_step(id=1, sequence=1)
+    child_step = make_product_step(id=2, sequence=2, depends_on_sequence=1)
+    parent_task = make_task_for_step(id=1, step=parent_step, status="IN_PROGRESS")
+    child_task = make_task_for_step(id=2, step=child_step)
+
+    can_start, blocked_by = kitchen_service.get_task_start_state(
+        task=child_task,
+        tasks=[parent_task, child_task],
+    )
+
+    assert can_start is False
+    assert blocked_by == "Step 1"
+
+
+def test_kitchen_task_start_state_unlocks_after_dependency_completion():
+    parent_step = make_product_step(id=1, sequence=1)
+    child_step = make_product_step(id=2, sequence=2, depends_on_sequence=1)
+    parent_task = make_task_for_step(id=1, step=parent_step, status="COMPLETED")
+    child_task = make_task_for_step(id=2, step=child_step)
+
+    can_start, blocked_by = kitchen_service.get_task_start_state(
+        task=child_task,
+        tasks=[parent_task, child_task],
+    )
+
+    assert can_start is True
+    assert blocked_by is None
+
+
 def test_bartender_can_start_new_bar_task_without_starting_kitchen_task(monkeypatch):
     bar_step = make_product_step(id=1, sequence=1)
     kitchen_step = make_product_step(id=2, sequence=1)
@@ -587,17 +617,18 @@ def test_bar_ready_event_ignores_unfinished_kitchen_tasks(monkeypatch):
     assert db.commits == 1
     assert events == [
         {
-            "channels": ["waiters", "bar"],
-            "event": "bar_order_ready",
-            "data": {
-                "order_id": 10,
-                "table_id": 3,
-                "table_number": "11",
-                "waiter_id": 5,
-                "department": "BAR",
-            },
-        }
-    ]
+                "channels": ["waiters", "bar", "public_qr"],
+                "event": "bar_order_ready",
+                "data": {
+                    "order_id": 10,
+                    "table_id": 3,
+                    "table_number": "11",
+                    "waiter_id": 5,
+                    "department": "BAR",
+                    "public_status": "READY",
+                },
+            }
+        ]
 
 
 def test_bartender_completion_checks_bar_order_readiness(monkeypatch):
@@ -764,14 +795,94 @@ def test_kitchen_ready_event_does_not_wait_for_bar(monkeypatch):
     assert bar_item.status == "IN_PROGRESS"
     assert events == [
         {
-            "channels": ["waiters", "kitchen", "bar", "floor"],
-            "event": "kitchen_order_ready",
+                "channels": ["waiters", "kitchen", "bar", "floor", "public_qr"],
+                "event": "kitchen_order_ready",
+                "data": {
+                    "order_id": 10,
+                    "table_id": 3,
+                    "table_number": "11",
+                    "waiter_id": 5,
+                    "department": "KITCHEN",
+                    "public_status": "READY",
+                },
+            }
+        ]
+
+
+def test_kitchen_course_issue_only_releases_selected_course(monkeypatch):
+    first_task = make_kitchen_task()
+    first_task.id = 1
+    first_task.order_item_id = 1
+    first_task.kitchen_section_id = 2
+    first_task.status = "COMPLETED"
+
+    second_task = make_kitchen_task()
+    second_task.id = 2
+    second_task.order_item_id = 2
+    second_task.kitchen_section_id = 2
+    second_task.status = "COMPLETED"
+
+    first_item = SimpleNamespace(
+        status="PENDING",
+        course_number=1,
+        kitchen_tasks=[first_task],
+    )
+    second_item = SimpleNamespace(
+        status="PENDING",
+        course_number=2,
+        kitchen_tasks=[second_task],
+    )
+    order = SimpleNamespace(
+        id=10,
+        table_id=3,
+        waiter_id=5,
+        status="OPEN",
+        items=[first_item, second_item],
+    )
+
+    class FakeCourseSession(FakeReadySession):
+        async def execute(self, _statement: Any) -> FakeRouteResult:
+            return FakeRouteResult(scalar=order)
+
+    events: list[dict[str, Any]] = []
+
+    async def get_bar_section_id(_db):
+        return 7
+
+    async def get_table(_db, id: int):
+        assert id == 3
+        return SimpleNamespace(table_number="11")
+
+    async def broadcast_many(*, channels, event, data):
+        events.append({"channels": channels, "event": event, "data": data})
+
+    monkeypatch.setattr(kitchen_routes, "_get_bar_section_id", get_bar_section_id)
+    monkeypatch.setattr(crud_restaurant_table, "get", get_table)
+    monkeypatch.setattr(websocket_manager, "broadcast_many", broadcast_many)
+
+    response = asyncio.run(
+        kitchen_routes.complete_kitchen_course(
+            10,
+            1,
+            cast(Any, FakeCourseSession()),
+            make_user("WYDAWKA"),
+        )
+    )
+
+    assert response == {"success": True, "course_number": 1}
+    assert first_item.status == "READY"
+    assert second_item.status == "PENDING"
+    assert events == [
+        {
+            "channels": ["waiters", "kitchen"],
+            "event": "kitchen_course_ready",
             "data": {
                 "order_id": 10,
                 "table_id": 3,
                 "table_number": "11",
                 "waiter_id": 5,
                 "department": "KITCHEN",
+                "course_number": 1,
             },
         }
     ]

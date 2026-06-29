@@ -208,6 +208,7 @@ class OrderService:
         table_id: int,
         guest_count: int,
         items: list[OrderItemRequest],
+        order_code: str | None = None,
     ) -> Order:
         if guest_count <= 0:
             raise ValueError("Guest count must be greater than zero.")
@@ -215,7 +216,11 @@ class OrderService:
         if not items:
             raise ValueError("Order must contain at least one item.")
 
-        table = await self._ensure_table_accepts_qr_order(db, table_id=table_id)
+        table, parent_order = await self._ensure_table_accepts_qr_order(
+            db,
+            table_id=table_id,
+            order_code=order_code,
+        )
 
         order = Order(
             table_id=table_id,
@@ -223,6 +228,7 @@ class OrderService:
             guest_count=guest_count,
             source="QR",
             status="PENDING_CONFIRMATION",
+            qr_parent_order_id=parent_order.id if parent_order is not None else None,
             total_amount=Decimal("0.00"),
         )
         db.add(order)
@@ -241,7 +247,8 @@ class OrderService:
         order.total_amount = total_amount
         order.subtotal_amount = total_amount
         order.discount_amount = Decimal("0.00")
-        table.status = "PENDING_ORDER"
+        if parent_order is None:
+            table.status = "PENDING_ORDER"
 
         db.add(table)
         db.add(order)
@@ -258,6 +265,8 @@ class OrderService:
                 "total_amount": str(order.total_amount),
                 "status": order.status,
                 "table_status": table.status,
+                "is_addition": parent_order is not None,
+                "target_order_id": parent_order.id if parent_order is not None else None,
             },
         )
         return order
@@ -279,11 +288,13 @@ class OrderService:
         order.waiter_id = waiter_id
         order.status = "REJECTED"
 
-        await self._set_order_table_status(
-            db,
-            order=order,
-            status="FREE",
-        )
+        is_addition = order.qr_parent_order_id is not None
+        if not is_addition:
+            await self._set_order_table_status(
+                db,
+                order=order,
+                status="FREE",
+            )
         db.add(
             OrderActionLog(
                 order_id=order.id,
@@ -296,14 +307,17 @@ class OrderService:
         await db.commit()
         await db.refresh(order)
         await websocket_manager.broadcast_many(
-            channels=["waiters", "floor"],
+            channels=["waiters", "floor", "public_qr"],
             event="qr_order_rejected",
             data={
                 "order_id": order.id,
                 "table_id": order.table_id,
                 "waiter_id": order.waiter_id,
                 "status": order.status,
-                "table_status": "FREE",
+                "table_status": "OCCUPIED" if is_addition else "FREE",
+                "is_addition": is_addition,
+                "target_order_id": order.qr_parent_order_id,
+                "public_status": "REJECTED",
             },
         )
         return order
@@ -599,7 +613,8 @@ class OrderService:
         db: AsyncSession,
         *,
         table_id: int,
-    ) -> RestaurantTable:
+        order_code: str | None = None,
+    ) -> tuple[RestaurantTable, Order | None]:
         result = await db.execute(
             select(RestaurantTable)
             .where(RestaurantTable.id == table_id)
@@ -613,21 +628,37 @@ class OrderService:
         if not table.is_active:
             raise ValueError("Restaurant table is not active.")
 
-        if table.status != "FREE":
-            raise ValueError("Restaurant table is not free.")
+        pending_order_result = await db.execute(
+            select(Order)
+            .where(
+                Order.table_id == table_id,
+                Order.status == "PENDING_CONFIRMATION",
+            )
+            .limit(1),
+        )
+        if pending_order_result.scalar_one_or_none() is not None:
+            raise ValueError("Restaurant table already has a QR order waiting for confirmation.")
 
         active_order_result = await db.execute(
             select(Order)
             .where(
                 Order.table_id == table_id,
-                Order.status.in_(["PENDING_CONFIRMATION", "OPEN"]),
+                Order.status.in_(["OPEN", "IN_PROGRESS"]),
             )
+            .order_by(Order.created_at.asc())
             .limit(1),
         )
-        if active_order_result.scalar_one_or_none() is not None:
-            raise ValueError("Restaurant table already has an active order.")
+        parent_order = active_order_result.scalar_one_or_none()
+        if parent_order is not None:
+            normalized_code = (order_code or "").strip()
+            if normalized_code != str(parent_order.id):
+                raise ValueError("Order number is required for occupied table.")
+            return table, parent_order
 
-        return table
+        if table.status != "FREE":
+            raise ValueError("Restaurant table is not free.")
+
+        return table, None
 
     async def _ensure_table_accepts_waiter_order(
         self,
@@ -709,6 +740,13 @@ class OrderService:
         if order.status != "PENDING_CONFIRMATION":
             raise ValueError("QR order is not pending confirmation.")
 
+        if order.qr_parent_order_id is not None:
+            return await self._confirm_pending_qr_addition(
+                db,
+                order=order,
+                waiter_id=waiter_id,
+            )
+
         result = await db.execute(
             select(OrderItem).where(OrderItem.order_id == order.id),
         )
@@ -753,7 +791,7 @@ class OrderService:
         await db.refresh(order)
         table_number = await self._get_order_table_number(db, order=order)
         await websocket_manager.broadcast_many(
-            channels=["waiters", "kitchen", "bar", "floor"],
+            channels=["waiters", "kitchen", "bar", "floor", "public_qr"],
             event="qr_order_confirmed",
             data={
                 "order_id": order.id,
@@ -764,9 +802,134 @@ class OrderService:
                 "status": order.status,
                 "estimated_time": order.estimated_time,
                 "table_status": "OCCUPIED",
+                "public_status": "PREPARING",
             },
         )
         return order
+
+    async def _confirm_pending_qr_addition(
+        self,
+        db: AsyncSession,
+        *,
+        order: Order,
+        waiter_id: int,
+    ) -> Order:
+        target_order = await db.get(Order, order.qr_parent_order_id)
+        if target_order is None or target_order.status not in {"OPEN", "IN_PROGRESS"}:
+            raise ValueError("Original order is no longer active.")
+
+        result = await db.execute(
+            select(OrderItem)
+            .where(OrderItem.order_id == order.id)
+            .order_by(OrderItem.position, OrderItem.id),
+        )
+        order_items = list(result.scalars().all())
+        if not order_items:
+            raise ValueError("QR order must contain at least one item.")
+
+        shift = await crud_employee_shift.get_open_by_user(db, user_id=waiter_id)
+        if shift is None:
+            raise ValueError("Start shift first.")
+
+        existing_items_result = await db.execute(
+            select(OrderItem).where(OrderItem.order_id == target_order.id),
+        )
+        existing_items = list(existing_items_result.scalars().all())
+        next_position = max((item.position for item in existing_items), default=-1) + 1
+
+        item_estimates: list[int] = []
+        added_total = Decimal("0.00")
+        for index, order_item in enumerate(order_items):
+            order_item.order_id = target_order.id
+            order_item.position = next_position + index
+            order_item.status = "NEW"
+            added_total += order_item.total_price
+            db.add(order_item)
+            item_estimated_time = await self._create_kitchen_task_for_item(
+                db,
+                order_item=order_item,
+            )
+            if item_estimated_time is not None:
+                item_estimates.append(item_estimated_time)
+
+        target_order.subtotal_amount += added_total
+        target_order.total_amount += added_total
+        if item_estimates:
+            target_order.estimated_time = max(
+                [target_order.estimated_time or 0, *item_estimates],
+            )
+
+        order.waiter_id = waiter_id
+        order.shift_id = shift.id
+        order.status = "MERGED"
+
+        db.add(
+            OrderActionLog(
+                order_id=target_order.id,
+                user_id=waiter_id,
+                action_type="QR_ADDITION_CONFIRMED",
+                description=f"QR additional order #{order.id} confirmed and added.",
+            ),
+        )
+        db.add(order)
+        db.add(target_order)
+        await db.commit()
+        await db.refresh(target_order)
+        table_number = await self._get_order_table_number(db, order=target_order)
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "floor", "public_qr"],
+            event="qr_order_confirmed",
+            data={
+                "order_id": order.id,
+                "target_order_id": target_order.id,
+                "table_id": target_order.table_id,
+                "table_number": table_number,
+                "waiter_id": target_order.waiter_id,
+                "shift_id": target_order.shift_id,
+                "status": target_order.status,
+                "table_status": "OCCUPIED",
+                "is_addition": True,
+                "public_status": "PREPARING",
+            },
+        )
+        await websocket_manager.broadcast_many(
+            channels=["waiters", "kitchen", "bar"],
+            event="order_items_added",
+            data={
+                "order_id": target_order.id,
+                "qr_order_id": order.id,
+                "table_id": target_order.table_id,
+                "table_number": table_number,
+                "status": target_order.status,
+                "departments": await self._get_order_item_departments(
+                    db,
+                    order_items=order_items,
+                ),
+            },
+        )
+        return target_order
+
+    async def _get_order_item_departments(
+        self,
+        db: AsyncSession,
+        *,
+        order_items: list[OrderItem],
+    ) -> list[str]:
+        product_ids = {
+            order_item.product_id
+            for order_item in order_items
+            if order_item.product_id is not None
+        }
+        if not product_ids:
+            return []
+
+        result = await db.execute(
+            select(ProductCategory.department)
+            .join(Product, Product.category_id == ProductCategory.id)
+            .where(Product.id.in_(product_ids))
+            .distinct(),
+        )
+        return sorted(set(result.scalars().all()))
 
     async def transfer_order(
         self,

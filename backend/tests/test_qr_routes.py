@@ -163,10 +163,12 @@ def test_create_qr_pending_order_reaches_service(monkeypatch):
         *,
         table_id: int,
         guest_count: int,
+        order_code: str | None,
         items,
     ):
         assert table_id == 1
         assert guest_count == 2
+        assert order_code is None
         assert len(items) == 1
         assert items[0].product_id == 10
         assert items[0].quantity == 2
