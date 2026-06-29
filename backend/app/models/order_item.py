@@ -81,6 +81,12 @@ class OrderItem(Base):
         nullable=True,
     )
 
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=datetime.utcnow,
+    )
+
     order: Mapped[Order] = relationship(
         "Order",
         back_populates="items",

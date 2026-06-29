@@ -22,6 +22,7 @@ export type KitchenOrderItem = {
   notes: string | null;
   course_number: number;
   status: string;
+  created_at: string;
   kitchen_tasks: KitchenTask[];
 };
 
@@ -42,6 +43,7 @@ export type KitchenSectionTask = {
   order_item_id: number;
   kitchen_section_id: number;
   order_created_at: string;
+  item_created_at: string;
   order_estimated_time: number | null;
   table_number: string | null;
   product_name: string;

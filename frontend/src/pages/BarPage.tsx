@@ -800,7 +800,7 @@ function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] 
     const group = groups.get(task.order_id) ?? {
       orderId: task.order_id,
       tableNumber: task.table_number,
-      createdAt: task.order_created_at,
+      createdAt: task.item_created_at || task.order_created_at,
       estimatedTime: task.order_estimated_time,
       tasks: [],
     };
@@ -808,16 +808,28 @@ function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] 
     groups.set(task.order_id, group);
   }
 
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    tasks: [...group.tasks].sort((first, second) => {
-      if (first.course_number !== second.course_number) {
-        return first.course_number - second.course_number;
-      }
-      if (first.order_item_id !== second.order_item_id) {
-        return first.order_item_id - second.order_item_id;
-      }
-      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
-    }),
-  }));
+  return Array.from(groups.values()).map((group) => {
+    const activeTasks = group.tasks.filter((t) => t.status !== "COMPLETED");
+    const oldestItemCreatedAt = activeTasks.length > 0
+      ? activeTasks.reduce((oldest, t) => {
+          const tTime = new Date(t.item_created_at || t.order_created_at).getTime();
+          const oldestTime = new Date(oldest).getTime();
+          return tTime < oldestTime ? (t.item_created_at || t.order_created_at) : oldest;
+        }, activeTasks[0].item_created_at || activeTasks[0].order_created_at)
+      : group.createdAt;
+
+    return {
+      ...group,
+      createdAt: oldestItemCreatedAt,
+      tasks: [...group.tasks].sort((first, second) => {
+        if (first.course_number !== second.course_number) {
+          return first.course_number - second.course_number;
+        }
+        if (first.order_item_id !== second.order_item_id) {
+          return first.order_item_id - second.order_item_id;
+        }
+        return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+      }),
+    };
+  });
 }

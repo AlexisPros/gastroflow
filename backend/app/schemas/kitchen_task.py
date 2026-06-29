@@ -41,6 +41,7 @@ class KitchenOrderItemRead(OrmBaseModel):
     notes: str | None = None
     course_number: int
     status: str
+    created_at: datetime
     kitchen_tasks: list[KitchenTaskRead]
 
 
@@ -61,6 +62,7 @@ class KitchenSectionTaskRead(OrmBaseModel):
     order_item_id: int
     kitchen_section_id: int
     order_created_at: datetime
+    item_created_at: datetime
     order_estimated_time: int | None = None
     table_number: str | None = None
     product_name: str

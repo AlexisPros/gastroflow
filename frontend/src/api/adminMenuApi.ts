@@ -87,6 +87,7 @@ export type AdminProduct = {
   id: number;
   category_id: number;
   kitchen_section_id: number | null;
+  warehouse_id: number | null;
   name: string;
   description: string | null;
   image_url: string | null;
@@ -102,6 +103,7 @@ export type AdminProduct = {
 export type AdminProductPayload = {
   category_id: number;
   kitchen_section_id: number | null;
+  warehouse_id: number | null;
   name: string;
   description: string | null;
   image_url: string | null;

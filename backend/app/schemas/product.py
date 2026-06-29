@@ -7,6 +7,7 @@ from app.schemas.base import OrmBaseModel
 class ProductBase(OrmBaseModel):
     category_id: int
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str
     description: str | None = None
     image_url: str | None = None
@@ -23,6 +24,7 @@ class ProductCreate(ProductBase):
 class ProductUpdate(OrmBaseModel):
     category_id: int | None = None
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str | None = None
     description: str | None = None
     image_url: str | None = None

@@ -169,6 +169,7 @@ class AdminProductStepRead(BaseModel):
 class AdminProductBase(BaseModel):
     category_id: int
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str = Field(min_length=1, max_length=150)
     description: str | None = None
     image_url: str | None = None
@@ -188,6 +189,7 @@ class AdminProductCreate(AdminProductBase):
 class AdminProductUpdate(BaseModel):
     category_id: int | None = None
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str | None = Field(default=None, min_length=1, max_length=150)
     description: str | None = None
     image_url: str | None = None
@@ -204,6 +206,7 @@ class AdminProductRead(BaseModel):
     id: int
     category_id: int
     kitchen_section_id: int | None
+    warehouse_id: int | None
     name: str
     description: str | None
     image_url: str | None
@@ -460,6 +463,7 @@ async def create_product(body: AdminProductCreate, db: DbSession) -> AdminProduc
     product = Product(
         category_id=body.category_id,
         kitchen_section_id=body.kitchen_section_id,
+        warehouse_id=body.warehouse_id,
         name=body.name.strip(),
         description=body.description,
         image_url=body.image_url,
@@ -492,6 +496,7 @@ async def update_product(
     for field in [
         "category_id",
         "kitchen_section_id",
+        "warehouse_id",
         "name",
         "description",
         "image_url",
@@ -988,6 +993,7 @@ def _product_read(product: Product) -> AdminProductRead:
         id=product.id,
         category_id=product.category_id,
         kitchen_section_id=product.kitchen_section_id,
+        warehouse_id=product.warehouse_id,
         name=product.name,
         description=product.description,
         image_url=product.image_url,

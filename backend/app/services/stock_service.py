@@ -224,12 +224,11 @@ class StockService:
         *,
         order_id: int,
     ) -> list[StockMovement]:
-        warehouse = await self._get_default_warehouse(db)
-        if warehouse is None:
-            return []
+        default_warehouse = await self._get_default_warehouse(db)
 
         result = await db.execute(
             select(OrderItem)
+            .options(selectinload(OrderItem.product))
             .where(
                 OrderItem.order_id == order_id,
                 OrderItem.stock_consumed_at.is_(None),
@@ -238,6 +237,17 @@ class StockService:
         )
         movements: list[StockMovement] = []
         for order_item in result.scalars().all():
+            warehouse = None
+            if order_item.product and order_item.product.warehouse_id:
+                try:
+                    warehouse = await self._get_active_warehouse(db, order_item.product.warehouse_id)
+                except ValueError:
+                    pass
+            if warehouse is None:
+                warehouse = default_warehouse
+            if warehouse is None:
+                continue
+
             movements.extend(
                 await self._consume_order_item(
                     db,
@@ -253,16 +263,25 @@ class StockService:
         *,
         order_item_id: int,
     ) -> list[StockMovement]:
-        warehouse = await self._get_default_warehouse(db)
-        if warehouse is None:
-            return []
         result = await db.execute(
             select(OrderItem)
+            .options(selectinload(OrderItem.product))
             .where(OrderItem.id == order_item_id)
             .with_for_update(),
         )
         order_item = result.scalar_one_or_none()
         if order_item is None or order_item.stock_consumed_at is not None:
+            return []
+
+        warehouse = None
+        if order_item.product and order_item.product.warehouse_id:
+            try:
+                warehouse = await self._get_active_warehouse(db, order_item.product.warehouse_id)
+            except ValueError:
+                pass
+        if warehouse is None:
+            warehouse = await self._get_default_warehouse(db)
+        if warehouse is None:
             return []
         return await self._consume_order_item(db, order_item=order_item, warehouse=warehouse)
 

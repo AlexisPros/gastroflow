@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, RefreshCw, Pencil, Trash2, ShieldCheck, X } from "lucide-react";
 
 import {
   createAdminCategory,
@@ -31,6 +32,7 @@ import {
   type AdminProductStep,
 } from "../api/adminMenuApi";
 import { ApiError } from "../api/apiClient";
+import { getWarehouses, type Warehouse } from "../api/warehouseApi";
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
 
@@ -70,6 +72,8 @@ export function AdminMenuPage() {
   const [categoryForm, setCategoryForm] = useState<CategoryFormState>(() => createEmptyCategoryForm());
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [expandedCategoryIds, setExpandedCategoryIds] = useState<Set<number>>(() => new Set());
+  const [activeSection, setActiveSection] = useState<"menu" | "ingredients" | "modifiers" | "discounts">("menu");
+  const [warehouses, setWarehouses] = useState<Warehouse[]>([]);
   const [discountForm, setDiscountForm] = useState({
     id: null as number | null,
     name: "",
@@ -111,8 +115,12 @@ export function AdminMenuPage() {
     setIsLoading(true);
     setError(null);
     try {
-      const nextMenu = await getAdminMenu(token);
+      const [nextMenu, nextWarehouses] = await Promise.all([
+        getAdminMenu(token),
+        getWarehouses(token).catch(() => []),
+      ]);
       setMenu(nextMenu);
+      setWarehouses(nextWarehouses);
     } catch (exc) {
       setError(exc instanceof ApiError ? exc.message : "Nie udało się pobrać menu.");
     } finally {
@@ -364,141 +372,199 @@ export function AdminMenuPage() {
   }
 
   return (
-    <section className="admin-menu-page">
-      <header className="admin-menu-header">
+    <section className="warehouse-page">
+      <header className="warehouse-header">
         <div>
-          <span className="eyebrow">Admin</span>
+          <span className="eyebrow">Konfiguracja systemu</span>
           <h1>Edytor menu</h1>
         </div>
-        <button type="button" className="ghost-button" onClick={() => void loadMenu()}>
-          Odśwież
-        </button>
+        <div className="warehouse-header-actions">
+          <button type="button" className="icon-command" title="Odśwież" onClick={() => void loadMenu()}>
+            <RefreshCw size={18} />
+            Odśwież
+          </button>
+        </div>
       </header>
 
       {error && <p className="form-error">{error}</p>}
       {notice && <p className="form-notice">{notice}</p>}
 
-      <div className="admin-menu-grid">
-        <aside className="admin-panel">
-          <div className="admin-panel-heading split">
-            <h2>Kategorie</h2>
-            <button type="button" className="admin-primary" onClick={() => openNewCategory()}>
-              Nowa kategoria
-            </button>
-          </div>
+      <div className="warehouse-tabs" role="tablist" aria-label="Sekcje menu" style={{ marginBottom: "8px" }}>
+        <button
+          type="button"
+          className={activeSection === "menu" ? "active" : ""}
+          onClick={() => setActiveSection("menu")}
+        >
+          Kategorie i Produkty
+        </button>
+        <button
+          type="button"
+          className={activeSection === "ingredients" ? "active" : ""}
+          onClick={() => setActiveSection("ingredients")}
+        >
+          Słownik składników
+        </button>
+        <button
+          type="button"
+          className={activeSection === "modifiers" ? "active" : ""}
+          onClick={() => setActiveSection("modifiers")}
+        >
+          Modyfikatory dań
+        </button>
+        <button
+          type="button"
+          className={activeSection === "discounts" ? "active" : ""}
+          onClick={() => setActiveSection("discounts")}
+        >
+          System rabatów
+        </button>
+      </div>
 
-          <div className="admin-category-tree">
-            {rootCategories.map((category) => (
-              <div key={category.id} className={`admin-category-group ${!category.is_active ? "inactive" : ""}`}>
-                <div className="admin-category-row">
-                  <button
-                    type="button"
-                    className="admin-category-toggle"
-                    onClick={() => toggleExpandedCategory(category.id)}
-                    aria-label={expandedCategoryIds.has(category.id) ? "Zwiń podkategorie" : "Rozwiń podkategorie"}
-                  >
-                    {expandedCategoryIds.has(category.id) ? "−" : "+"}
-                  </button>
-                  <strong>{category.name}</strong>
-                  <small>{category.department === "BAR" ? "Bar" : "Dania"}</small>
-                  <CategoryActions
-                    category={category}
-                    onEdit={openExistingCategory}
-                    onCreateChild={openNewCategory}
-                    onToggle={toggleCategory}
-                    onDelete={removeCategory}
-                  />
-                </div>
-                {expandedCategoryIds.has(category.id) && (
-                  <div className="admin-category-children">
-                    {(childCategoriesByParent.get(category.id) ?? []).map((child) => (
-                      <div key={child.id} className={`admin-category-row child ${!child.is_active ? "inactive" : ""}`}>
-                        <span>{child.name}</span>
-                        <CategoryActions
-                          category={child}
-                          onEdit={openExistingCategory}
-                          onCreateChild={openNewCategory}
-                          onToggle={toggleCategory}
-                          onDelete={removeCategory}
-                        />
-                      </div>
-                    ))}
-                    {(childCategoriesByParent.get(category.id) ?? []).length === 0 && (
-                      <p className="admin-category-empty">Brak podkategorii.</p>
-                    )}
-                  </div>
-                )}
+      {activeSection === "menu" && (
+        <div className="warehouse-content-grid" style={{ gridTemplateColumns: "minmax(320px, 0.85fr) minmax(520px, 1.15fr)", alignItems: "stretch" }}>
+          <aside className="warehouse-section" style={{ minHeight: "520px" }}>
+            <div className="warehouse-section-heading">
+              <div>
+                <span className="eyebrow">Grupy produktów</span>
+                <h2>Kategorie</h2>
               </div>
-            ))}
-          </div>
-        </aside>
+              <button 
+                type="button" 
+                className="admin-primary" 
+                onClick={() => openNewCategory()}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", minHeight: "36px", padding: "0 12px", background: "var(--brand-green)", color: "#fff", borderColor: "var(--brand-green)", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}
+              >
+                <Plus size={16} /> Nowa kategoria
+              </button>
+            </div>
 
-        <main className="admin-panel">
-          <div className="admin-panel-heading split">
-            <h2>Produkty</h2>
-            <button
-              type="button"
-              className="admin-primary"
-              onClick={openNewProduct}
-            >
-              Nowy produkt
-            </button>
-          </div>
-
-          <div className="admin-product-list">
-            {menu.products.map((product) => {
-              const category = menu.categories.find((item) => item.id === product.category_id);
-              return (
-                <button
-                  key={product.id}
-                  type="button"
-                  className={`${selectedProductId === product.id ? "active" : ""} ${!product.is_active ? "inactive" : ""}`}
-                  onClick={() => openExistingProduct(product)}
-                >
-                  {product.image_url ? <img src={product.image_url} alt="" /> : <span />}
-                  <div>
-                    <strong>{product.name}</strong>
-                    <small>{category?.name ?? "Bez kategorii"} · {money.format(Number(product.price))}</small>
+            <div className="admin-category-tree">
+              {rootCategories.map((category) => (
+                <div key={category.id} className={`admin-category-group ${!category.is_active ? "inactive" : ""}`}>
+                  <div className="admin-category-row">
+                    <button
+                      type="button"
+                      className="admin-category-toggle"
+                      onClick={() => toggleExpandedCategory(category.id)}
+                      aria-label={expandedCategoryIds.has(category.id) ? "Zwiń podkategorie" : "Rozwiń podkategorie"}
+                    >
+                      {expandedCategoryIds.has(category.id) ? "−" : "+"}
+                    </button>
+                    <strong>{category.name}</strong>
+                    <small>{category.department === "BAR" ? "Bar" : "Dania"}</small>
+                    <CategoryActions
+                      category={category}
+                      onEdit={openExistingCategory}
+                      onCreateChild={openNewCategory}
+                      onToggle={toggleCategory}
+                      onDelete={removeCategory}
+                    />
                   </div>
-                </button>
-              );
-            })}
-          </div>
-        </main>
-      </div>
+                  {expandedCategoryIds.has(category.id) && (
+                    <div className="admin-category-children">
+                      {(childCategoriesByParent.get(category.id) ?? []).map((child) => (
+                        <div key={child.id} className={`admin-category-row child ${!child.is_active ? "inactive" : ""}`}>
+                          <span>{child.name}</span>
+                          <CategoryActions
+                            category={child}
+                            onEdit={openExistingCategory}
+                            onCreateChild={openNewCategory}
+                            onToggle={toggleCategory}
+                            onDelete={removeCategory}
+                          />
+                        </div>
+                      ))}
+                      {(childCategoriesByParent.get(category.id) ?? []).length === 0 && (
+                        <p className="admin-category-empty">Brak podkategorii.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </aside>
 
-      <div className="admin-aux-grid">
-        <section className="admin-panel">
-          <ReferenceEditor
-            title="Składniki"
-            items={menu.ingredients}
-            onCreate={createIngredient}
-            onSave={saveIngredient}
-            onDelete={(item) => token ? deleteAdminIngredient(token, item.id).then(loadMenu) : undefined}
-          />
-        </section>
+          <main className="warehouse-section" style={{ minHeight: "520px" }}>
+            <div className="warehouse-section-heading">
+              <div>
+                <span className="eyebrow">Oferta lokalu</span>
+                <h2>Produkty</h2>
+              </div>
+              <button
+                type="button"
+                className="admin-primary"
+                onClick={openNewProduct}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", minHeight: "36px", padding: "0 12px", background: "var(--brand-green)", color: "#fff", borderColor: "var(--brand-green)", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" }}
+              >
+                <Plus size={16} /> Nowy produkt
+              </button>
+            </div>
 
-        <section className="admin-panel">
-          <ModifierEditor
-            title="Modyfikatory"
-            items={menu.modifiers}
-            onCreate={createModifier}
-            onSave={saveModifier}
-            onDelete={(item) => token ? deleteAdminModifier(token, item.id).then(loadMenu) : undefined}
-          />
-        </section>
+            <div className="admin-product-list">
+              {menu.products.map((product) => {
+                const category = menu.categories.find((item) => item.id === product.category_id);
+                return (
+                  <button
+                    key={product.id}
+                    type="button"
+                    className={`${selectedProductId === product.id ? "active" : ""} ${!product.is_active ? "inactive" : ""}`}
+                    onClick={() => openExistingProduct(product)}
+                  >
+                    {product.image_url ? <img src={product.image_url} alt="" /> : <span />}
+                    <div>
+                      <strong>{product.name}</strong>
+                      <small>{category?.name ?? "Bez kategorii"} · {money.format(Number(product.price))}</small>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </main>
+        </div>
+      )}
 
-        <section className="admin-panel">
-          <DiscountEditor
-            discounts={menu.discounts}
-            form={discountForm}
-            onChange={setDiscountForm}
-            onSave={saveDiscount}
-            onEdit={setDiscountForm}
-            onDelete={removeDiscount}
-          />
-        </section>
-      </div>
+      {activeSection === "ingredients" && (
+        <div className="warehouse-content-grid" style={{ gridTemplateColumns: "1fr" }}>
+          <section className="warehouse-section" style={{ minHeight: "520px" }}>
+            <ReferenceEditor
+              title="Składniki"
+              items={menu.ingredients}
+              onCreate={createIngredient}
+              onSave={saveIngredient}
+              onDelete={(item) => token ? deleteAdminIngredient(token, item.id).then(loadMenu) : undefined}
+            />
+          </section>
+        </div>
+      )}
+
+      {activeSection === "modifiers" && (
+        <div className="warehouse-content-grid" style={{ gridTemplateColumns: "1fr" }}>
+          <section className="warehouse-section" style={{ minHeight: "520px" }}>
+            <ModifierEditor
+              title="Modyfikatory"
+              items={menu.modifiers}
+              onCreate={createModifier}
+              onSave={saveModifier}
+              onDelete={(item) => token ? deleteAdminModifier(token, item.id).then(loadMenu) : undefined}
+            />
+          </section>
+        </div>
+      )}
+
+      {activeSection === "discounts" && (
+        <div className="warehouse-content-grid" style={{ gridTemplateColumns: "1fr" }}>
+          <section className="warehouse-section" style={{ minHeight: "520px" }}>
+            <DiscountEditor
+              discounts={menu.discounts}
+              form={discountForm}
+              onChange={setDiscountForm}
+              onSave={saveDiscount}
+              onEdit={setDiscountForm}
+              onDelete={removeDiscount}
+            />
+          </section>
+        </div>
+      )}
 
       {isCategoryModalOpen && (
         <div className="admin-modal-backdrop">
@@ -676,6 +742,25 @@ export function AdminMenuPage() {
                 ))}
               </select>
             </label>
+            <label>
+              Magazyn do rozchodu składników
+              <select
+                value={form.warehouse_id ?? ""}
+                onChange={(event) =>
+                  setForm({
+                    ...form,
+                    warehouse_id: event.target.value ? Number(event.target.value) : null,
+                  })
+                }
+              >
+                <option value="">Użyj domyślnego magazynu</option>
+                {warehouses.filter((w) => w.is_active).map((w) => (
+                  <option key={w.id} value={w.id}>
+                    {w.name}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="wide">
               Opis
               <textarea
@@ -748,6 +833,7 @@ export function AdminMenuPage() {
       id: current.id ?? 0,
       category_id: current.category_id,
       kitchen_section_id: current.kitchen_section_id,
+      warehouse_id: current.warehouse_id,
       name: current.name,
       description: current.description,
       image_url: current.image_url,
@@ -795,24 +881,44 @@ function CategoryActions({
   onDelete: (category: AdminCategory) => Promise<void>;
 }) {
   return (
-    <span>
-      <button type="button" className="info-link" onClick={() => onEdit(category)}>
-        Edytuj
+    <span style={{ display: "inline-flex", gap: "6px", alignItems: "center", marginLeft: "auto" }}>
+      <button
+        type="button"
+        className="stock-edit-button"
+        title="Edytuj"
+        style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "4px" }}
+        onClick={() => onEdit(category)}
+      >
+        <Pencil size={15} />
       </button>
       {category.parent_category_id === null && (
-        <button type="button" className="success-link" onClick={() => onCreateChild(category.id)}>
-          Podkategoria
+        <button
+          type="button"
+          className="stock-edit-button"
+          title="Dodaj podkategorię"
+          style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "4px", color: "var(--brand-green)" }}
+          onClick={() => onCreateChild(category.id)}
+        >
+          <Plus size={15} />
         </button>
       )}
       <button
         type="button"
-        className={category.is_active ? "danger-link" : "success-link"}
+        className="stock-edit-button"
+        title={category.is_active ? "Dezaktywuj" : "Aktywuj"}
+        style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "4px", color: category.is_active ? "#e08b14" : "#1e6287" }}
         onClick={() => void onToggle(category)}
       >
-        {category.is_active ? "Dezaktywuj" : "Aktywuj"}
+        <ShieldCheck size={15} />
       </button>
-      <button type="button" className="danger-link" onClick={() => void onDelete(category)}>
-        Usuń
+      <button
+        type="button"
+        className="stock-delete-button"
+        title="Usuń"
+        style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "4px" }}
+        onClick={() => void onDelete(category)}
+      >
+        <Trash2 size={15} />
       </button>
     </span>
   );
@@ -1118,61 +1224,96 @@ function DiscountEditor({
   onDelete: (discount: AdminDiscount) => Promise<void>;
 }) {
   return (
-    <div className="admin-discounts">
-      <h2>Rabaty</h2>
-      <div className="admin-inline-form">
-        <input
-          placeholder="Nazwa rabatu"
-          value={form.name}
-          onChange={(event) => onChange({ ...form, name: event.target.value })}
-        />
-        <select value={form.type} onChange={(event) => onChange({ ...form, type: event.target.value })}>
-          <option value="PERCENT">Procent od rachunku</option>
-          <option value="FIXED">Kwota od rachunku</option>
-        </select>
-        <input
-          type="number"
-          step="0.01"
-          value={form.value}
-          onChange={(event) => onChange({ ...form, value: event.target.value })}
-        />
-        <label className="switch-row compact">
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
+      <div className="warehouse-section-heading">
+        <h2>Rabaty</h2>
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", background: "#f7fafc", padding: "16px", borderRadius: "8px", border: "1px dashed #cbd5e0", alignItems: "flex-end" }}>
+        <label style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 2, minWidth: "150px" }}>
+          <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#4a5568" }}>Nazwa rabatu</span>
+          <input
+            placeholder="np. Karta Stałego Klienta"
+            value={form.name}
+            onChange={(event) => onChange({ ...form, name: event.target.value })}
+            style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
+          />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: "4px", flex: 1, minWidth: "150px" }}>
+          <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#4a5568" }}>Typ rabatu</span>
+          <select 
+            value={form.type} 
+            onChange={(event) => onChange({ ...form, type: event.target.value })}
+            style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0", height: "38px" }}
+          >
+            <option value="PERCENT">Procent (%)</option>
+            <option value="FIXED">Kwota stała (PLN)</option>
+          </select>
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: "4px", width: "100px" }}>
+          <span style={{ fontSize: "0.8rem", fontWeight: "bold", color: "#4a5568" }}>Wartość</span>
+          <input
+            type="number"
+            step="0.01"
+            value={form.value}
+            onChange={(event) => onChange({ ...form, value: event.target.value })}
+            style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
+          />
+        </label>
+        <label className="switch-row compact" style={{ display: "flex", alignItems: "center", gap: "6px", height: "38px", margin: 0 }}>
           <input
             type="checkbox"
             checked={form.is_active}
             onChange={(event) => onChange({ ...form, is_active: event.target.checked })}
           />
-          Aktywny
+          <span style={{ fontSize: "0.85rem" }}>Aktywny</span>
         </label>
-        <button type="button" onClick={() => void onSave()}>
-          {form.id === null ? "Utwórz rabat" : "Zapisz rabat"}
-        </button>
-        <button
-          type="button"
-          className="admin-cancel-button"
-          onClick={() => onChange({ id: null, name: "", type: "PERCENT", value: "10.00", is_active: true })}
-        >
-          Anuluj
-        </button>
-      </div>
-      <div className="admin-discount-list">
-        {discounts.map((discount) => (
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button 
+            type="button" 
+            className="admin-primary" 
+            style={{ height: "38px", padding: "0 16px", borderRadius: "6px", fontWeight: "bold" }}
+            onClick={() => void onSave()}
+          >
+            {form.id === null ? "Utwórz" : "Zapisz"}
+          </button>
           <button
             type="button"
+            className="ghost-button"
+            style={{ height: "38px", padding: "0 16px", borderRadius: "6px" }}
+            onClick={() => onChange({ id: null, name: "", type: "PERCENT", value: "10.00", is_active: true })}
+          >
+            Anuluj
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-discount-list" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "10px", overflowY: "auto", flex: 1, paddingRight: "4px" }}>
+        {discounts.map((discount) => (
+          <div
             key={discount.id}
-            className={!discount.is_active ? "inactive" : ""}
+            className={`admin-discount-item ${!discount.is_active ? "inactive" : ""}`}
             onClick={() => onEdit(discount)}
+            style={{ display: "flex", flexDirection: "column", gap: "6px", padding: "12px", border: "1px solid #d7dfda", borderRadius: "8px", background: discount.is_active ? "#ffffff" : "#fbfcfb", cursor: "pointer", position: "relative" }}
           >
             <strong>{discount.name}</strong>
-            <small>{discount.type === "PERCENT" ? `${discount.value}%` : money.format(Number(discount.value))}</small>
-            <span onClick={(event) => {
-              event.stopPropagation();
-              void onDelete(discount);
-            }}>
+            <small style={{ color: "#718096" }}>{discount.type === "PERCENT" ? `${discount.value}%` : money.format(Number(discount.value))}</small>
+            <button
+              type="button"
+              className="danger-link"
+              style={{ border: "none", background: "none", color: "#a83427", cursor: "pointer", alignSelf: "flex-end", padding: "4px", fontSize: "0.8rem", fontWeight: "bold" }}
+              onClick={(event) => {
+                event.stopPropagation();
+                void onDelete(discount);
+              }}
+            >
               Usuń
-            </span>
-          </button>
+            </button>
+          </div>
         ))}
+        {discounts.length === 0 && (
+          <p style={{ color: "#718096", textAlign: "center", gridColumn: "1 / -1", marginTop: "20px" }}>Brak rabatów w systemie.</p>
+        )}
       </div>
     </div>
   );
@@ -1196,56 +1337,85 @@ function ReferenceEditor({
   const [newUnit, setNewUnit] = useState("g");
 
   async function submit() {
-    await onCreate(newName, newUnit);
+    if (!newName.trim() || !newUnit.trim()) return;
+    await onCreate(newName.trim(), newUnit.trim());
     setNewName("");
     setNewUnit("g");
   }
 
   return (
-    <div className="admin-reference-list">
-      <h3>{title}</h3>
-      <div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
+      <div className="warehouse-section-heading">
+        <h2>{title}</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center", background: "#f7fafc", padding: "12px", borderRadius: "8px", border: "1px dashed #cbd5e0" }}>
         <input
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
-          placeholder="Nowy składnik"
+          placeholder="Nazwa nowego składnika"
+          style={{ flex: 2, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
         />
         <input
           value={newUnit}
           onChange={(event) => setNewUnit(event.target.value)}
-          placeholder="Jednostka"
+          placeholder="Jednostka (np. g, ml, szt.)"
+          style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
         />
-        <button type="button" className="admin-add-button" onClick={() => void submit()}>Dodaj</button>
+        <button
+          type="button"
+          className="admin-primary"
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "6px", height: "40px" }}
+          onClick={() => void submit()}
+        >
+          <Plus size={16} /> Dodaj
+        </button>
       </div>
-      {items.map((item) => (
-        <div key={item.id} className={!item.is_active ? "inactive" : ""}>
-          <input
-            defaultValue={item.name}
-            onBlur={(event) => void onSave({ ...item, name: event.target.value })}
-          />
-          <input
-            defaultValue={item.unit}
-            onBlur={(event) => void onSave({ ...item, unit: event.target.value })}
-          />
-          <button
-            type="button"
-            className="danger-link"
-            onClick={async () => {
-              const yes = await confirm({
-                title: "Potwierdź usunięcie składnika",
-                message: `Czy na pewno chcesz usunąć składnik "${item.name}"?`,
-                confirmText: "Usuń",
-                cancelText: "Anuluj",
-              });
-              if (yes) {
-                void onDelete(item);
-              }
-            }}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto", flex: 1, paddingRight: "4px" }}>
+        {items.map((item) => (
+          <div 
+            key={item.id} 
+            className={!item.is_active ? "inactive" : ""}
+            style={{ display: "flex", gap: "10px", alignItems: "center", padding: "8px 12px", border: "1px solid #e2eae6", borderRadius: "8px", background: item.is_active ? "#ffffff" : "#f7fafc" }}
           >
-            Usuń
-          </button>
-        </div>
-      ))}
+            <input
+              defaultValue={item.name}
+              onBlur={(event) => void onSave({ ...item, name: event.target.value })}
+              style={{ flex: 2, padding: "6px 10px", border: "1px solid transparent", background: "transparent", fontWeight: "bold" }}
+              onFocus={(e) => e.target.style.border = "1px solid #cbd5e0"}
+            />
+            <input
+              defaultValue={item.unit}
+              onBlur={(event) => void onSave({ ...item, unit: event.target.value })}
+              style={{ width: "80px", padding: "6px 10px", border: "1px solid transparent", background: "transparent", color: "#4a5568" }}
+              onFocus={(e) => e.target.style.border = "1px solid #cbd5e0"}
+            />
+            <button
+              type="button"
+              className="stock-delete-button"
+              title="Usuń"
+              style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "6px" }}
+              onClick={async () => {
+                const yes = await confirm({
+                  title: "Potwierdź usunięcie składnika",
+                  message: `Czy na pewno chcesz usunąc składnik "${item.name}"?`,
+                  confirmText: "Usuń",
+                  cancelText: "Anuluj",
+                });
+                if (yes) {
+                  void onDelete(item);
+                }
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak składników w słowniku.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1268,19 +1438,24 @@ function ModifierEditor({
   const [newPrice, setNewPrice] = useState("0.00");
 
   async function submit() {
-    await onCreate(newName, newPrice);
+    if (!newName.trim() || !newPrice.trim()) return;
+    await onCreate(newName.trim(), newPrice.trim());
     setNewName("");
     setNewPrice("0.00");
   }
 
   return (
-    <div className="admin-reference-list">
-      <h3>{title}</h3>
-      <div>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px", height: "100%" }}>
+      <div className="warehouse-section-heading">
+        <h2>{title}</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center", background: "#f7fafc", padding: "12px", borderRadius: "8px", border: "1px dashed #cbd5e0" }}>
         <input
           value={newName}
           onChange={(event) => setNewName(event.target.value)}
-          placeholder="Nowy modyfikator"
+          placeholder="Nazwa nowego modyfikatora"
+          style={{ flex: 2, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
         />
         <input
           type="number"
@@ -1288,40 +1463,64 @@ function ModifierEditor({
           value={newPrice}
           onChange={(event) => setNewPrice(event.target.value)}
           placeholder="Cena"
+          style={{ width: "120px", padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e0" }}
         />
-        <button type="button" className="admin-add-button" onClick={() => void submit()}>Dodaj</button>
+        <button
+          type="button"
+          className="admin-primary"
+          style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "8px 16px", borderRadius: "6px", height: "40px" }}
+          onClick={() => void submit()}
+        >
+          <Plus size={16} /> Dodaj
+        </button>
       </div>
-      {items.map((item) => (
-        <div key={item.id} className={!item.is_active ? "inactive" : ""}>
-          <input
-            defaultValue={item.name}
-            onBlur={(event) => void onSave({ ...item, name: event.target.value })}
-          />
-          <input
-            type="number"
-            step="0.01"
-            defaultValue={item.price}
-            onBlur={(event) => void onSave({ ...item, price: event.target.value })}
-          />
-          <button
-            type="button"
-            className="danger-link"
-            onClick={async () => {
-              const yes = await confirm({
-                title: "Potwierdź usunięcie modyfikatora",
-                message: `Czy na pewno chcesz usunąć modyfikator "${item.name}"?`,
-                confirmText: "Usuń",
-                cancelText: "Anuluj",
-              });
-              if (yes) {
-                void onDelete(item);
-              }
-            }}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto", flex: 1, paddingRight: "4px" }}>
+        {items.map((item) => (
+          <div 
+            key={item.id} 
+            className={!item.is_active ? "inactive" : ""}
+            style={{ display: "flex", gap: "10px", alignItems: "center", padding: "8px 12px", border: "1px solid #e2eae6", borderRadius: "8px", background: item.is_active ? "#ffffff" : "#f7fafc" }}
           >
-            Usuń
-          </button>
-        </div>
-      ))}
+            <input
+              defaultValue={item.name}
+              onBlur={(event) => void onSave({ ...item, name: event.target.value })}
+              style={{ flex: 2, padding: "6px 10px", border: "1px solid transparent", background: "transparent", fontWeight: "bold" }}
+              onFocus={(e) => e.target.style.border = "1px solid #cbd5e0"}
+            />
+            <input
+              type="number"
+              step="0.01"
+              defaultValue={item.price}
+              onBlur={(event) => void onSave({ ...item, price: event.target.value })}
+              style={{ width: "100px", padding: "6px 10px", border: "1px solid transparent", background: "transparent", color: "#4a5568" }}
+              onFocus={(e) => e.target.style.border = "1px solid #cbd5e0"}
+            />
+            <button
+              type="button"
+              className="stock-delete-button"
+              title="Usuń"
+              style={{ background: "none", border: "none", cursor: "pointer", display: "inline-flex", padding: "6px" }}
+              onClick={async () => {
+                const yes = await confirm({
+                  title: "Potwierdź usunięcie modyfikatora",
+                  message: `Czy na pewno chcesz usunąć modyfikator "${item.name}"?`,
+                  confirmText: "Usuń",
+                  cancelText: "Anuluj",
+                });
+                if (yes) {
+                  void onDelete(item);
+                }
+              }}
+            >
+              <Trash2 size={16} />
+            </button>
+          </div>
+        ))}
+        {items.length === 0 && (
+          <p style={{ color: "#718096", textAlign: "center", marginTop: "20px" }}>Brak modyfikatorów.</p>
+        )}
+      </div>
     </div>
   );
 }
@@ -1331,6 +1530,7 @@ function createEmptyProductForm(categoryId = 0): ProductFormState {
     id: null,
     category_id: categoryId,
     kitchen_section_id: null,
+    warehouse_id: null,
     name: "",
     description: "",
     image_url: null,
@@ -1362,6 +1562,7 @@ function productToForm(product: AdminProduct): ProductFormState {
     id: product.id,
     category_id: product.category_id,
     kitchen_section_id: product.kitchen_section_id,
+    warehouse_id: product.warehouse_id,
     name: product.name,
     description: product.description ?? "",
     image_url: product.image_url,
@@ -1408,6 +1609,7 @@ function formToPayload(form: ProductFormState): AdminProductPayload {
   return {
     category_id: form.category_id,
     kitchen_section_id: form.kitchen_section_id,
+    warehouse_id: form.warehouse_id,
     name: form.name.trim(),
     description: form.description?.trim() || null,
     image_url: form.image_url,

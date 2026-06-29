@@ -436,8 +436,20 @@ export function KitchenPage() {
               const isCurrentCourseReady =
                 currentCourseTasks.length > 0
                 && currentCourseTasks.every((task) => task.status === "COMPLETED");
+
+              const activeCourseItems = currentCourseItems.filter(
+                (item) => item.status !== "COMPLETED" && item.status !== "READY" && item.status !== "KITCHEN_READY"
+              );
+              const activeCourseCreatedAt = activeCourseItems.length > 0
+                ? activeCourseItems.reduce((oldest, item) => {
+                    const iTime = new Date(item.created_at || order.created_at).getTime();
+                    const oldestTime = new Date(oldest).getTime();
+                    return iTime < oldestTime ? (item.created_at || order.created_at) : oldest;
+                  }, activeCourseItems[0].created_at || order.created_at)
+                : order.created_at;
+
               const timing = getOrderTimingState(
-                order.created_at,
+                activeCourseCreatedAt,
                 order.estimated_time,
                 now,
               );
@@ -501,7 +513,7 @@ export function KitchenPage() {
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.8rem", color: "#4a5568", marginTop: "4px" }}>
                       <span>Kelner: {order.waiter_name || "Brak"}</span>
                       <strong style={{ color: "#3182ce" }}>
-                        {getElapsedTimeText(order.created_at)}
+                        {getElapsedTimeText(activeCourseCreatedAt)}
                       </strong>
                     </div>
                   </div>
@@ -1462,7 +1474,7 @@ function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrder
     const group = groups.get(task.order_id) ?? {
       orderId: task.order_id,
       tableNumber: task.table_number,
-      createdAt: task.order_created_at,
+      createdAt: task.item_created_at || task.order_created_at,
       estimatedTime: task.order_estimated_time,
       tasks: [],
     };
@@ -1470,16 +1482,28 @@ function groupSectionTasksByOrder(tasks: KitchenSectionTask[]): SectionTaskOrder
     groups.set(task.order_id, group);
   }
 
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    tasks: [...group.tasks].sort((first, second) => {
-      if (first.course_number !== second.course_number) {
-        return first.course_number - second.course_number;
-      }
-      if (first.order_item_id !== second.order_item_id) {
-        return first.order_item_id - second.order_item_id;
-      }
-      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
-    }),
-  }));
+  return Array.from(groups.values()).map((group) => {
+    const activeTasks = group.tasks.filter((t) => t.status !== "COMPLETED");
+    const oldestItemCreatedAt = activeTasks.length > 0
+      ? activeTasks.reduce((oldest, t) => {
+          const tTime = new Date(t.item_created_at || t.order_created_at).getTime();
+          const oldestTime = new Date(oldest).getTime();
+          return tTime < oldestTime ? (t.item_created_at || t.order_created_at) : oldest;
+        }, activeTasks[0].item_created_at || activeTasks[0].order_created_at)
+      : group.createdAt;
+
+    return {
+      ...group,
+      createdAt: oldestItemCreatedAt,
+      tasks: [...group.tasks].sort((first, second) => {
+        if (first.course_number !== second.course_number) {
+          return first.course_number - second.course_number;
+        }
+        if (first.order_item_id !== second.order_item_id) {
+          return first.order_item_id - second.order_item_id;
+        }
+        return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+      }),
+    };
+  });
 }

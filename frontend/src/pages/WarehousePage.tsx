@@ -60,6 +60,7 @@ export function WarehousePage() {
   const [ingredients, setIngredients] = useState<StockIngredient[]>([]);
   const [items, setItems] = useState<WarehouseStockItem[]>([]);
   const [documents, setDocuments] = useState<WarehouseDocument[]>([]);
+  const [viewingDocument, setViewingDocument] = useState<WarehouseDocument | null>(null);
   const [accessUsers, setAccessUsers] = useState<WarehouseAccessUser[]>([]);
   const [modal, setModal] = useState<ModalKind>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -522,7 +523,11 @@ export function WarehousePage() {
                   </div>
                   <div className="warehouse-document-list">
                     {documents.map((document) => (
-                      <article key={document.id}>
+                      <article 
+                        key={document.id}
+                        onClick={() => setViewingDocument(document)}
+                        style={{ cursor: "pointer" }}
+                      >
                         <div>
                           <strong>{document.document_number}</strong>
                           <small>{document.operation_date} · {document.issued_by_name ?? "system"}</small>
@@ -639,6 +644,98 @@ export function WarehousePage() {
                 <ModalActions saving={isSaving} onCancel={() => setModal(null)} onSave={() => void saveAccess()} />
               </>
             )}
+          </section>
+        </div>
+      )}
+
+      {viewingDocument && (
+        <div className="admin-modal-backdrop" onClick={() => setViewingDocument(null)}>
+          <section 
+            className="admin-modal warehouse-modal" 
+            style={{ maxWidth: "600px", width: "100%", padding: "24px" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button 
+              type="button" 
+              className="modal-close-icon" 
+              title="Zamknij" 
+              onClick={() => setViewingDocument(null)}
+            >
+              <X size={20} />
+            </button>
+            <h2>Szczegóły dokumentu: {viewingDocument.document_number}</h2>
+            <div className="warehouse-document-meta" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px", marginTop: "16px" }}>
+              <div>
+                <strong>Typ dokumentu:</strong> {viewingDocument.document_type}
+              </div>
+              <div>
+                <strong>Status:</strong> {viewingDocument.status}
+              </div>
+              <div>
+                <strong>Magazyn źródłowy:</strong> {viewingDocument.source_warehouse_name ?? "—"}
+              </div>
+              <div>
+                <strong>Magazyn docelowy:</strong> {viewingDocument.destination_warehouse_name ?? "—"}
+              </div>
+              <div>
+                <strong>Wystawił:</strong> {viewingDocument.issued_by_name ?? "system"}
+              </div>
+              <div>
+                <strong>Data operacji:</strong> {viewingDocument.operation_date}
+              </div>
+              {viewingDocument.reason && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Powód RW:</strong> {viewingDocument.reason}
+                </div>
+              )}
+              {viewingDocument.description && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Uwagi:</strong> {viewingDocument.description}
+                </div>
+              )}
+            </div>
+
+            <h3 style={{ margin: "20px 0 10px 0" }}>Pozycje dokumentu</h3>
+            <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #edf2f7", borderRadius: "8px", padding: "8px", background: "rgba(0,0,0,0.01)" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #cbd5e0", textAlign: "left" }}>
+                    <th style={{ padding: "6px" }}>Towar</th>
+                    <th style={{ padding: "6px", textAlign: "right" }}>Ilość</th>
+                    {viewingDocument.document_type === "PZ" && (
+                      <>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Cena jedn.</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Wartość</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {viewingDocument.items.map((item) => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #edf2f7" }}>
+                      <td style={{ padding: "6px" }}>{item.ingredient_name}</td>
+                      <td style={{ padding: "6px", textAlign: "right" }}>{number.format(Number(item.quantity))} {item.unit}</td>
+                      {viewingDocument.document_type === "PZ" && (
+                        <>
+                          <td style={{ padding: "6px", textAlign: "right" }}>
+                            {item.unit_price ? `${number.format(Number(item.unit_price))} PLN` : "—"}
+                          </td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>
+                            {item.total_value ? `${number.format(Number(item.total_value))} PLN` : "—"}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "20px" }}>
+              <button type="button" className="ghost-button" onClick={() => setViewingDocument(null)}>
+                Zamknij
+              </button>
+            </div>
           </section>
         </div>
       )}

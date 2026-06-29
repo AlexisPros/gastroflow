@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.product_ingredient import ProductIngredient
     from app.models.product_kitchen_step import ProductKitchenStep
     from app.models.product_modifier import ProductModifier
+    from app.models.warehouse import Warehouse
 
 
 class Product(Base):
@@ -30,6 +31,11 @@ class Product(Base):
 
     kitchen_section_id: Mapped[int | None] = mapped_column(
         ForeignKey("kitchen_sections.id"),
+        nullable=True,
+    )
+
+    warehouse_id: Mapped[int | None] = mapped_column(
+        ForeignKey("warehouses.id"),
         nullable=True,
     )
 
@@ -84,6 +90,10 @@ class Product(Base):
     kitchen_section: Mapped[KitchenSection | None] = relationship(
         "KitchenSection",
         back_populates="products",
+    )
+
+    warehouse: Mapped[Warehouse | None] = relationship(
+        "Warehouse",
     )
 
     product_modifiers: Mapped[list[ProductModifier]] = relationship(
