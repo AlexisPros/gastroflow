@@ -1,14 +1,20 @@
 import asyncio
+from datetime import date
 from decimal import Decimal
 from typing import Any
 
 import pytest
 
+from app.models.ingredient import Ingredient
 from app.models.order_item import OrderItem
 from app.models.product_ingredient import ProductIngredient
 from app.models.product_modifier import ProductModifier
+from app.models.stock_item import StockItem
+from app.models.stock_movement import StockMovement
 from app.models.warehouse import Warehouse
-from app.services.stock_service import StockService
+from app.models.warehouse_document import WarehouseDocument
+from app.models.warehouse_document_item import WarehouseDocumentItem
+from app.services.stock_service import InventoryConflictError, StockService
 
 
 class ScalarListResult:
@@ -33,6 +39,25 @@ class RequirementSession:
 
     async def execute(self, _statement: Any) -> ScalarListResult:
         return self.results.pop(0)
+
+
+class InventorySession:
+    def __init__(self, stock_items: list[StockItem]) -> None:
+        self.stock_items = stock_items
+        self.added: list[Any] = []
+        self.committed = False
+
+    async def execute(self, _statement: Any) -> ScalarListResult:
+        return ScalarListResult(self.stock_items)
+
+    def add(self, item: Any) -> None:
+        self.added.append(item)
+
+    def add_all(self, items: list[Any]) -> None:
+        self.added.extend(items)
+
+    async def commit(self) -> None:
+        self.committed = True
 
 
 def test_modifier_replaces_recipe_ingredient_in_stock_requirements() -> None:
@@ -141,3 +166,115 @@ def test_consumed_order_item_is_not_deducted_twice(monkeypatch) -> None:
     )
 
     assert movements == []
+
+
+def test_inventory_records_differences_and_adjusts_stock(monkeypatch) -> None:
+    service = StockService()
+    warehouse = Warehouse(id=1, name="Main", type="GENERAL", is_active=True, is_default=True)
+    flour = Ingredient(id=1, name="Mąka", unit="kg", is_active=True)
+    oil = Ingredient(id=2, name="Olej", unit="l", is_active=True)
+    flour_stock = StockItem(
+        id=10,
+        warehouse_id=warehouse.id,
+        ingredient_id=flour.id,
+        quantity=Decimal("10.000"),
+        minimum_quantity=None,
+        is_active=True,
+    )
+    oil_stock = StockItem(
+        id=11,
+        warehouse_id=warehouse.id,
+        ingredient_id=oil.id,
+        quantity=Decimal("2.000"),
+        minimum_quantity=None,
+        is_active=True,
+    )
+    flour_stock.ingredient = flour
+    oil_stock.ingredient = oil
+    session = InventorySession([flour_stock, oil_stock])
+    document = WarehouseDocument(
+        id=50,
+        document_number="INW/2026/000050",
+        document_type="INW",
+        status="COMPLETED",
+        source_warehouse_id=warehouse.id,
+        operation_date=date(2026, 6, 30),
+    )
+
+    async def get_warehouse(_db: Any, _warehouse_id: int) -> Warehouse:
+        return warehouse
+
+    async def create_document(_db: Any, **_kwargs: Any) -> WarehouseDocument:
+        return document
+
+    async def reload_document(_db: Any, _document_id: int) -> WarehouseDocument:
+        return document
+
+    monkeypatch.setattr(service, "_get_active_warehouse", get_warehouse)
+    monkeypatch.setattr(service, "_create_document", create_document)
+    monkeypatch.setattr(service, "_reload_document", reload_document)
+
+    result = asyncio.run(
+        service.inventory_stock(  # type: ignore[arg-type]
+            session,
+            warehouse_id=warehouse.id,
+            lines=[
+                (flour_stock.id, Decimal("10.000"), Decimal("8.000"), Decimal("3.00")),
+                (oil_stock.id, Decimal("2.000"), Decimal("4.000"), Decimal("1.50")),
+            ],
+            issued_by_user_id=1,
+            operation_date=date(2026, 6, 30),
+            reason="Inwentaryzacja okresowa",
+        ),
+    )
+
+    document_items = [item for item in session.added if isinstance(item, WarehouseDocumentItem)]
+    movements = [item for item in session.added if isinstance(item, StockMovement)]
+    assert result is document
+    assert session.committed is True
+    assert flour_stock.quantity == Decimal("8.000")
+    assert oil_stock.quantity == Decimal("4.000")
+    assert [(item.difference_quantity, item.difference_value) for item in document_items] == [
+        (Decimal("-2.000"), Decimal("-6.00")),
+        (Decimal("2.000"), Decimal("3.00")),
+    ]
+    assert [(movement.type, movement.quantity) for movement in movements] == [
+        ("INVENTORY_LOSS", Decimal("2.000")),
+        ("INVENTORY_GAIN", Decimal("2.000")),
+    ]
+
+
+def test_inventory_rejects_stale_book_quantity(monkeypatch) -> None:
+    service = StockService()
+    warehouse = Warehouse(id=1, name="Main", type="GENERAL", is_active=True, is_default=True)
+    ingredient = Ingredient(id=1, name="Mąka", unit="kg", is_active=True)
+    stock_item = StockItem(
+        id=10,
+        warehouse_id=warehouse.id,
+        ingredient_id=ingredient.id,
+        quantity=Decimal("9.000"),
+        minimum_quantity=None,
+        is_active=True,
+    )
+    stock_item.ingredient = ingredient
+    session = InventorySession([stock_item])
+
+    async def get_warehouse(_db: Any, _warehouse_id: int) -> Warehouse:
+        return warehouse
+
+    monkeypatch.setattr(service, "_get_active_warehouse", get_warehouse)
+
+    with pytest.raises(InventoryConflictError, match="zmienił się"):
+        asyncio.run(
+            service.inventory_stock(  # type: ignore[arg-type]
+                session,
+                warehouse_id=warehouse.id,
+                lines=[(stock_item.id, Decimal("10.000"), Decimal("8.000"), Decimal("3.00"))],
+                issued_by_user_id=1,
+                operation_date=date(2026, 6, 30),
+                reason="Inwentaryzacja kontrolna",
+            ),
+        )
+
+    assert session.committed is False
+    assert stock_item.quantity == Decimal("9.000")

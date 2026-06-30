@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -40,6 +40,9 @@ class RouteSession:
         self.committed = True
 
     async def refresh(self, _item: Any) -> None:
+        return None
+
+    async def rollback(self) -> None:
         return None
 
 
@@ -138,3 +141,35 @@ def test_zero_quantity_stock_item_is_soft_deleted(monkeypatch) -> None:
 
     assert result.is_active is False
     assert session.committed is True
+
+
+def test_inventory_conflict_is_returned_as_http_409(monkeypatch) -> None:
+    warehouse = Warehouse(id=1, name="Główny", type="GENERAL", is_active=True, is_default=True)
+    session = RouteSession()
+
+    async def allow_access(_db: Any, _user: User, _warehouse_id: int) -> Warehouse:
+        return warehouse
+
+    async def inventory_conflict(*_args: Any, **_kwargs: Any) -> None:
+        raise stock_routes.InventoryConflictError("Stan towaru zmienił się.")
+
+    monkeypatch.setattr(stock_routes, "_ensure_warehouse_access", allow_access)
+    monkeypatch.setattr(stock_routes.stock_service, "inventory_stock", inventory_conflict)
+    body = stock_routes.InventoryDocumentRequest(
+        warehouse_id=warehouse.id,
+        operation_date=date(2026, 6, 30),
+        reason="Inwentaryzacja kontrolna",
+        items=[
+            stock_routes.InventoryLineInput(
+                stock_item_id=3,
+                book_quantity=Decimal("2.000"),
+                actual_quantity=Decimal("1.500"),
+                unit_price=Decimal("4.00"),
+            ),
+        ],
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(stock_routes.create_inventory_document(body, session, admin_user()))  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 409

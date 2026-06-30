@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -21,6 +21,7 @@ from app.models.warehouse_user_access import WarehouseUserAccess
 from app.schemas import StockMovementRead
 from app.schemas.stock_item import StockItemRead
 from app.services import stock_service
+from app.services.stock_service import InventoryConflictError
 
 router = APIRouter(tags=["Stock"])
 
@@ -131,6 +132,37 @@ class WriteOffDocumentRequest(BaseModel):
     items: list[DocumentLineInput] = Field(min_length=1)
 
 
+class InventorySheetItemRead(BaseModel):
+    stock_item_id: int
+    ingredient_id: int
+    ingredient_name: str
+    unit: str
+    book_quantity: Decimal
+    suggested_unit_price: Decimal | None
+
+
+class InventorySheetRead(BaseModel):
+    warehouse_id: int
+    warehouse_name: str
+    generated_at: datetime
+    items: list[InventorySheetItemRead]
+
+
+class InventoryLineInput(BaseModel):
+    stock_item_id: int
+    book_quantity: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=3)
+    actual_quantity: Decimal = Field(ge=Decimal("0"), max_digits=14, decimal_places=3)
+    unit_price: Decimal = Field(ge=Decimal("0"), max_digits=12, decimal_places=2)
+
+
+class InventoryDocumentRequest(BaseModel):
+    warehouse_id: int
+    operation_date: date
+    reason: str = Field(min_length=1, max_length=1000)
+    description: str | None = Field(default=None, max_length=1000)
+    items: list[InventoryLineInput] = Field(min_length=1)
+
+
 class WarehouseDocumentItemRead(BaseModel):
     id: int
     ingredient_id: int
@@ -139,6 +171,10 @@ class WarehouseDocumentItemRead(BaseModel):
     unit: str
     unit_price: Decimal | None
     total_value: Decimal | None
+    book_quantity: Decimal | None
+    actual_quantity: Decimal | None
+    difference_quantity: Decimal | None
+    difference_value: Decimal | None
 
 
 class WarehouseDocumentRead(BaseModel):
@@ -522,6 +558,65 @@ async def delete_warehouse_item(
     return _stock_item_read(item)
 
 
+@router.get(
+    "/stock/warehouses/{warehouse_id}/inventory-sheet",
+    response_model=InventorySheetRead,
+)
+async def get_inventory_sheet(
+    warehouse_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> InventorySheetRead:
+    warehouse = await _ensure_warehouse_access(db, current_user, warehouse_id)
+    result = await db.execute(
+        select(StockItem)
+        .join(Ingredient, Ingredient.id == StockItem.ingredient_id)
+        .where(
+            StockItem.warehouse_id == warehouse_id,
+            StockItem.is_active.is_(True),
+        )
+        .options(selectinload(StockItem.ingredient))
+        .order_by(Ingredient.name),
+    )
+    stock_items = list(result.scalars().all())
+    response_items: list[InventorySheetItemRead] = []
+    for stock_item in stock_items:
+        latest_price = (
+            await db.execute(
+                select(WarehouseDocumentItem.unit_price)
+                .join(
+                    WarehouseDocument,
+                    WarehouseDocument.id == WarehouseDocumentItem.warehouse_document_id,
+                )
+                .where(
+                    WarehouseDocument.destination_warehouse_id == warehouse_id,
+                    WarehouseDocument.document_type == "PZ",
+                    WarehouseDocumentItem.ingredient_id == stock_item.ingredient_id,
+                    WarehouseDocumentItem.unit_price.is_not(None),
+                )
+                .order_by(WarehouseDocument.issued_at.desc(), WarehouseDocumentItem.id.desc())
+                .limit(1),
+            )
+        ).scalar_one_or_none()
+        response_items.append(
+            InventorySheetItemRead(
+                stock_item_id=stock_item.id,
+                ingredient_id=stock_item.ingredient_id,
+                ingredient_name=stock_item.ingredient.name,
+                unit=stock_item.ingredient.unit,
+                book_quantity=stock_item.quantity,
+                suggested_unit_price=latest_price,
+            ),
+        )
+
+    return InventorySheetRead(
+        warehouse_id=warehouse.id,
+        warehouse_name=warehouse.name,
+        generated_at=datetime.now(timezone.utc),
+        items=response_items,
+    )
+
+
 @router.post("/stock/documents/receipts", response_model=WarehouseDocumentRead)
 async def create_receipt_document(
     body: ReceiptDocumentRequest,
@@ -586,6 +681,40 @@ async def create_write_off_document(
             description=body.description,
         )
         return _document_read(document)
+    except ValueError as exc:
+        await db.rollback()
+        raise_bad_request(exc)
+
+
+@router.post("/stock/documents/inventory", response_model=WarehouseDocumentRead)
+async def create_inventory_document(
+    body: InventoryDocumentRequest,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> WarehouseDocumentRead:
+    await _ensure_warehouse_access(db, current_user, body.warehouse_id)
+    try:
+        document = await stock_service.inventory_stock(
+            db,
+            warehouse_id=body.warehouse_id,
+            lines=[
+                (
+                    item.stock_item_id,
+                    item.book_quantity,
+                    item.actual_quantity,
+                    item.unit_price,
+                )
+                for item in body.items
+            ],
+            issued_by_user_id=current_user.id,
+            operation_date=body.operation_date,
+            reason=body.reason,
+            description=body.description,
+        )
+        return _document_read(document)
+    except InventoryConflictError as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         await db.rollback()
         raise_bad_request(exc)
@@ -823,6 +952,10 @@ def _document_read(document: WarehouseDocument) -> WarehouseDocumentRead:
                 unit=item.unit,
                 unit_price=item.unit_price,
                 total_value=item.total_value,
+                book_quantity=item.book_quantity,
+                actual_quantity=item.actual_quantity,
+                difference_quantity=item.difference_quantity,
+                difference_value=item.difference_value,
             )
             for item in document.items
         ],

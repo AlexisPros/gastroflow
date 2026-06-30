@@ -21,6 +21,11 @@ from app.models.warehouse_document_item import WarehouseDocumentItem
 
 
 DocumentLine = tuple[int, Decimal, Decimal | None]
+InventoryLine = tuple[int, Decimal, Decimal, Decimal]
+
+
+class InventoryConflictError(ValueError):
+    """Raised when warehouse stock changed after an inventory sheet was opened."""
 
 
 class StockService:
@@ -214,6 +219,106 @@ class StockService:
                 unit_price=unit_price,
                 movement_type="RW_OUT",
             )
+
+        await db.commit()
+        return await self._reload_document(db, document.id)
+
+    async def inventory_stock(
+        self,
+        db: AsyncSession,
+        *,
+        warehouse_id: int,
+        lines: list[InventoryLine],
+        issued_by_user_id: int,
+        operation_date: date,
+        reason: str,
+        description: str | None = None,
+    ) -> WarehouseDocument:
+        if not reason.strip():
+            raise ValueError("Inventory reason or type is required.")
+        if not lines:
+            raise ValueError("Inventory must contain all active warehouse items.")
+        if any(actual < 0 for _, _, actual, _ in lines):
+            raise ValueError("Actual inventory quantity cannot be negative.")
+        if any(unit_price < 0 for _, _, _, unit_price in lines):
+            raise ValueError("Inventory unit price cannot be negative.")
+
+        warehouse = await self._get_active_warehouse(db, warehouse_id)
+        result = await db.execute(
+            select(StockItem)
+            .where(
+                StockItem.warehouse_id == warehouse.id,
+                StockItem.is_active.is_(True),
+            )
+            .options(selectinload(StockItem.ingredient))
+            .order_by(StockItem.id)
+            .with_for_update(),
+        )
+        stock_items = list(result.scalars().all())
+        if not stock_items:
+            raise ValueError("Warehouse does not contain active items to inventory.")
+
+        line_by_stock_item_id = {
+            stock_item_id: (book_quantity, actual_quantity, unit_price)
+            for stock_item_id, book_quantity, actual_quantity, unit_price in lines
+        }
+        if len(line_by_stock_item_id) != len(lines):
+            raise ValueError("Each warehouse item can appear only once in an inventory.")
+
+        expected_ids = {item.id for item in stock_items}
+        if set(line_by_stock_item_id) != expected_ids:
+            raise ValueError("Inventory must contain every active item from the selected warehouse.")
+
+        for stock_item in stock_items:
+            expected_quantity, _, _ = line_by_stock_item_id[stock_item.id]
+            if stock_item.quantity != expected_quantity:
+                raise InventoryConflictError(
+                    f"Stan towaru „{stock_item.ingredient.name}” zmienił się w trakcie inwentaryzacji. "
+                    "Odśwież arkusz i przelicz towar ponownie.",
+                )
+
+        document = await self._create_document(
+            db,
+            document_type="INW",
+            source_warehouse_id=warehouse.id,
+            issued_by_user_id=issued_by_user_id,
+            operation_date=operation_date,
+            reason=reason.strip(),
+            description=description,
+        )
+
+        money_precision = Decimal("0.01")
+        for stock_item in stock_items:
+            book_quantity, actual_quantity, unit_price = line_by_stock_item_id[stock_item.id]
+            difference = actual_quantity - book_quantity
+            actual_value = (actual_quantity * unit_price).quantize(money_precision)
+            difference_value = (difference * unit_price).quantize(money_precision)
+
+            document_item = WarehouseDocumentItem(
+                warehouse_document_id=document.id,
+                ingredient_id=stock_item.ingredient_id,
+                quantity=actual_quantity,
+                unit=stock_item.ingredient.unit,
+                unit_price=unit_price,
+                total_value=actual_value,
+                book_quantity=book_quantity,
+                actual_quantity=actual_quantity,
+                difference_quantity=difference,
+                difference_value=difference_value,
+            )
+            stock_item.quantity = actual_quantity
+            db.add_all([stock_item, document_item])
+
+            if difference != 0:
+                db.add(
+                    StockMovement(
+                        stock_item_id=stock_item.id,
+                        warehouse_document_id=document.id,
+                        type=("INVENTORY_GAIN" if difference > 0 else "INVENTORY_LOSS"),
+                        quantity=abs(difference),
+                        description=document.document_number,
+                    ),
+                )
 
         await db.commit()
         return await self._reload_document(db, document.id)

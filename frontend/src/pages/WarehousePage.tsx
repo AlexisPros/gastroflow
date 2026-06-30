@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import {
   ArrowRightLeft,
+  ClipboardCheck,
   ClipboardMinus,
   PackagePlus,
   Pencil,
@@ -16,6 +17,7 @@ import {
 import { ApiError } from "../api/apiClient";
 import {
   addWarehouseItem,
+  createInventoryDocument,
   createReceiptDocument,
   createTransferDocument,
   createWarehouse,
@@ -23,6 +25,7 @@ import {
   deleteWarehouse,
   deleteWarehouseItem,
   getStockIngredients,
+  getInventorySheet,
   getWarehouseAccess,
   getWarehouseDocuments,
   getWarehouseItems,
@@ -31,6 +34,7 @@ import {
   updateWarehouseAccess,
   updateWarehouseItem,
   type StockIngredient,
+  type InventorySheet,
   type Warehouse,
   type WarehouseAccessUser,
   type WarehouseDocument,
@@ -39,7 +43,7 @@ import {
 import { useAuth } from "../auth/useAuth";
 import { usePrompt } from "../components/PromptProvider";
 
-type ModalKind = "WAREHOUSE" | "ITEM" | "PZ" | "MM" | "RW" | "ACCESS" | null;
+type ModalKind = "WAREHOUSE" | "ITEM" | "PZ" | "MM" | "RW" | "INVENTORY" | "ACCESS" | null;
 
 type DocumentLineForm = {
   key: number;
@@ -48,9 +52,19 @@ type DocumentLineForm = {
   unit_price: string;
 };
 
+type InventoryLineForm = {
+  stock_item_id: number;
+  ingredient_name: string;
+  unit: string;
+  book_quantity: string;
+  actual_quantity: string;
+  unit_price: string;
+};
+
 let lineKey = 0;
 
 const number = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 3 });
+const money = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
 
 export function WarehousePage() {
   const { token, user } = useAuth();
@@ -80,6 +94,8 @@ export function WarehousePage() {
   const [reason, setReason] = useState("");
   const [destinationWarehouseId, setDestinationWarehouseId] = useState<number | null>(null);
   const [documentLines, setDocumentLines] = useState<DocumentLineForm[]>([emptyLine()]);
+  const [inventorySheet, setInventorySheet] = useState<InventorySheet | null>(null);
+  const [inventoryLines, setInventoryLines] = useState<InventoryLineForm[]>([]);
 
   const selectedWarehouse = warehouses.find((warehouse) => warehouse.id === selectedWarehouseId) ?? null;
   const lowStockItems = useMemo(() => items.filter((item) => item.is_low_stock), [items]);
@@ -140,7 +156,7 @@ export function WarehousePage() {
     void loadWarehouseData();
   }, [loadWarehouseData]);
 
-  function openDocumentModal(kind: Exclude<ModalKind, "WAREHOUSE" | "ITEM" | "ACCESS" | null>) {
+  function openDocumentModal(kind: "PZ" | "MM" | "RW") {
     setOperationDate(today());
     setDescription("");
     setReason("");
@@ -149,6 +165,36 @@ export function WarehousePage() {
     );
     setDocumentLines([emptyLine()]);
     setModal(kind);
+  }
+
+  async function openInventory() {
+    if (!token || selectedWarehouseId === null) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const sheet = await getInventorySheet(token, selectedWarehouseId);
+      if (sheet.items.length === 0) {
+        setError("Magazyn nie zawiera aktywnych towarów do inwentaryzacji.");
+        return;
+      }
+      setOperationDate(today());
+      setReason("Inwentaryzacja okresowa");
+      setDescription("");
+      setInventorySheet(sheet);
+      setInventoryLines(sheet.items.map((item) => ({
+        stock_item_id: item.stock_item_id,
+        ingredient_name: item.ingredient_name,
+        unit: item.unit,
+        book_quantity: item.book_quantity,
+        actual_quantity: "",
+        unit_price: item.suggested_unit_price ?? "",
+      })));
+      setModal("INVENTORY");
+    } catch (exc) {
+      setError(errorMessage(exc, "Nie udało się przygotować arkusza inwentaryzacji."));
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   async function saveWarehouse() {
@@ -292,6 +338,52 @@ export function WarehousePage() {
     });
   }
 
+  async function saveInventory() {
+    if (!token || selectedWarehouseId === null || inventorySheet === null) return;
+    const invalidLine = inventoryLines.find((line) => (
+      line.actual_quantity.trim() === ""
+      || line.unit_price.trim() === ""
+      || !isNonNegativeNumber(line.actual_quantity)
+      || !isNonNegativeNumber(line.unit_price)
+    ));
+    if (invalidLine) {
+      setError(`Uzupełnij poprawny stan faktyczny i cenę dla towaru „${invalidLine.ingredient_name}”.`);
+      return;
+    }
+    if (!reason.trim()) {
+      setError("Wybierz rodzaj lub podstawę inwentaryzacji.");
+      return;
+    }
+
+    const accepted = await confirm({
+      title: "Zatwierdzić inwentaryzację?",
+      message: "Dokument skoryguje stany magazynowe do wartości faktycznych. Po zatwierdzeniu nie będzie można go edytować ani usunąć.",
+      confirmText: "Zatwierdź dokument INW",
+      cancelText: "Wróć do arkusza",
+    });
+    if (!accepted) return;
+
+    await runSave(async () => {
+      const saved = await createInventoryDocument(token, {
+        warehouse_id: selectedWarehouseId,
+        operation_date: operationDate,
+        reason: reason.trim(),
+        description: description.trim() || null,
+        items: inventoryLines.map((line) => ({
+          stock_item_id: line.stock_item_id,
+          book_quantity: line.book_quantity,
+          actual_quantity: normalizeDecimal(line.actual_quantity),
+          unit_price: normalizeDecimal(line.unit_price),
+        })),
+      });
+      setModal(null);
+      setInventorySheet(null);
+      setInventoryLines([]);
+      await loadWarehouseData();
+      setNotice(`Zatwierdzono inwentaryzację ${saved.document_number}.`);
+    });
+  }
+
   async function openAccess() {
     if (!token || selectedWarehouseId === null) return;
     setError(null);
@@ -399,6 +491,9 @@ export function WarehousePage() {
                 </button>
                 <button type="button" className="danger-outline" onClick={() => openDocumentModal("RW")}>
                   <ClipboardMinus size={18} /> Rozchód / odpis RW
+                </button>
+                <button type="button" onClick={() => void openInventory()}>
+                  <ClipboardCheck size={18} /> Inwentaryzacja
                 </button>
                 <button
                   type="button"
@@ -623,6 +718,38 @@ export function WarehousePage() {
                 <ModalActions saving={isSaving} onCancel={() => setModal(null)} onSave={() => void saveDocument()} />
               </>
             )}
+            {modal === "INVENTORY" && inventorySheet && (
+              <>
+                <div className="inventory-modal-heading">
+                  <div>
+                    <span className="eyebrow">Arkusz spisu z natury</span>
+                    <h2>Inwentaryzacja · {inventorySheet.warehouse_name}</h2>
+                  </div>
+                  <small>Stan na moment otwarcia: {formatDateTime(inventorySheet.generated_at)}</small>
+                </div>
+                <div className="warehouse-document-meta">
+                  <label>
+                    Data inwentaryzacji
+                    <input type="date" value={operationDate} onChange={(event) => setOperationDate(event.target.value)} />
+                  </label>
+                  <label>
+                    Rodzaj / podstawa
+                    <select value={reason} onChange={(event) => setReason(event.target.value)}>
+                      <option>Inwentaryzacja okresowa</option>
+                      <option>Inwentaryzacja doraźna</option>
+                      <option>Inwentaryzacja kontrolna</option>
+                      <option>Zmiana osoby odpowiedzialnej</option>
+                    </select>
+                  </label>
+                  <label className="wide">
+                    Uwagi komisji / osoby dokonującej spisu
+                    <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+                  </label>
+                </div>
+                <InventoryLines lines={inventoryLines} onChange={setInventoryLines} />
+                <ModalActions saving={isSaving} onCancel={() => setModal(null)} onSave={() => void saveInventory()} />
+              </>
+            )}
             {modal === "ACCESS" && (
               <>
                 <h2>Dostęp pracowników</h2>
@@ -652,7 +779,11 @@ export function WarehousePage() {
         <div className="admin-modal-backdrop" onClick={() => setViewingDocument(null)}>
           <section 
             className="admin-modal warehouse-modal" 
-            style={{ maxWidth: "600px", width: "100%", padding: "24px" }}
+            style={{
+              maxWidth: viewingDocument.document_type === "INW" ? "1000px" : "600px",
+              width: "100%",
+              padding: "24px",
+            }}
             onClick={(e) => e.stopPropagation()}
           >
             <button 
@@ -685,7 +816,7 @@ export function WarehousePage() {
               </div>
               {viewingDocument.reason && (
                 <div style={{ gridColumn: "1 / -1" }}>
-                  <strong>Powód RW:</strong> {viewingDocument.reason}
+                  <strong>{viewingDocument.document_type === "INW" ? "Rodzaj / podstawa:" : "Powód RW:"}</strong> {viewingDocument.reason}
                 </div>
               )}
               {viewingDocument.description && (
@@ -696,16 +827,28 @@ export function WarehousePage() {
             </div>
 
             <h3 style={{ margin: "20px 0 10px 0" }}>Pozycje dokumentu</h3>
-            <div style={{ maxHeight: "250px", overflowY: "auto", border: "1px solid #edf2f7", borderRadius: "8px", padding: "8px", background: "rgba(0,0,0,0.01)" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}>
+            <div style={{ maxHeight: "350px", overflow: "auto", border: "1px solid #edf2f7", borderRadius: "8px", padding: "8px", background: "rgba(0,0,0,0.01)" }}>
+              <table style={{ width: "100%", minWidth: viewingDocument.document_type === "INW" ? "820px" : undefined, borderCollapse: "collapse", fontSize: "0.9rem" }}>
                 <thead>
                   <tr style={{ borderBottom: "2px solid #cbd5e0", textAlign: "left" }}>
                     <th style={{ padding: "6px" }}>Towar</th>
-                    <th style={{ padding: "6px", textAlign: "right" }}>Ilość</th>
-                    {viewingDocument.document_type === "PZ" && (
+                    {viewingDocument.document_type === "INW" ? (
                       <>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Stan księgowy</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Stan faktyczny</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Różnica</th>
                         <th style={{ padding: "6px", textAlign: "right" }}>Cena jedn.</th>
-                        <th style={{ padding: "6px", textAlign: "right" }}>Wartość</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Wartość różnicy</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Ilość</th>
+                        {viewingDocument.document_type === "PZ" && (
+                          <>
+                            <th style={{ padding: "6px", textAlign: "right" }}>Cena jedn.</th>
+                            <th style={{ padding: "6px", textAlign: "right" }}>Wartość</th>
+                          </>
+                        )}
                       </>
                     )}
                   </tr>
@@ -714,15 +857,31 @@ export function WarehousePage() {
                   {viewingDocument.items.map((item) => (
                     <tr key={item.id} style={{ borderBottom: "1px solid #edf2f7" }}>
                       <td style={{ padding: "6px" }}>{item.ingredient_name}</td>
-                      <td style={{ padding: "6px", textAlign: "right" }}>{number.format(Number(item.quantity))} {item.unit}</td>
-                      {viewingDocument.document_type === "PZ" && (
+                      {viewingDocument.document_type === "INW" ? (
                         <>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatQuantity(item.book_quantity, item.unit)}</td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatQuantity(item.actual_quantity, item.unit)}</td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatSignedQuantity(item.difference_quantity, item.unit)}</td>
                           <td style={{ padding: "6px", textAlign: "right" }}>
                             {item.unit_price ? `${number.format(Number(item.unit_price))} PLN` : "—"}
                           </td>
                           <td style={{ padding: "6px", textAlign: "right" }}>
-                            {item.total_value ? `${number.format(Number(item.total_value))} PLN` : "—"}
+                            {formatSignedMoney(item.difference_value)}
                           </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{number.format(Number(item.quantity))} {item.unit}</td>
+                          {viewingDocument.document_type === "PZ" && (
+                            <>
+                              <td style={{ padding: "6px", textAlign: "right" }}>
+                                {item.unit_price ? `${number.format(Number(item.unit_price))} PLN` : "—"}
+                              </td>
+                              <td style={{ padding: "6px", textAlign: "right" }}>
+                                {item.total_value ? `${number.format(Number(item.total_value))} PLN` : "—"}
+                              </td>
+                            </>
+                          )}
                         </>
                       )}
                     </tr>
@@ -740,6 +899,86 @@ export function WarehousePage() {
         </div>
       )}
     </section>
+  );
+}
+
+function InventoryLines({
+  lines,
+  onChange,
+}: {
+  lines: InventoryLineForm[];
+  onChange: (lines: InventoryLineForm[]) => void;
+}) {
+  const summary = lines.reduce(
+    (total, line) => {
+      const unitPrice = parseDecimal(line.unit_price);
+      const book = parseDecimal(line.book_quantity);
+      const actual = parseDecimal(line.actual_quantity);
+      return {
+        bookValue: total.bookValue + book * unitPrice,
+        actualValue: total.actualValue + actual * unitPrice,
+      };
+    },
+    { bookValue: 0, actualValue: 0 },
+  );
+
+  return (
+    <div className="inventory-sheet">
+      <div className="inventory-sheet-scroll">
+        <div className="inventory-line inventory-line-header">
+          <span>Lp.</span>
+          <span>Towar</span>
+          <span>Jedn.</span>
+          <span>Stan księgowy</span>
+          <span>Stan faktyczny</span>
+          <span>Różnica</span>
+          <span>Cena jedn.</span>
+          <span>Wartość faktyczna</span>
+        </div>
+        {lines.map((line, index) => {
+          const difference = line.actual_quantity.trim() === ""
+            ? null
+            : parseDecimal(line.actual_quantity) - parseDecimal(line.book_quantity);
+          const actualValue = parseDecimal(line.actual_quantity) * parseDecimal(line.unit_price);
+          return (
+            <div className="inventory-line" key={line.stock_item_id}>
+              <span>{index + 1}</span>
+              <strong>{line.ingredient_name}</strong>
+              <span>{line.unit}</span>
+              <span>{number.format(parseDecimal(line.book_quantity))}</span>
+              <input
+                type="number"
+                min="0"
+                step="0.001"
+                value={line.actual_quantity}
+                placeholder="Wpisz ilość"
+                aria-label={`Stan faktyczny: ${line.ingredient_name}`}
+                onChange={(event) => updateInventoryLine(lines, index, { actual_quantity: event.target.value }, onChange)}
+              />
+              <span className={difference === null ? "" : difference < 0 ? "inventory-negative" : difference > 0 ? "inventory-positive" : ""}>
+                {difference === null ? "—" : signedNumber(difference)}
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={line.unit_price}
+                placeholder="0,00"
+                aria-label={`Cena jednostkowa: ${line.ingredient_name}`}
+                onChange={(event) => updateInventoryLine(lines, index, { unit_price: event.target.value }, onChange)}
+              />
+              <span>{money.format(actualValue)}</span>
+            </div>
+          );
+        })}
+      </div>
+      <div className="inventory-summary">
+        <span>Wartość księgowa <strong>{money.format(summary.bookValue)}</strong></span>
+        <span>Wartość faktyczna <strong>{money.format(summary.actualValue)}</strong></span>
+        <span>Różnica <strong className={summary.actualValue < summary.bookValue ? "inventory-negative" : "inventory-positive"}>{formatSignedMoney(String(summary.actualValue - summary.bookValue))}</strong></span>
+      </div>
+      <p className="field-help">Wpisz wynik rzeczywistego liczenia, ważenia lub mierzenia każdego towaru. Stan księgowy jest tylko punktem odniesienia.</p>
+    </div>
   );
 }
 
@@ -805,6 +1044,56 @@ function emptyLine(): DocumentLineForm {
 
 function updateLine(lines: DocumentLineForm[], index: number, line: DocumentLineForm, onChange: (lines: DocumentLineForm[]) => void) {
   onChange(lines.map((item, itemIndex) => itemIndex === index ? line : item));
+}
+
+function updateInventoryLine(
+  lines: InventoryLineForm[],
+  index: number,
+  patch: Partial<InventoryLineForm>,
+  onChange: (lines: InventoryLineForm[]) => void,
+) {
+  onChange(lines.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+}
+
+function parseDecimal(value: string): number {
+  const parsed = Number(value.replace(",", "."));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function normalizeDecimal(value: string): string {
+  return value.trim().replace(",", ".");
+}
+
+function isNonNegativeNumber(value: string): boolean {
+  const parsed = Number(normalizeDecimal(value));
+  return Number.isFinite(parsed) && parsed >= 0;
+}
+
+function signedNumber(value: number): string {
+  if (value === 0) return "0";
+  return `${value > 0 ? "+" : ""}${number.format(value)}`;
+}
+
+function formatQuantity(value: string | null, unit: string): string {
+  return value === null ? "—" : `${number.format(Number(value))} ${unit}`;
+}
+
+function formatSignedQuantity(value: string | null, unit: string): string {
+  if (value === null) return "—";
+  return `${signedNumber(Number(value))} ${unit}`;
+}
+
+function formatSignedMoney(value: string | null): string {
+  if (value === null) return "—";
+  const parsed = Number(value);
+  return `${parsed > 0 ? "+" : ""}${money.format(parsed)}`;
+}
+
+function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat("pl-PL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
 }
 
 function today(): string {

@@ -66,7 +66,27 @@ export type WarehouseDocument = {
     unit: string;
     unit_price: string | null;
     total_value: string | null;
+    book_quantity: string | null;
+    actual_quantity: string | null;
+    difference_quantity: string | null;
+    difference_value: string | null;
   }>;
+};
+
+export type InventorySheetItem = {
+  stock_item_id: number;
+  ingredient_id: number;
+  ingredient_name: string;
+  unit: string;
+  book_quantity: string;
+  suggested_unit_price: string | null;
+};
+
+export type InventorySheet = {
+  warehouse_id: number;
+  warehouse_name: string;
+  generated_at: string;
+  items: InventorySheetItem[];
 };
 
 export async function getWarehouses(token: string): Promise<Warehouse[]> {
@@ -211,6 +231,37 @@ export async function createWriteOffDocument(
   },
 ): Promise<WarehouseDocument> {
   return apiRequest<WarehouseDocument>("/stock/documents/write-offs", {
+    method: "POST",
+    token,
+    body,
+  });
+}
+
+export async function getInventorySheet(
+  token: string,
+  warehouseId: number,
+): Promise<InventorySheet> {
+  return apiRequest<InventorySheet>(`/stock/warehouses/${warehouseId}/inventory-sheet`, {
+    token,
+  });
+}
+
+export async function createInventoryDocument(
+  token: string,
+  body: {
+    warehouse_id: number;
+    operation_date: string;
+    reason: string;
+    description: string | null;
+    items: Array<{
+      stock_item_id: number;
+      book_quantity: string;
+      actual_quantity: string;
+      unit_price: string;
+    }>;
+  },
+): Promise<WarehouseDocument> {
+  return apiRequest<WarehouseDocument>("/stock/documents/inventory", {
     method: "POST",
     token,
     body,
