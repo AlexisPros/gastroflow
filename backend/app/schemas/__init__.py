@@ -128,3 +128,13 @@ from app.schemas.stock_movement import (
 from app.schemas.system_module import SystemModuleCreate, SystemModuleRead, SystemModuleUpdate
 from app.schemas.user import UserCreate, UserRead, UserUpdate
 from app.schemas.warehouse import WarehouseCreate, WarehouseRead, WarehouseUpdate
+from app.schemas.reports import (
+    ChartDataPoint,
+    EmployeeProductivityCompare,
+    AdvancedSalesReport,
+    WarehouseReportDocument,
+    WarehouseReport,
+    UserActionLogReport,
+    WarehouseUnitBreakdown,
+    WarehouseReportDocumentItem,
+)

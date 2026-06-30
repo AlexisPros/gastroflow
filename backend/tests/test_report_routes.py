@@ -247,3 +247,92 @@ def test_daily_production_report_groups_task_rows(monkeypatch):
     assert report.estimated_minutes == 40
     assert report.actual_minutes == 18
     assert report.sections[0].sold_items[0].total == Decimal("120.00")
+
+
+def test_advanced_sales_report_reaches_service(monkeypatch):
+    from app.schemas.reports import AdvancedSalesReport
+    async def build_advanced_sales_report(_db, *, period, date_str, user_id):
+        assert period == "week"
+        assert date_str == "2026-05-26"
+        return AdvancedSalesReport(
+            start_date=date(2026, 5, 25),
+            end_date=date(2026, 5, 31),
+            orders_count=1,
+            items_count=1,
+            total_sales=Decimal("100.00"),
+            total_tips=Decimal("10.00"),
+            total_discounts=Decimal("0.00"),
+            cash_total=Decimal("100.00"),
+            card_total=Decimal("0.00"),
+            other_payment_total=Decimal("0.00"),
+            sold_items=[],
+            discounts=[],
+            payment_methods=[],
+            chart_data=[],
+            average_check=Decimal("100.00"),
+            average_daily_sales=Decimal("100.00"),
+            employee_comparison=[],
+        )
+
+    monkeypatch.setattr(report_service, "build_advanced_sales_report", build_advanced_sales_report)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/reports/sales/advanced?period=week&date=2026-05-26",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["total_sales"] == "100.00"
+
+
+def test_warehouse_report_reaches_service(monkeypatch):
+    from app.schemas.reports import WarehouseReport
+    async def build_warehouse_report(_db, *, document_type, period, date_str):
+        assert period == "month"
+        assert date_str == "2026-05-26"
+        return WarehouseReport(
+            start_date=date(2026, 5, 1),
+            end_date=date(2026, 5, 31),
+            document_count=0,
+            total_positions_count=0,
+            unit_breakdown=[],
+            documents=[],
+        )
+
+    monkeypatch.setattr(report_service, "build_warehouse_report", build_warehouse_report)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/reports/warehouse?period=month&date=2026-05-26&document_type=ALL",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["document_count"] == 0
+
+
+def test_user_action_logs_reaches_service(monkeypatch):
+    async def build_user_action_logs(_db, *, user_id, date_str):
+        assert date_str == "2026-05-26"
+        return []
+
+    monkeypatch.setattr(report_service, "build_user_action_logs", build_user_action_logs)
+    override_current_user("MANAGER")
+
+    try:
+        response = client.get(
+            "/api/v1/reports/logs?date=2026-05-26",
+            headers={"Authorization": "Bearer fake-token"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
