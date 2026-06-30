@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   ClipboardCheck,
   ClipboardMinus,
+  Download,
   PackagePlus,
   Pencil,
   Plus,
@@ -24,6 +25,7 @@ import {
   createWriteOffDocument,
   deleteWarehouse,
   deleteWarehouseItem,
+  downloadWarehouseDocumentPdf,
   getStockIngredients,
   getInventorySheet,
   getWarehouseAccess,
@@ -79,6 +81,7 @@ export function WarehousePage() {
   const [modal, setModal] = useState<ModalKind>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [warehouseName, setWarehouseName] = useState("");
@@ -418,6 +421,25 @@ export function WarehousePage() {
       setError(errorMessage(exc, "Nie udało się zapisać zmian."));
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function downloadDocument(document: WarehouseDocument) {
+    if (!token) return;
+    setDownloadingDocumentId(document.id);
+    setError(null);
+    try {
+      const blob = await downloadWarehouseDocumentPdf(token, document.id);
+      const url = URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `${document.document_number.replaceAll("/", "-")}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (exc) {
+      setError(errorMessage(exc, "Nie udało się pobrać dokumentu PDF."));
+    } finally {
+      setDownloadingDocumentId(null);
     }
   }
 
@@ -890,9 +912,18 @@ export function WarehousePage() {
               </table>
             </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
               <button type="button" className="ghost-button" onClick={() => setViewingDocument(null)}>
                 Zamknij
+              </button>
+              <button
+                type="button"
+                className="admin-primary"
+                disabled={downloadingDocumentId === viewingDocument.id}
+                onClick={() => void downloadDocument(viewingDocument)}
+              >
+                <Download size={17} />
+                {downloadingDocumentId === viewingDocument.id ? "Generowanie..." : "Pobierz PDF"}
               </button>
             </div>
           </section>

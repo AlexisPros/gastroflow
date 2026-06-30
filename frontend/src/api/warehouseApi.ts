@@ -1,4 +1,4 @@
-import { apiRequest } from "./apiClient";
+import { apiBlobRequest, apiRequest } from "./apiClient";
 
 export type Warehouse = {
   id: number;
@@ -185,6 +185,13 @@ export async function getWarehouseDocuments(
   warehouseId: number,
 ): Promise<WarehouseDocument[]> {
   return apiRequest<WarehouseDocument[]>(`/stock/documents?warehouse_id=${warehouseId}`, { token });
+}
+
+export async function downloadWarehouseDocumentPdf(
+  token: string,
+  documentId: number,
+): Promise<Blob> {
+  return apiBlobRequest(`/stock/documents/${documentId}/pdf`, { token });
 }
 
 export async function createReceiptDocument(
