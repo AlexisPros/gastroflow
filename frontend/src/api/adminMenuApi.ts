@@ -46,12 +46,30 @@ export type AdminProductModifier = {
   modifier_name?: string | null;
   modifier_price: string;
   price_override?: string | null;
+  stock_ingredient_id?: number | null;
+  stock_ingredient_name?: string | null;
+  stock_ingredient_unit?: string | null;
+  stock_quantity?: string | null;
+  replaces_ingredient_id?: number | null;
+  replaces_ingredient_name?: string | null;
   is_active: boolean;
 };
 
-export type AdminProductModifierRead = Required<
-  Pick<AdminProductModifier, "id" | "modifier_id" | "modifier_name" | "modifier_price" | "price_override" | "is_active">
->;
+export type AdminProductModifierRead = Required<Pick<
+  AdminProductModifier,
+  | "id"
+  | "modifier_id"
+  | "modifier_name"
+  | "modifier_price"
+  | "price_override"
+  | "stock_ingredient_id"
+  | "stock_ingredient_name"
+  | "stock_ingredient_unit"
+  | "stock_quantity"
+  | "replaces_ingredient_id"
+  | "replaces_ingredient_name"
+  | "is_active"
+>>;
 
 export type AdminProductStep = {
   id?: number | null;
@@ -69,6 +87,7 @@ export type AdminProduct = {
   id: number;
   category_id: number;
   kitchen_section_id: number | null;
+  warehouse_id: number | null;
   name: string;
   description: string | null;
   image_url: string | null;
@@ -84,6 +103,7 @@ export type AdminProduct = {
 export type AdminProductPayload = {
   category_id: number;
   kitchen_section_id: number | null;
+  warehouse_id: number | null;
   name: string;
   description: string | null;
   image_url: string | null;

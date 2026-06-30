@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, Clock3, Info, LockKeyhole, Play } from "lucide-react";
 import { useAuth } from "../auth/useAuth";
 import {
@@ -10,12 +10,20 @@ import {
 } from "../api/kitchenApi";
 import { connectLiveUpdates } from "../ws/liveUpdates";
 import type { WebSocketMessage } from "../shared/types";
-import { getOrderTimingState } from "../shared/orderTiming";
+import {
+  getKitchenTaskTimingState,
+  getWorstTimingState,
+} from "../shared/orderTiming";
 
 // Audio alert using Web Audio API for soft double chime
 const playBarAlertSound = () => {
   try {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    const audioWindow = window as Window & {
+      webkitAudioContext?: typeof AudioContext;
+    };
+    const AudioContextConstructor = window.AudioContext ?? audioWindow.webkitAudioContext;
+    if (!AudioContextConstructor) return;
+    const audioCtx = new AudioContextConstructor();
     const osc1 = audioCtx.createOscillator();
     const gain = audioCtx.createGain();
     
@@ -71,18 +79,18 @@ export function BarPage() {
   }, [token]);
 
   // Load bar tasks
-  const loadTasks = async () => {
+  const loadTasks = useCallback(async () => {
     if (!token || barSectionId === undefined) return [] as KitchenSectionTask[];
     try {
       const activeTasks = await getActiveSectionTasks(token, barSectionId);
       setTasks(activeTasks);
       setError(null);
       return activeTasks;
-    } catch (err: any) {
-      setError("Błąd pobierania zadań baru: " + (err.message || err));
+    } catch (err: unknown) {
+      setError("Błąd pobierania zadań baru: " + getErrorMessage(err));
       return [] as KitchenSectionTask[];
     }
-  };
+  }, [barSectionId, token]);
 
   // Poll time for elapsed timers
   useEffect(() => {
@@ -92,8 +100,8 @@ export function BarPage() {
 
   // Fetch when barSectionId changes
   useEffect(() => {
-    loadTasks();
-  }, [token, barSectionId]);
+    void loadTasks();
+  }, [loadTasks]);
 
   // WebSocket Live Updates
   useEffect(() => {
@@ -123,7 +131,7 @@ export function BarPage() {
               message.event === "qr_order_confirmed" ||
               message.event === "order_items_added"
             ) {
-              const data = message.data as any;
+              const data = message.data as LiveOrderEventData;
               const orderId = Number(data.order_id);
               if (!activeTasks.some((task) => task.order_id === orderId)) {
                 return;
@@ -148,15 +156,15 @@ export function BarPage() {
     });
 
     return cleanup;
-  }, [token, barSectionId]);
+  }, [token, barSectionId, loadTasks]);
 
   const handleStartTask = async (taskId: number) => {
     if (!token) return;
     try {
       await startKitchenTask(token, taskId);
       loadTasks();
-    } catch (err: any) {
-      alert("Błąd rozpoczęcia zadania: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd rozpoczęcia zadania: " + getErrorMessage(err));
     }
   };
 
@@ -165,8 +173,8 @@ export function BarPage() {
     try {
       await completeKitchenTask(token, taskId);
       loadTasks();
-    } catch (err: any) {
-      alert("Błąd zakończenia zadania: " + err.message);
+    } catch (err: unknown) {
+      alert("Błąd zakończenia zadania: " + getErrorMessage(err));
     }
   };
 
@@ -181,6 +189,7 @@ export function BarPage() {
   const pendingTasks = tasks.filter((t) => t.status === "NEW" || t.status === "PENDING");
   const inProgressTasks = tasks.filter((t) => t.status === "IN_PROGRESS");
   const barTaskOrders = groupBarTasksByOrder(tasks);
+  const showLegacyColumns = false;
 
   return (
     <section className="page-stack" style={{ padding: "20px" }}>
@@ -216,17 +225,21 @@ export function BarPage() {
         </button>
       </div>
 
+      {error && <div className="form-error">{error}</div>}
+
       {/* Bar tasks grouped by check */}
       <div className="kitchen-order-board bar-order-board">
         {barTaskOrders.map((orderGroup) => {
           const inProgressCount = orderGroup.tasks.filter(
             (task) => task.status === "IN_PROGRESS",
           ).length;
-          const timing = getOrderTimingState(
-            orderGroup.createdAt,
-            orderGroup.estimatedTime,
-            now,
+          const taskTimings = orderGroup.tasks.map((task) =>
+            getKitchenTaskTimingState(task, now),
           );
+          const timing = getWorstTimingState(taskTimings);
+          const delayedTaskCount = taskTimings.filter(
+            (taskTiming) => taskTiming.tone !== "on-time",
+          ).length;
 
           return (
             <article
@@ -248,7 +261,7 @@ export function BarPage() {
                   }
                 >
                   {timing.tone !== "on-time"
-                    ? `Opóźnienie ${timing.delayMinutes} min`
+                    ? `Opóźnione: ${delayedTaskCount} · maks. ${timing.delayMinutes} min`
                     : inProgressCount > 0
                     ? `W trakcie: ${inProgressCount}`
                     : `Oczekuje: ${orderGroup.tasks.length}`}
@@ -259,13 +272,15 @@ export function BarPage() {
                 {orderGroup.tasks.map((task) => {
                   const isInProgress = task.status === "IN_PROGRESS";
                   const isBlocked = !isInProgress && !task.can_start;
+                  const taskTiming = getKitchenTaskTimingState(task, now);
+                  const waitingText = getWaitingTimeText(task.item_created_at);
 
                   return (
                     <section
                       key={task.id}
                       className={`kitchen-order-task ${
                         isInProgress ? "in-progress" : isBlocked ? "blocked" : "ready"
-                      }`}
+                      } ${taskTiming.tone}`}
                     >
                       <div className="kitchen-order-task-meta">
                         <span>{task.quantity}x {task.product_name}</span>
@@ -302,9 +317,11 @@ export function BarPage() {
                           <Clock3 aria-hidden="true" />
                           {isInProgress && task.started_at
                             ? `W toku ${getWaitingTimeText(task.started_at)}`
+                            : isBlocked
+                              ? "Oczekuje na poprzedni krok"
                             : task.estimated_time
-                              ? `${task.estimated_time} min`
-                              : "Bez czasu"}
+                              ? `Oczekuje ${waitingText} · ${task.estimated_time} min`
+                              : `Oczekuje ${waitingText}`}
                         </span>
                         {isInProgress ? (
                           <button
@@ -351,7 +368,7 @@ export function BarPage() {
       </div>
 
       {/* Previous column view kept out of the render path while grouped checks are active. */}
-      {false && (
+      {showLegacyColumns && (
       <div
         style={{
           display: "flex",
@@ -788,10 +805,17 @@ export function BarPage() {
 type BarTaskOrderGroup = {
   orderId: number;
   tableNumber: string | null;
-  createdAt: string;
-  estimatedTime: number | null;
   tasks: KitchenSectionTask[];
 };
+
+type LiveOrderEventData = {
+  order_id?: number | string;
+  table_number?: string | null;
+};
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] {
   const groups = new Map<number, BarTaskOrderGroup>();
@@ -800,8 +824,6 @@ function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] 
     const group = groups.get(task.order_id) ?? {
       orderId: task.order_id,
       tableNumber: task.table_number,
-      createdAt: task.order_created_at,
-      estimatedTime: task.order_estimated_time,
       tasks: [],
     };
     group.tasks.push(task);
@@ -809,15 +831,15 @@ function groupBarTasksByOrder(tasks: KitchenSectionTask[]): BarTaskOrderGroup[] 
   }
 
   return Array.from(groups.values()).map((group) => ({
-    ...group,
-    tasks: [...group.tasks].sort((first, second) => {
-      if (first.course_number !== second.course_number) {
-        return first.course_number - second.course_number;
-      }
-      if (first.order_item_id !== second.order_item_id) {
-        return first.order_item_id - second.order_item_id;
-      }
-      return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
-    }),
-  }));
+      ...group,
+      tasks: [...group.tasks].sort((first, second) => {
+        if (first.course_number !== second.course_number) {
+          return first.course_number - second.course_number;
+        }
+        if (first.order_item_id !== second.order_item_id) {
+          return first.order_item_id - second.order_item_id;
+        }
+        return (first.step_sequence ?? 0) - (second.step_sequence ?? 0);
+      }),
+    }));
 }

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from app.models.order import Order
     from app.models.order_action_log import OrderActionLog
     from app.models.order_transfer_log import OrderTransferLog
+    from app.models.warehouse_user_access import WarehouseUserAccess
 
 
 class User(Base):
@@ -114,4 +115,10 @@ class User(Base):
     employee_shift_reports: Mapped[list[EmployeeShiftReport]] = relationship(
         "EmployeeShiftReport",
         back_populates="user",
+    )
+
+    warehouse_accesses: Mapped[list[WarehouseUserAccess]] = relationship(
+        "WarehouseUserAccess",
+        back_populates="user",
+        cascade="all, delete-orphan",
     )

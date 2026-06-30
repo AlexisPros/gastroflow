@@ -122,6 +122,9 @@ class AdminProductModifierInput(BaseModel):
     modifier_name: str | None = Field(default=None, max_length=150)
     modifier_price: Decimal = Decimal("0.00")
     price_override: Decimal | None = None
+    stock_ingredient_id: int | None = None
+    stock_quantity: Decimal | None = Field(default=None, gt=Decimal("0"))
+    replaces_ingredient_id: int | None = None
     is_active: bool = True
 
 
@@ -131,6 +134,12 @@ class AdminProductModifierRead(BaseModel):
     modifier_name: str
     modifier_price: Decimal
     price_override: Decimal | None
+    stock_ingredient_id: int | None
+    stock_ingredient_name: str | None
+    stock_ingredient_unit: str | None
+    stock_quantity: Decimal | None
+    replaces_ingredient_id: int | None
+    replaces_ingredient_name: str | None
     is_active: bool
 
 
@@ -160,6 +169,7 @@ class AdminProductStepRead(BaseModel):
 class AdminProductBase(BaseModel):
     category_id: int
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str = Field(min_length=1, max_length=150)
     description: str | None = None
     image_url: str | None = None
@@ -179,6 +189,7 @@ class AdminProductCreate(AdminProductBase):
 class AdminProductUpdate(BaseModel):
     category_id: int | None = None
     kitchen_section_id: int | None = None
+    warehouse_id: int | None = None
     name: str | None = Field(default=None, min_length=1, max_length=150)
     description: str | None = None
     image_url: str | None = None
@@ -195,6 +206,7 @@ class AdminProductRead(BaseModel):
     id: int
     category_id: int
     kitchen_section_id: int | None
+    warehouse_id: int | None
     name: str
     description: str | None
     image_url: str | None
@@ -451,6 +463,7 @@ async def create_product(body: AdminProductCreate, db: DbSession) -> AdminProduc
     product = Product(
         category_id=body.category_id,
         kitchen_section_id=body.kitchen_section_id,
+        warehouse_id=body.warehouse_id,
         name=body.name.strip(),
         description=body.description,
         image_url=body.image_url,
@@ -483,6 +496,7 @@ async def update_product(
     for field in [
         "category_id",
         "kitchen_section_id",
+        "warehouse_id",
         "name",
         "description",
         "image_url",
@@ -603,12 +617,29 @@ async def _sync_product_children(
         existing = {item.id: item for item in existing_links}
         seen_ids: set[int] = set()
         for item in body.modifiers:
+            if (item.stock_ingredient_id is None) != (item.stock_quantity is None):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Stock ingredient and stock quantity must be configured together.",
+                )
+            if item.replaces_ingredient_id is not None and item.stock_ingredient_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Replacement modifier must define the stock ingredient to consume.",
+                )
+            if item.stock_ingredient_id is not None:
+                await _get_ingredient_or_404(db, item.stock_ingredient_id)
+            if item.replaces_ingredient_id is not None:
+                await _get_ingredient_or_404(db, item.replaces_ingredient_id)
             modifier = await _resolve_modifier(db, item)
             link = existing.get(item.id) if item.id is not None else None
             if link is None:
                 link = ProductModifier(product_id=product.id, modifier_id=modifier.id)
             link.modifier_id = modifier.id
             link.price_override = item.price_override
+            link.stock_ingredient_id = item.stock_ingredient_id
+            link.stock_quantity = item.stock_quantity
+            link.replaces_ingredient_id = item.replaces_ingredient_id
             link.is_active = item.is_active
             db.add(link)
             await db.flush()
@@ -739,6 +770,8 @@ async def _reload_product_read(db: DbSession, product_id: int) -> AdminProductRe
         .options(
             selectinload(Product.product_ingredients).selectinload(ProductIngredient.ingredient),
             selectinload(Product.product_modifiers).selectinload(ProductModifier.modifier),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.stock_ingredient),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.replaces_ingredient),
             selectinload(Product.kitchen_steps).selectinload(ProductKitchenStep.kitchen_section),
         )
         .execution_options(populate_existing=True),
@@ -784,6 +817,8 @@ async def _list_products(db: DbSession) -> list[Product]:
         .options(
             selectinload(Product.product_ingredients).selectinload(ProductIngredient.ingredient),
             selectinload(Product.product_modifiers).selectinload(ProductModifier.modifier),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.stock_ingredient),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.replaces_ingredient),
             selectinload(Product.kitchen_steps).selectinload(ProductKitchenStep.kitchen_section),
         )
         .order_by(Product.name),
@@ -805,6 +840,8 @@ async def _get_product_or_404(db: DbSession, product_id: int) -> Product:
         options=[
             selectinload(Product.product_ingredients).selectinload(ProductIngredient.ingredient),
             selectinload(Product.product_modifiers).selectinload(ProductModifier.modifier),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.stock_ingredient),
+            selectinload(Product.product_modifiers).selectinload(ProductModifier.replaces_ingredient),
             selectinload(Product.kitchen_steps).selectinload(ProductKitchenStep.kitchen_section),
         ],
     )
@@ -956,6 +993,7 @@ def _product_read(product: Product) -> AdminProductRead:
         id=product.id,
         category_id=product.category_id,
         kitchen_section_id=product.kitchen_section_id,
+        warehouse_id=product.warehouse_id,
         name=product.name,
         description=product.description,
         image_url=product.image_url,
@@ -980,6 +1018,18 @@ def _product_read(product: Product) -> AdminProductRead:
                 modifier_name=item.modifier.name,
                 modifier_price=item.modifier.price,
                 price_override=item.price_override,
+                stock_ingredient_id=item.stock_ingredient_id,
+                stock_ingredient_name=(
+                    item.stock_ingredient.name if item.stock_ingredient is not None else None
+                ),
+                stock_ingredient_unit=(
+                    item.stock_ingredient.unit if item.stock_ingredient is not None else None
+                ),
+                stock_quantity=item.stock_quantity,
+                replaces_ingredient_id=item.replaces_ingredient_id,
+                replaces_ingredient_name=(
+                    item.replaces_ingredient.name if item.replaces_ingredient is not None else None
+                ),
                 is_active=item.is_active,
             )
             for item in product.product_modifiers

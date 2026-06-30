@@ -43,6 +43,9 @@ DEV_USERS = [
 ]
 
 OPERATIONAL_TABLES = [
+    "warehouse_document_items",
+    "stock_movements",
+    "warehouse_documents",
     "bill_segment_items",
     "bill_segments",
     "employee_shift_reports",
@@ -59,10 +62,12 @@ OPERATIONAL_TABLES = [
     "reservations",
     "floor_plan_tables",
     "restaurant_tables",
-    "stock_movements",
 ]
 
 TABLES_WITH_SERIAL_ID = [
+    "warehouse_document_items",
+    "warehouse_documents",
+    "warehouse_user_accesses",
     "bill_segment_items",
     "bill_segments",
     "discounts",
@@ -469,6 +474,8 @@ async def seed_stock(
         defaults={"type": "MAIN"},
     )
     warehouse.type = "MAIN"
+    warehouse.is_active = True
+    warehouse.is_default = True
 
     ingredients_data = [
         ("Bulka burgerowa", "szt", Decimal("100.00"), Decimal("10.00")),

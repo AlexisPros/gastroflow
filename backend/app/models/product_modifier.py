@@ -9,6 +9,7 @@ from decimal import Decimal
 from app.db.base import Base
 
 if TYPE_CHECKING:
+    from app.models.ingredient import Ingredient
     from app.models.modifier import Modifier
     from app.models.order_item_modifier import OrderItemModifier
     from app.models.product import Product
@@ -27,6 +28,21 @@ class ProductModifier(Base):
     modifier_id: Mapped[int] = mapped_column(
         ForeignKey("modifiers.id"),
         nullable=False,
+    )
+
+    stock_ingredient_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ingredients.id"),
+        nullable=True,
+    )
+
+    replaces_ingredient_id: Mapped[int | None] = mapped_column(
+        ForeignKey("ingredients.id"),
+        nullable=True,
+    )
+
+    stock_quantity: Mapped[Decimal | None] = mapped_column(
+        Numeric(14, 3),
+        nullable=True,
     )
 
     price_override: Mapped[Decimal | None] = mapped_column(
@@ -48,6 +64,16 @@ class ProductModifier(Base):
     modifier: Mapped[Modifier] = relationship(
         "Modifier",
         back_populates="product_modifiers",
+    )
+
+    stock_ingredient: Mapped[Ingredient | None] = relationship(
+        "Ingredient",
+        foreign_keys=[stock_ingredient_id],
+    )
+
+    replaces_ingredient: Mapped[Ingredient | None] = relationship(
+        "Ingredient",
+        foreign_keys=[replaces_ingredient_id],
     )
 
     order_item_modifiers: Mapped[list[OrderItemModifier]] = relationship(

@@ -25,6 +25,9 @@ from seed_dev_data import (
 )
 
 TEST_DATA_TABLES = [
+    "warehouse_document_items",
+    "stock_movements",
+    "warehouse_documents",
     "bill_segment_items",
     "bill_segments",
     "employee_shift_reports",
@@ -39,10 +42,12 @@ TEST_DATA_TABLES = [
     "employee_shifts",
     "reservation_tables",
     "reservations",
-    "stock_movements",
 ]
 
 SERIAL_TABLES = [
+    "warehouse_document_items",
+    "warehouse_documents",
+    "warehouse_user_accesses",
     "bill_segment_items",
     "bill_segments",
     "discounts",

@@ -7,11 +7,11 @@ import { GuestQrPage } from "../pages/GuestQrPage";
 import { LoginPage } from "../pages/LoginPage";
 import { AdminMenuPage } from "../pages/AdminMenuPage";
 import { AdminUsersPage } from "../pages/AdminUsersPage";
-import { PlaceholderPage } from "../pages/PlaceholderPage";
 import { ReportsPage } from "../pages/ReportsPage";
 import { WaiterPage } from "../pages/WaiterPage";
 import { KitchenPage } from "../pages/KitchenPage";
 import { BarPage } from "../pages/BarPage";
+import { WarehousePage } from "../pages/WarehousePage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { routes } from "./routePaths";
 
@@ -44,6 +44,15 @@ const router = createBrowserRouter([
               {
                 path: routes.waiter,
                 element: <WaiterPage />,
+              },
+            ],
+          },
+          {
+            element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"]} />,
+            children: [
+              {
+                path: routes.warehouse,
+                element: <WarehousePage />,
               },
             ],
           },

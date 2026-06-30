@@ -36,6 +36,9 @@ from app.models.product_ingredient import ProductIngredient
 from app.models.warehouse import Warehouse
 from app.models.stock_item import StockItem
 from app.models.stock_movement import StockMovement
+from app.models.warehouse_document import WarehouseDocument
+from app.models.warehouse_document_item import WarehouseDocumentItem
+from app.models.warehouse_user_access import WarehouseUserAccess
 
 from app.models.restaurant_config import RestaurantConfig
 from app.models.system_module import SystemModule
