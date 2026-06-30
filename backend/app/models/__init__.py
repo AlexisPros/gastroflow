@@ -4,6 +4,8 @@ from app.models.employee_shift_report import EmployeeShiftReport
 from app.models.restaurant_table import RestaurantTable
 from app.models.reservation import Reservation
 from app.models.reservation_table import ReservationTable
+from app.models.reservation_item import ReservationItem
+from app.models.reservation_payment import ReservationPayment
 from app.models.floor_plan import FloorPlan
 from app.models.floor_plan_decoration import FloorPlanDecoration
 from app.models.floor_plan_table import FloorPlanTable

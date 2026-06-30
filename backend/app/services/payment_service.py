@@ -4,12 +4,16 @@ from typing import NotRequired, TypedDict
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.core.websocket_manager import websocket_manager
 from app.crud import order as crud_order
 from app.models.order import Order
 from app.models.order_action_log import OrderActionLog
 from app.models.payment import Payment
+from app.models.reservation import Reservation
+from app.models.reservation_table import ReservationTable
+from app.models.restaurant_table import RestaurantTable
 
 
 class PaymentInput(TypedDict):
@@ -93,7 +97,12 @@ class PaymentService:
 
         if order.status not in {"OPEN", "IN_PROGRESS"}:
             raise ValueError("Only an active order can be paid.")
-        if not payments:
+        amount_due = max(
+            order.total_amount
+            - (order.reservation_prepaid_amount or Decimal("0.00")),
+            Decimal("0.00"),
+        )
+        if not payments and amount_due > 0:
             raise ValueError("At least one payment is required.")
 
         existing_result = await db.execute(
@@ -153,12 +162,31 @@ class PaymentService:
             created.append(payment)
             payment_total += amount
 
-        if payment_total != order.total_amount:
-            raise ValueError("Payment total must exactly match the order total.")
+        if payment_total != amount_due:
+            raise ValueError("Payment total must exactly match the remaining order total.")
 
         order.status = "CLOSED"
         order.closed_at = datetime.now(timezone.utc)
         await crud_order._release_table_if_no_active_orders(db, order=order)
+        if order.reservation_id is not None:
+            reservation_result = await db.execute(
+                select(Reservation)
+                .options(selectinload(Reservation.reservation_tables))
+                .where(Reservation.id == order.reservation_id)
+            )
+            reservation = reservation_result.scalar_one_or_none()
+            if reservation is not None:
+                reservation.status = "COMPLETED"
+                db.add(reservation)
+                table_ids = [link.table_id for link in reservation.reservation_tables]
+                if table_ids:
+                    tables_result = await db.execute(
+                        select(RestaurantTable).where(RestaurantTable.id.in_(table_ids))
+                    )
+                    for table in tables_result.scalars().all():
+                        table.status = "FREE"
+                        table.current_guests = None
+                        db.add(table)
         db.add(order)
         await db.commit()
         await db.refresh(order)

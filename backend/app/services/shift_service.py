@@ -13,6 +13,7 @@ from app.models.employee_shift_report import EmployeeShiftReport
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.payment import Payment
+from app.models.reservation_payment import ReservationPayment
 from app.models.product import Product
 from app.models.user import User
 
@@ -133,9 +134,14 @@ class ShiftService:
 
         sold_items = await self._build_sold_items(db, order_ids=order_ids)
         discounts = await self._build_discounts_breakdown(db, orders=orders)
-        payment_methods = await self._build_payment_methods(db, order_ids=order_ids)
+        payment_methods = await self._build_payment_methods(
+            db, order_ids=order_ids, shift_id=shift.id
+        )
 
-        total_sales = sum((order.total_amount for order in orders), Decimal("0.00"))
+        total_sales = sum(
+            (Decimal(item["total"]) for item in payment_methods),
+            Decimal("0.00"),
+        )
         total_tips = sum((order.tip_amount for order in orders), Decimal("0.00"))
         total_discounts = sum(
             (order.discount_amount for order in orders),
@@ -278,21 +284,32 @@ class ShiftService:
         db: AsyncSession,
         *,
         order_ids: list[int],
+        shift_id: int | None = None,
     ) -> list[dict[str, Any]]:
-        if not order_ids:
+        if not order_ids and shift_id is None:
             return []
-
-        result = await db.execute(
-            select(Payment).where(
-                Payment.order_id.in_(order_ids),
-                Payment.status == "COMPLETED",
-            ),
-        )
 
         grouped: dict[str, dict[str, Any]] = defaultdict(
             lambda: {"method": "", "count": 0, "total": Decimal("0.00")},
         )
-        for payment in result.scalars().all():
+        payments: list[Payment | ReservationPayment] = []
+        if order_ids:
+            result = await db.execute(
+                select(Payment).where(
+                    Payment.order_id.in_(order_ids),
+                    Payment.status == "COMPLETED",
+                ),
+            )
+            payments.extend(result.scalars().all())
+        if shift_id is not None:
+            reservation_result = await db.execute(
+                select(ReservationPayment).where(
+                    ReservationPayment.shift_id == shift_id,
+                    ReservationPayment.status == "COMPLETED",
+                )
+            )
+            payments.extend(reservation_result.scalars().all())
+        for payment in payments:
             method = payment.method.upper()
             row = grouped[method]
             row["method"] = method

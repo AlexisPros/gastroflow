@@ -12,6 +12,7 @@ from app.models.kitchen_task import KitchenTask
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.payment import Payment
+from app.models.reservation_payment import ReservationPayment
 from app.models.product import Product
 from app.schemas.daily_report import (
     DailyOperationsReport,
@@ -37,7 +38,10 @@ class ReportService:
 
         sold_items = await self._build_sold_items(db, order_ids=order_ids)
         discounts = await self._build_discounts_breakdown(db, orders=orders)
-        payment_methods = await self._build_payment_methods(db, order_ids=order_ids)
+        start_at, end_at = self._day_bounds(current_date)
+        payment_methods = await self._build_payment_methods(
+            db, order_ids=order_ids, reservation_payment_window=(start_at, end_at)
+        )
 
         payment_totals = {
             item.method: item.total
@@ -56,7 +60,7 @@ class ReportService:
             report_date=current_date,
             orders_count=len(orders),
             items_count=sum(item.quantity for item in sold_items),
-            total_sales=sum((order.total_amount for order in orders), Decimal("0.00")),
+            total_sales=sum((item.total for item in payment_methods), Decimal("0.00")),
             total_tips=sum((order.tip_amount for order in orders), Decimal("0.00")),
             total_discounts=sum(
                 (order.discount_amount for order in orders),
@@ -304,21 +308,34 @@ class ReportService:
         db: AsyncSession,
         *,
         order_ids: list[int],
+        reservation_payment_window: tuple[datetime, datetime] | None = None,
     ) -> list[ReportPaymentMethod]:
-        if not order_ids:
+        if not order_ids and reservation_payment_window is None:
             return []
-
-        result = await db.execute(
-            select(Payment).where(
-                Payment.order_id.in_(order_ids),
-                Payment.status == "COMPLETED",
-            ),
-        )
 
         grouped: dict[str, ReportPaymentMethod] = defaultdict(
             lambda: ReportPaymentMethod(method="", count=0, total=Decimal("0.00")),
         )
-        for payment in result.scalars().all():
+        payments: list[Payment | ReservationPayment] = []
+        if order_ids:
+            result = await db.execute(
+                select(Payment).where(
+                    Payment.order_id.in_(order_ids),
+                    Payment.status == "COMPLETED",
+                ),
+            )
+            payments.extend(result.scalars().all())
+        if reservation_payment_window is not None:
+            start_at, end_at = reservation_payment_window
+            reservation_result = await db.execute(
+                select(ReservationPayment).where(
+                    ReservationPayment.status == "COMPLETED",
+                    ReservationPayment.created_at >= start_at,
+                    ReservationPayment.created_at < end_at,
+                )
+            )
+            payments.extend(reservation_result.scalars().all())
+        for payment in payments:
             method = payment.method.upper()
             row = grouped[method]
             row.method = method

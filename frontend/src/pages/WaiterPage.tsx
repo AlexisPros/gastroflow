@@ -1872,7 +1872,11 @@ export function WaiterPage() {
       return;
     }
 
-    const total = Number(selectedOrder.total_amount);
+    const total = Math.max(
+      Number(selectedOrder.total_amount)
+        - Number(selectedOrder.reservation_prepaid_amount ?? 0),
+      0,
+    );
     const payments: Array<{
       method: "CARD" | "CASH";
       amount: string;
@@ -1880,7 +1884,9 @@ export function WaiterPage() {
       idempotency_key: string;
     }> = [];
 
-    if (method === "CARD") {
+    if (total === 0) {
+      // A fully prepaid reservation closes without charging the guest again.
+    } else if (method === "CARD") {
       payments.push({
         method: "CARD",
         amount: total.toFixed(2),

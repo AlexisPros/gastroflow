@@ -9,6 +9,7 @@ from app.models.invoice import Invoice
 from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.product import Product
+from app.models.reservation import Reservation
 
 MONEY = Decimal("0.01")
 VAT_RATE_LETTERS = {
@@ -94,6 +95,109 @@ class FiscalService:
             ],
         )
 
+        return "\n".join(lines)
+
+    async def generate_reservation_guest_check_text(
+        self,
+        db: AsyncSession,
+        *,
+        reservation: Reservation,
+    ) -> str:
+        created_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        lines = [
+            "GastroFlow",
+            "REZERWACJA - KARTA GOSCIA",
+            f"Rezerwacja: GF-RES-{reservation.id:06d}",
+            f"Klient: {reservation.customer_name}",
+            f"Telefon: {reservation.customer_phone}",
+            f"Czas: {reservation.reservation_time.strftime('%Y-%m-%d %H:%M')}",
+            f"Date: {created_at}",
+            "-" * 40,
+        ]
+
+        for item in reservation.items:
+            lines.append(item.product.name)
+            lines.append(
+                f"  {item.quantity} x {item.unit_price:.2f} "
+                f"{item.total_price:.2f}",
+            )
+
+        lines.extend(
+            [
+                "-" * 40,
+                f"Total: {reservation.total_amount:.2f}",
+                f"Prepaid: {reservation.prepaid_amount:.2f}",
+                "-" * 40,
+                "Dokument niefiskalny.",
+            ],
+        )
+        return "\n".join(lines)
+
+    async def generate_reservation_text_receipt(
+        self,
+        db: AsyncSession,
+        *,
+        reservation: Reservation,
+    ) -> str:
+        receipt_number = f"RES-{reservation.id:06d}/{datetime.now(timezone.utc):%Y%m%d}"
+        lines = [
+            "GASTROFLOW SP. Z O.O.",
+            "ul. Demo 1",
+            "00-000 Warszawa",
+            "NIP 0000000000",
+            "-" * 32,
+            "PARAGON FISKALNY (ZALICZKA)",
+            f"NR WYDRUKU {receipt_number}",
+            f"DATA {datetime.now(timezone.utc):%Y-%m-%d %H:%M}",
+        ]
+
+        if reservation.invoice_nip:
+            lines.append(f"NIP NABYWCY {reservation.invoice_nip}")
+
+        lines.append("-" * 32)
+
+        vat_summary: dict[Decimal, dict[str, Decimal]] = {}
+        for item in reservation.items:
+            product = item.product
+            rate = self._normalize_rate(product.vat_rate)
+            vat_letter = self._vat_letter(rate)
+            lines.extend(
+                [
+                    self._fit_line(
+                        product.name[:22],
+                        f"{item.total_price:.2f}{vat_letter}",
+                    ),
+                    f"  {item.quantity} x {item.unit_price:.2f}",
+                ],
+            )
+            tax = self._round_money(item.total_price * rate / (Decimal("100.00") + rate))
+            net = item.total_price - tax
+            if rate not in vat_summary:
+                vat_summary[rate] = {"gross": Decimal("0.00"), "net": Decimal("0.00"), "tax": Decimal("0.00")}
+            vat_summary[rate]["gross"] += item.total_price
+            vat_summary[rate]["net"] += net
+            vat_summary[rate]["tax"] += tax
+
+        lines.append("-" * 32)
+        total_tax = Decimal("0.00")
+        for rate, summary in sorted(vat_summary.items(), reverse=True):
+            vat_letter = self._vat_letter(rate)
+            total_tax += summary["tax"]
+            lines.append(self._fit_line(f"SP.OP.{vat_letter} {rate:.2f}%", f"{summary['gross']:.2f}"))
+            lines.append(self._fit_line(f"PTU {vat_letter} {rate:.2f}%", f"{summary['tax']:.2f}"))
+
+        lines.extend(
+            [
+                "-" * 32,
+                self._fit_line("SUMA PTU", f"{total_tax:.2f}"),
+                self._fit_line("SUMA PLN", f"{reservation.total_amount:.2f}"),
+                self._fit_line("ZAPLACONO", f"{reservation.total_amount:.2f}"),
+                "-" * 32,
+                "PL 0000000000",
+                "BF 0000000000",
+                "DZIEKUJEMY",
+            ],
+        )
         return "\n".join(lines)
 
     async def generate_text_receipt(

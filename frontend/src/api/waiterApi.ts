@@ -33,6 +33,8 @@ export type Order = {
   shift_id: number | null;
   split_parent_order_id: number | null;
   qr_parent_order_id: number | null;
+  reservation_id: number | null;
+  reservation_prepaid_amount: string | null;
   split_sequence: number | null;
   guest_count: number | null;
   source: string;

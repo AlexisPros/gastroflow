@@ -1,4 +1,4 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 
 from app.api.deps import (
@@ -9,6 +9,7 @@ from app.api.deps import (
     raise_forbidden,
 )
 from app.crud import order as crud_order
+from app.crud import reservation as crud_reservation
 from app.models.order import Order
 from app.services import authorization_service, fiscal_service, mock_printer_service
 
@@ -109,4 +110,44 @@ async def generate_guest_check_pdf(order_id: int, db: DbSession, current_user: C
         pdf_path,
         media_type="application/pdf",
         filename=pdf_path.name,
+    )
+
+
+@router.post("/reservations/{reservation_id}/receipt/pdf")
+async def generate_reservation_receipt_pdf(reservation_id: int, db: DbSession, current_user: CurrentUser):
+    # Eager load items and products using join/options if needed, or get_or_404
+    # Wait, we can preload options via a custom query or get the reservation from reservation_service.get
+    from app.services import reservation_service
+    reservation = await reservation_service.get(db, reservation_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    receipt_content = await fiscal_service.generate_reservation_text_receipt(db, reservation=reservation)
+    pdf_path = mock_printer_service.print_receipt_to_pdf(
+        order_id=reservation.id + 100000,
+        receipt_content=receipt_content,
+    )
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"receipt_reservation_{reservation.id}.pdf",
+    )
+
+
+@router.post("/reservations/{reservation_id}/guest-check/pdf")
+async def generate_reservation_guest_check_pdf(reservation_id: int, db: DbSession, current_user: CurrentUser):
+    from app.services import reservation_service
+    reservation = await reservation_service.get(db, reservation_id)
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+
+    receipt_content = await fiscal_service.generate_reservation_guest_check_text(db, reservation=reservation)
+    pdf_path = mock_printer_service.print_guest_check_to_pdf(
+        order_id=reservation.id + 100000,
+        receipt_content=receipt_content,
+    )
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=f"guest_check_reservation_{reservation.id}.pdf",
     )

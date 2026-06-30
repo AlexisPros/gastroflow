@@ -37,7 +37,7 @@ class PaymentPartRequest(BaseModel):
 
 
 class CloseOrderWithPaymentsRequest(BaseModel):
-    payments: list[PaymentPartRequest] = Field(min_length=1, max_length=2)
+    payments: list[PaymentPartRequest] = Field(default_factory=list, max_length=2)
 
 
 class CloseOrderWithPaymentsResponse(BaseModel):

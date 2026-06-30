@@ -7,6 +7,7 @@ export const routes = {
   kitchen: "/kitchen",
   bar: "/bar",
   reports: "/reports",
+  reservations: "/reservations",
   warehouse: "/warehouse",
   admin: "/admin",
   adminMenu: "/admin/menu",

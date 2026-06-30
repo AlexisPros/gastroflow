@@ -48,6 +48,8 @@ class OrderService:
         source: str = "WAITER",
         idempotency_key: str | None = None,
         items: list[OrderItemRequest],
+        allow_empty: bool = False,
+        allow_reserved_table: bool = False,
     ) -> Order:
         if idempotency_key:
             existing_result = await db.execute(
@@ -59,7 +61,7 @@ class OrderService:
                     raise ValueError("This order request belongs to another user.")
                 return existing_order
 
-        if not items:
+        if not items and not allow_empty:
             raise ValueError("Order must contain at least one item.")
 
         if guest_count is not None and guest_count <= 0:
@@ -76,7 +78,11 @@ class OrderService:
             shift_id = shift.id
 
         if table_id is not None:
-            await self._ensure_table_accepts_waiter_order(db, table_id=table_id)
+            await self._ensure_table_accepts_waiter_order(
+                db,
+                table_id=table_id,
+                allow_reserved=allow_reserved_table,
+            )
 
         order = Order(
             table_id=table_id,
@@ -672,6 +678,7 @@ class OrderService:
         db: AsyncSession,
         *,
         table_id: int,
+        allow_reserved: bool = False,
     ) -> RestaurantTable:
         result = await db.execute(
             select(RestaurantTable)
@@ -683,7 +690,8 @@ class OrderService:
             raise ValueError("Restaurant table does not exist.")
         if not table.is_active:
             raise ValueError("Restaurant table is not active.")
-        if table.status != "FREE":
+        accepted_statuses = {"FREE", "RESERVED"} if allow_reserved else {"FREE"}
+        if table.status not in accepted_statuses:
             raise ValueError("Restaurant table is not free.")
 
         active_order_result = await db.execute(
