@@ -4,6 +4,7 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import delete, or_, select, update
 from sqlalchemy.orm import selectinload
@@ -22,6 +23,7 @@ from app.schemas import StockMovementRead
 from app.schemas.stock_item import StockItemRead
 from app.services import stock_service
 from app.services.stock_service import InventoryConflictError
+from app.services.warehouse_document_pdf_service import warehouse_document_pdf_service
 
 router = APIRouter(tags=["Stock"])
 
@@ -758,6 +760,47 @@ async def list_stock_documents(
         stmt = stmt.where(WarehouseDocument.document_type == document_type.upper())
     result = await db.execute(stmt)
     return [_document_read(document) for document in result.scalars().unique().all()]
+
+
+@router.get("/stock/documents/{document_id}/pdf")
+async def download_stock_document_pdf(
+    document_id: int,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Response:
+    result = await db.execute(
+        select(WarehouseDocument)
+        .where(WarehouseDocument.id == document_id)
+        .options(
+            selectinload(WarehouseDocument.items).selectinload(WarehouseDocumentItem.ingredient),
+            selectinload(WarehouseDocument.source_warehouse),
+            selectinload(WarehouseDocument.destination_warehouse),
+            selectinload(WarehouseDocument.issued_by_user),
+        ),
+    )
+    document = result.scalar_one_or_none()
+    if document is None:
+        raise HTTPException(status_code=404, detail="Nie znaleziono dokumentu magazynowego.")
+
+    accessible = await _accessible_warehouse_ids(db, current_user)
+    document_warehouse_ids = {
+        warehouse_id
+        for warehouse_id in (
+            document.source_warehouse_id,
+            document.destination_warehouse_id,
+        )
+        if warehouse_id is not None
+    }
+    if document_warehouse_ids.isdisjoint(accessible):
+        raise HTTPException(status_code=403, detail="Brak dostępu do tego dokumentu.")
+
+    content = warehouse_document_pdf_service.generate(document)
+    filename = f"{document.document_number.replace('/', '-')}.pdf"
+    return Response(
+        content=content,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get(

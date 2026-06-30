@@ -11,6 +11,7 @@ from app.models.ingredient import Ingredient
 from app.models.stock_item import StockItem
 from app.models.user import User
 from app.models.warehouse import Warehouse
+from app.models.warehouse_document import WarehouseDocument
 
 
 class ScalarResult:
@@ -173,3 +174,34 @@ def test_inventory_conflict_is_returned_as_http_409(monkeypatch) -> None:
         asyncio.run(stock_routes.create_inventory_document(body, session, admin_user()))  # type: ignore[arg-type]
 
     assert exc_info.value.status_code == 409
+
+
+def test_stock_document_pdf_is_downloaded_for_accessible_warehouse(monkeypatch) -> None:
+    document = WarehouseDocument(
+        id=4,
+        document_number="INW/2026/000004",
+        document_type="INW",
+        status="COMPLETED",
+        source_warehouse_id=1,
+        operation_date=date(2026, 6, 30),
+        issued_at=datetime.now(timezone.utc),
+    )
+    session = RouteSession(execute_values=[document])
+
+    async def accessible_warehouses(_db: Any, _user: User) -> set[int]:
+        return {1}
+
+    monkeypatch.setattr(stock_routes, "_accessible_warehouse_ids", accessible_warehouses)
+    monkeypatch.setattr(
+        stock_routes.warehouse_document_pdf_service,
+        "generate",
+        lambda _document: b"%PDF-1.4 warehouse",
+    )
+
+    response = asyncio.run(
+        stock_routes.download_stock_document_pdf(document.id, session, admin_user()),  # type: ignore[arg-type]
+    )
+
+    assert response.media_type == "application/pdf"
+    assert response.body == b"%PDF-1.4 warehouse"
+    assert response.headers["content-disposition"] == 'attachment; filename="INW-2026-000004.pdf"'
