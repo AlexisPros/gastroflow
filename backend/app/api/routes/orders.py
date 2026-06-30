@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import and_, not_, select
 from sqlalchemy.orm import selectinload
 
 from app.api.deps import (
@@ -153,7 +153,14 @@ def require_order_access(current_user: CurrentUser, order: Order) -> None:
 
 @router.get("/orders/workspace", response_model=list[OrderRead])
 async def list_workspace_orders(db: DbSession, current_user: CurrentUser):
-    query = select(Order).order_by(Order.created_at.desc())
+    visible_order = not_(
+        and_(
+            Order.reservation_id.is_not(None),
+            Order.reservation_prepaid_amount > 0,
+            Order.reservation_prepaid_amount >= Order.total_amount,
+        )
+    )
+    query = select(Order).where(visible_order).order_by(Order.created_at.desc())
     if current_user.role == "WAITER":
         query = query.where(Order.waiter_id == current_user.id)
     result = await db.execute(query)
@@ -170,6 +177,15 @@ async def list_workspace_order_items(db: DbSession, current_user: CurrentUser):
             .selectinload(OrderItemModifier.product_modifier)
             .selectinload(ProductModifier.modifier),
             selectinload(OrderItem.kitchen_tasks),
+        )
+        .where(
+            not_(
+                and_(
+                    Order.reservation_id.is_not(None),
+                    Order.reservation_prepaid_amount > 0,
+                    Order.reservation_prepaid_amount >= Order.total_amount,
+                )
+            )
         )
     )
     if current_user.role == "WAITER":

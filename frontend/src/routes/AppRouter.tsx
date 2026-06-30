@@ -12,6 +12,7 @@ import { WaiterPage } from "../pages/WaiterPage";
 import { KitchenPage } from "../pages/KitchenPage";
 import { BarPage } from "../pages/BarPage";
 import { WarehousePage } from "../pages/WarehousePage";
+import { ReservationsPage } from "../pages/ReservationsPage";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { routes } from "./routePaths";
 
@@ -50,6 +51,10 @@ const router = createBrowserRouter([
           {
             element: <ProtectedRoute allowedRoles={["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"]} />,
             children: [
+              {
+                path: routes.reservations,
+                element: <ReservationsPage />,
+              },
               {
                 path: routes.warehouse,
                 element: <WarehousePage />,

@@ -44,6 +44,12 @@ const actions: DashboardAction[] = [
     roles: ["ADMIN", "MANAGER"],
   },
   {
+    title: "Rezerwacje",
+    description: "Sprawdź gości, stoliki, terminy i przedzamówienia.",
+    path: routes.reservations,
+    roles: ["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"],
+  },
+  {
     title: "Magazyn",
     description: "Kontroluj stany, dokumenty PZ, MM i RW oraz alerty niskiego stanu.",
     path: routes.warehouse,

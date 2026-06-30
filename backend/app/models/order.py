@@ -76,6 +76,18 @@ class Order(Base):
         index=True,
     )
 
+    reservation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("reservations.id"),
+        nullable=True,
+        unique=True,
+    )
+
+    reservation_prepaid_amount: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        default=Decimal("0.00"),
+    )
+
     split_sequence: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,

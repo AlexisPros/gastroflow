@@ -12,6 +12,8 @@ class OrderBase(OrmBaseModel):
     shift_id: int | None = None
     split_parent_order_id: int | None = None
     qr_parent_order_id: int | None = None
+    reservation_id: int | None = None
+    reservation_prepaid_amount: Decimal | None = Decimal("0.00")
     split_sequence: int | None = None
     guest_count: int | None = None
     source: str = "WAITER"
@@ -33,6 +35,8 @@ class OrderUpdate(OrmBaseModel):
     shift_id: int | None = None
     split_parent_order_id: int | None = None
     qr_parent_order_id: int | None = None
+    reservation_id: int | None = None
+    reservation_prepaid_amount: Decimal | None = None
     split_sequence: int | None = None
     guest_count: int | None = None
     source: str | None = None

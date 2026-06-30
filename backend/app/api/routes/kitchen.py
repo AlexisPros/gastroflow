@@ -113,8 +113,8 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
     query = (
         select(Order)
         .where(Order.status == "OPEN")
-        .join(OrderItem, OrderItem.order_id == Order.id)
-        .join(KitchenTask, KitchenTask.order_item_id == OrderItem.id)
+        .outerjoin(OrderItem, OrderItem.order_id == Order.id)
+        .outerjoin(KitchenTask, KitchenTask.order_item_id == OrderItem.id)
     )
     if bar_section_id is not None:
         query = query.where(KitchenTask.kitchen_section_id != bar_section_id)
@@ -180,7 +180,7 @@ async def list_active_kitchen_orders(db: DbSession, current_user: CurrentUser):
                     ]
                 )
             )
-        if not items_read:
+        if len(order.items) > 0 and not items_read:
             continue
 
         waiter_name = f"{order.waiter.first_name} {order.waiter.last_name}" if order.waiter else None

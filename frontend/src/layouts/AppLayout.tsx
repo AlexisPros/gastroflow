@@ -36,6 +36,7 @@ const navItems: NavItem[] = [
   { label: "Kuchnia", path: routes.kitchen, roles: ["ADMIN", "MANAGER", "KITCHEN", "CHEF", "WYDAWKA"] },
   { label: "Bar", path: routes.bar, roles: ["ADMIN", "MANAGER", "BARTENDER"] },
   { label: "Raporty", path: routes.reports, roles: ["ADMIN", "MANAGER", "WAITER"] },
+  { label: "Rezerwacje", path: routes.reservations, roles: ["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"] },
   { label: "Magazyn", path: routes.warehouse, roles: ["ADMIN", "MANAGER", "WAITER", "KITCHEN", "CHEF", "WYDAWKA", "BARTENDER"] },
   { label: "Menu", path: routes.adminMenu, roles: ["ADMIN"] },
   { label: "Pracownicy", path: routes.adminUsers, roles: ["ADMIN"] },
