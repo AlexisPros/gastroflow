@@ -1,15 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  BarChart3,
-  Users,
-  Package,
-  FileText,
-  ChevronRight,
-  RefreshCw,
-  Search,
-  ArrowUpDown,
-  SlidersHorizontal,
-} from "lucide-react";
+import { Search, X, Download } from "lucide-react";
+import { downloadWarehouseDocumentPdf } from "../api/warehouseApi";
 
 import { ApiError } from "../api/apiClient";
 import { useAuth } from "../auth/useAuth";
@@ -23,7 +14,6 @@ import {
   type WarehouseReportDocument,
   type UserActionLogReport,
   type DailyProductionReport,
-  type ReportSoldItem,
 } from "../api/reportsApi";
 import { getAdminUsers, type AdminUser } from "../api/adminUsersApi";
 import { getAdminMenu, type AdminProduct } from "../api/adminMenuApi";
@@ -73,6 +63,26 @@ export function ReportsPage() {
 
   // Warehouse Detail modal state
   const [activeWarehouseDoc, setActiveWarehouseDoc] = useState<WarehouseReportDocument | null>(null);
+  const [downloadingDocumentId, setDownloadingDocumentId] = useState<number | null>(null);
+
+  const downloadDocument = async (document: WarehouseReportDocument) => {
+    if (!token) return;
+    try {
+      setDownloadingDocumentId(document.id);
+      const blob = await downloadWarehouseDocumentPdf(token, document.id);
+      const url = window.URL.createObjectURL(blob);
+      const link = window.document.createElement("a");
+      link.href = url;
+      link.download = `${document.document_number.replaceAll("/", "-")}.pdf`;
+      window.document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (exc) {
+      setError(exc instanceof ApiError ? exc.message : "Nie udało się pobrać dokumentu PDF.");
+    } finally {
+      setDownloadingDocumentId(null);
+    }
+  };
 
   // Global status states
   const [status, setStatus] = useState<LoadingState>("idle");
@@ -806,16 +816,32 @@ export function ReportsPage() {
           {activeTab === "warehouse" && warehouseReport && (
             <>
               {/* Summary */}
-              <div className="report-metrics-grid" style={{ gridTemplateColumns: "1fr 1fr" }}>
+              <div className="report-metrics-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px" }}>
                 <div className="report-metric-card">
                   <span>Liczba dokumentów</span>
                   <strong>{warehouseReport.document_count}</strong>
                 </div>
                 <div className="report-metric-card">
-                  <span>Ilość obróconych produktów</span>
-                  <strong>{warehouseReport.total_items_count} szt.</strong>
+                  <span>Łączna liczba pozycji</span>
+                  <strong>{warehouseReport.total_positions_count}</strong>
                 </div>
               </div>
+
+              {warehouseReport.unit_breakdown && warehouseReport.unit_breakdown.length > 0 && (
+                <div style={{ background: "#ffffff", padding: "16px", borderRadius: "8px", border: "1px solid #d7dfda", marginBottom: "20px" }}>
+                  <span style={{ fontSize: "11px", color: "#60716c", display: "block", marginBottom: "8px", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Łączny obrót według jednostek miar
+                  </span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                    {warehouseReport.unit_breakdown.map((item) => (
+                      <div key={item.unit} style={{ padding: "6px 12px", background: "#f8faf9", borderRadius: "6px", fontSize: "13px", border: "1px solid #eef1ef" }}>
+                        <strong style={{ color: "#10b066" }}>{numberFormat.format(item.total_quantity)}</strong>{" "}
+                        <span style={{ color: "#60716c" }}>{item.unit}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* Documents table */}
               <div style={{ background: "#ffffff", padding: "20px", borderRadius: "8px", border: "1px solid #d7dfda" }}>
@@ -915,42 +941,145 @@ export function ReportsPage() {
 
       {/* Warehouse Document details modal */}
       {activeWarehouseDoc && (
-        <div className="modal-backdrop">
-          <div className="reservation-details-modal">
-            <header>
+        <div className="admin-modal-backdrop" onClick={() => setActiveWarehouseDoc(null)}>
+          <section
+            className="admin-modal warehouse-modal"
+            style={{
+              maxWidth: activeWarehouseDoc.document_type === "INW" ? "1000px" : "600px",
+              width: "100%",
+              padding: "24px",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="modal-close-icon"
+              title="Zamknij"
+              onClick={() => setActiveWarehouseDoc(null)}
+              style={{
+                position: "absolute",
+                top: "16px",
+                right: "16px",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "#64748b",
+              }}
+            >
+              <X size={20} />
+            </button>
+            <h2 style={{ fontSize: "1.5rem", fontWeight: "600", marginBottom: "16px" }}>Szczegóły dokumentu: {activeWarehouseDoc.document_number}</h2>
+            <div className="warehouse-document-meta" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "20px", marginTop: "16px" }}>
               <div>
-                <span className="eyebrow">
-                  Dokument: {activeWarehouseDoc.document_type}
-                </span>
-                <h2>{activeWarehouseDoc.document_number}</h2>
+                <strong>Typ dokumentu:</strong> {activeWarehouseDoc.document_type}
               </div>
-              <button type="button" className="ghost-button" onClick={() => setActiveWarehouseDoc(null)}>
-                Zamknij
-              </button>
-            </header>
-            <div className="reservation-details-body" style={{ padding: "20px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "16px", marginBottom: "20px" }}>
-                <div><small style={{ color: "#60716c" }}>Status:</small> <strong>{activeWarehouseDoc.status}</strong></div>
-                <div><small style={{ color: "#60716c" }}>Data operacji:</small> <strong>{activeWarehouseDoc.operation_date}</strong></div>
-                <div><small style={{ color: "#60716c" }}>Magazyn źródłowy:</small> <strong>{activeWarehouseDoc.source_warehouse_name || "—"}</strong></div>
-                <div><small style={{ color: "#60716c" }}>Magazyn docelowy:</small> <strong>{activeWarehouseDoc.destination_warehouse_name || "—"}</strong></div>
-                <div><small style={{ color: "#60716c" }}>Wystawił:</small> <strong>{activeWarehouseDoc.issued_by_user_name || "System"}</strong></div>
-                <div><small style={{ color: "#60716c" }}>Ilość produktów:</small> <strong>{activeWarehouseDoc.items_count}</strong></div>
+              <div>
+                <strong>Status:</strong> {activeWarehouseDoc.status}
+              </div>
+              <div>
+                <strong>Magazyn źródłowy:</strong> {activeWarehouseDoc.source_warehouse_name ?? "—"}
+              </div>
+              <div>
+                <strong>Magazyn docelowy:</strong> {activeWarehouseDoc.destination_warehouse_name ?? "—"}
+              </div>
+              <div>
+                <strong>Wystawił:</strong> {activeWarehouseDoc.issued_by_user_name ?? "System"}
+              </div>
+              <div>
+                <strong>Data operacji:</strong> {activeWarehouseDoc.operation_date}
               </div>
               {activeWarehouseDoc.reason && (
-                <div style={{ marginBottom: "20px" }}>
-                  <small style={{ color: "#60716c", display: "block", marginBottom: "4px" }}>Powód</small>
-                  <p style={{ margin: 0, padding: "8px", background: "#f8faf9", borderRadius: "4px" }}>{activeWarehouseDoc.reason}</p>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>{activeWarehouseDoc.document_type === "INW" ? "Rodzaj / podstawa:" : "Powód RW:"}</strong> {activeWarehouseDoc.reason}
                 </div>
               )}
               {activeWarehouseDoc.description && (
-                <div style={{ marginBottom: "20px" }}>
-                  <small style={{ color: "#60716c", display: "block", marginBottom: "4px" }}>Opis</small>
-                  <p style={{ margin: 0, padding: "8px", background: "#f8faf9", borderRadius: "4px" }}>{activeWarehouseDoc.description}</p>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <strong>Uwagi:</strong> {activeWarehouseDoc.description}
                 </div>
               )}
             </div>
-          </div>
+
+            <h3 style={{ margin: "20px 0 10px 0", fontSize: "1.1rem", fontWeight: "600" }}>Pozycje dokumentu</h3>
+            <div style={{ maxHeight: "350px", overflow: "auto", border: "1px solid #edf2f7", borderRadius: "8px", padding: "8px", background: "rgba(0,0,0,0.01)" }}>
+              <table style={{ width: "100%", minWidth: activeWarehouseDoc.document_type === "INW" ? "820px" : undefined, borderCollapse: "collapse", fontSize: "0.9rem" }}>
+                <thead>
+                  <tr style={{ borderBottom: "2px solid #cbd5e0", textAlign: "left" }}>
+                    <th style={{ padding: "6px" }}>Towar</th>
+                    {activeWarehouseDoc.document_type === "INW" ? (
+                      <>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Stan księgowy</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Stan faktyczny</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Różnica</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Cena jedn.</th>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Wartość różnicy</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ padding: "6px", textAlign: "right" }}>Ilość</th>
+                        {activeWarehouseDoc.document_type === "PZ" && (
+                          <>
+                            <th style={{ padding: "6px", textAlign: "right" }}>Cena jedn.</th>
+                            <th style={{ padding: "6px", textAlign: "right" }}>Wartość</th>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {(activeWarehouseDoc.items || []).map((item) => (
+                    <tr key={item.id} style={{ borderBottom: "1px solid #edf2f7" }}>
+                      <td style={{ padding: "6px" }}>{item.ingredient_name}</td>
+                      {activeWarehouseDoc.document_type === "INW" ? (
+                        <>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatQuantity(item.book_quantity, item.unit)}</td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatQuantity(item.actual_quantity, item.unit)}</td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{formatSignedQuantity(item.difference_quantity, item.unit)}</td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>
+                            {item.unit_price ? `${Number(item.unit_price).toFixed(2)} PLN` : "—"}
+                          </td>
+                          <td style={{ padding: "6px", textAlign: "right" }}>
+                            {formatSignedMoney(item.difference_value)}
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td style={{ padding: "6px", textAlign: "right" }}>{Number(item.quantity)} {item.unit}</td>
+                          {activeWarehouseDoc.document_type === "PZ" && (
+                            <>
+                              <td style={{ padding: "6px", textAlign: "right" }}>
+                                {item.unit_price ? `${Number(item.unit_price).toFixed(2)} PLN` : "—"}
+                              </td>
+                              <td style={{ padding: "6px", textAlign: "right" }}>
+                                {item.total_value ? `${Number(item.total_value).toFixed(2)} PLN` : "—"}
+                              </td>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px", marginTop: "20px" }}>
+              <button type="button" className="ghost-button" onClick={() => setActiveWarehouseDoc(null)}>
+                Zamknij
+              </button>
+              <button
+                type="button"
+                className="admin-primary"
+                disabled={downloadingDocumentId === activeWarehouseDoc.id}
+                onClick={() => void downloadDocument(activeWarehouseDoc)}
+                style={{ display: "flex", alignItems: "center", gap: "6px" }}
+              >
+                <Download size={17} />
+                {downloadingDocumentId === activeWarehouseDoc.id ? "Generowanie..." : "Pobierz PDF"}
+              </button>
+            </div>
+          </section>
         </div>
       )}
     </section>
@@ -962,9 +1091,9 @@ function SVGRevenueChart({
   averageCheck,
   averageDailySales,
 }: {
-  data: { label: string; value: any }[];
-  averageCheck: any;
-  averageDailySales: any;
+  data: { label: string; value: number | string }[];
+  averageCheck: number | string;
+  averageDailySales: number | string;
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
@@ -1163,7 +1292,7 @@ function formatLabelShort(label: string, totalCount: number): string {
   return label;
 }
 
-function formatMoneyCompact(val: any): string {
+function formatMoneyCompact(val: number | string | null | undefined): string {
   const num = Number(val);
   if (isNaN(num)) return "0 zł";
   if (num >= 1_000_000) return `${(num / 1_000_000).toFixed(1)}M zł`;
@@ -1171,11 +1300,34 @@ function formatMoneyCompact(val: any): string {
   return `${num.toFixed(0)} zł`;
 }
 
-function formatMoney(value: any): string {
+function formatMoney(value: number | string | null | undefined): string {
   const num = Number(value);
   if (isNaN(num)) return "0,00 zł";
   return new Intl.NumberFormat("pl-PL", {
     style: "currency",
     currency: "PLN",
   }).format(num);
+}
+
+const numberFormat = new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 3 });
+const moneyFormat = new Intl.NumberFormat("pl-PL", { style: "currency", currency: "PLN" });
+
+function signedNumber(value: number): string {
+  if (value === 0) return "0";
+  return `${value > 0 ? "+" : ""}${numberFormat.format(value)}`;
+}
+
+function formatQuantity(value: string | number | null, unit: string): string {
+  return value === null || value === undefined ? "—" : `${numberFormat.format(Number(value))} ${unit}`;
+}
+
+function formatSignedQuantity(value: string | number | null, unit: string): string {
+  if (value === null || value === undefined) return "—";
+  return `${signedNumber(Number(value))} ${unit}`;
+}
+
+function formatSignedMoney(value: string | number | null): string {
+  if (value === null || value === undefined) return "—";
+  const parsed = Number(value);
+  return `${parsed > 0 ? "+" : ""}${moneyFormat.format(parsed)}`;
 }

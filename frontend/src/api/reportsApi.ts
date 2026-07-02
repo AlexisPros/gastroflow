@@ -56,6 +56,20 @@ export interface AdvancedSalesReport {
   employee_comparison: EmployeeProductivityCompare[];
 }
 
+export interface WarehouseReportDocumentItem {
+  id: number;
+  ingredient_id: number;
+  ingredient_name: string;
+  quantity: number;
+  unit: string;
+  unit_price: number | null;
+  total_value: number | null;
+  book_quantity: number | null;
+  actual_quantity: number | null;
+  difference_quantity: number | null;
+  difference_value: number | null;
+}
+
 export interface WarehouseReportDocument {
   id: number;
   document_number: string;
@@ -68,13 +82,20 @@ export interface WarehouseReportDocument {
   items_count: number;
   reason: string | null;
   description: string | null;
+  items: WarehouseReportDocumentItem[];
+}
+
+export interface WarehouseUnitBreakdown {
+  unit: string;
+  total_quantity: number;
 }
 
 export interface WarehouseReport {
   start_date: string;
   end_date: string;
   document_count: number;
-  total_items_count: number;
+  total_positions_count: number;
+  unit_breakdown: WarehouseUnitBreakdown[];
   documents: WarehouseReportDocument[];
 }
 
@@ -118,7 +139,21 @@ export async function getAdvancedSalesReport(
   query.append("period", params.period);
   if (params.date) query.append("date", params.date);
   if (params.user_id) query.append("user_id", String(params.user_id));
-  return apiRequest<AdvancedSalesReport>(`/reports/sales/advanced?${query.toString()}`, { token });
+  const report = await apiRequest<AdvancedSalesReport>(
+    `/reports/sales/advanced?${query.toString()}`,
+    { token },
+  );
+  return {
+    ...report,
+    sold_items: report?.sold_items ?? [],
+    discounts: report?.discounts ?? [],
+    payment_methods: report?.payment_methods ?? [],
+    chart_data: report?.chart_data ?? [],
+    employee_comparison: (report?.employee_comparison ?? []).map((employee) => ({
+      ...employee,
+      sold_items: employee?.sold_items ?? [],
+    })),
+  };
 }
 
 export async function getWarehouseReport(
@@ -129,7 +164,18 @@ export async function getWarehouseReport(
   query.append("period", params.period);
   if (params.date) query.append("date", params.date);
   if (params.document_type) query.append("document_type", params.document_type);
-  return apiRequest<WarehouseReport>(`/reports/warehouse?${query.toString()}`, { token });
+  const report = await apiRequest<WarehouseReport>(
+    `/reports/warehouse?${query.toString()}`,
+    { token }
+  );
+  return {
+    ...report,
+    unit_breakdown: report?.unit_breakdown ?? [],
+    documents: (report?.documents ?? []).map((doc) => ({
+      ...doc,
+      items: doc?.items ?? [],
+    })),
+  };
 }
 
 export async function getUserActionLogs(
@@ -139,7 +185,11 @@ export async function getUserActionLogs(
   const query = new URLSearchParams();
   if (params.date) query.append("date", params.date);
   if (params.user_id) query.append("user_id", String(params.user_id));
-  return apiRequest<UserActionLogReport[]>(`/reports/logs?${query.toString()}`, { token });
+  const logs = await apiRequest<UserActionLogReport[]>(
+    `/reports/logs?${query.toString()}`,
+    { token },
+  );
+  return Array.isArray(logs) ? logs : [];
 }
 
 export async function getDailyProductionReport(
@@ -149,5 +199,12 @@ export async function getDailyProductionReport(
 ): Promise<DailyProductionReport> {
   const path = scope === "KITCHEN" ? "/reports/kitchen/daily" : "/reports/bar/daily";
   const query = date ? `?report_date=${date}` : "";
-  return apiRequest<DailyProductionReport>(`${path}${query}`, { token });
+  const report = await apiRequest<DailyProductionReport>(`${path}${query}`, { token });
+  return {
+    ...report,
+    sections: (report?.sections ?? []).map((section) => ({
+      ...section,
+      sold_items: section?.sold_items ?? [],
+    })),
+  };
 }
